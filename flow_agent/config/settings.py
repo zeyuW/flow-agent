@@ -50,6 +50,15 @@ class MemoryPolicySettings:
 
 
 @dataclass(slots=True)
+class ProactiveSettings:
+    enabled: bool = False
+    interval_seconds: int = 60
+    cooldown_seconds: int = 300
+    dedup_ttl_seconds: int = 86400
+    source_file: str = ".flow_agent/proactive_items.txt"
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
@@ -59,6 +68,7 @@ class Settings:
     retrieval: RetrievalSettings
     observe: ObserveSettings
     memory_policy: MemoryPolicySettings
+    proactive: ProactiveSettings
 
     @property
     def model_name(self) -> str:

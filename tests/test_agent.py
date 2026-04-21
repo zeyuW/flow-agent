@@ -3,6 +3,7 @@ from flow_agent.config.settings import (
     MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
+    ProactiveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -52,6 +53,7 @@ def test_agent_run():
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
         memory_policy=MemoryPolicySettings(enabled=False),
+        proactive=ProactiveSettings(enabled=False),
     )
     context = ConversationContext()
     client = FakeLLMClient()

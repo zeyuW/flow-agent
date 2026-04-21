@@ -6,6 +6,7 @@ from flow_agent.config.settings import (
     MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
+    ProactiveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -42,6 +43,7 @@ def test_trace_jsonl_written(tmp_path: Path):
         retrieval=RetrievalSettings(enabled=False),
         observe=ObserveSettings(enabled=True, trace_path=str(trace_path)),
         memory_policy=MemoryPolicySettings(enabled=False),
+        proactive=ProactiveSettings(enabled=False),
     )
     store = InMemoryMessageStore()
     context = ConversationContext(store=store)

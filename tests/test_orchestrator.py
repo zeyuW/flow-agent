@@ -3,6 +3,7 @@ from flow_agent.config.settings import (
     MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
+    ProactiveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -80,6 +81,7 @@ def test_orchestrator_tool_call_loop():
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
         memory_policy=MemoryPolicySettings(enabled=False),
+        proactive=ProactiveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -116,6 +118,7 @@ def test_orchestrator_switches_sessions():
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
         memory_policy=MemoryPolicySettings(enabled=False),
+        proactive=ProactiveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -175,6 +178,7 @@ def test_orchestrator_tool_loop_respects_max_steps():
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
         memory_policy=MemoryPolicySettings(enabled=False),
+        proactive=ProactiveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = LoopingLLMClient()

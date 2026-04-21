@@ -8,6 +8,7 @@ from flow_agent.config.settings import (
     MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
+    ProactiveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -66,6 +67,26 @@ def load_settings() -> Settings:
         dedupe=os.getenv("FLOW_AGENT_MEMORY_DEDUPE", "true").lower()
         not in {"0", "false", "no", "off"},
     )
+    proactive = ProactiveSettings(
+        enabled=os.getenv("FLOW_AGENT_PROACTIVE_ENABLED", "false").lower()
+        not in {"0", "false", "no", "off"},
+        interval_seconds=max(
+            1,
+            int(os.getenv("FLOW_AGENT_PROACTIVE_INTERVAL_SECONDS", "60")),
+        ),
+        cooldown_seconds=max(
+            0,
+            int(os.getenv("FLOW_AGENT_PROACTIVE_COOLDOWN_SECONDS", "300")),
+        ),
+        dedup_ttl_seconds=max(
+            1,
+            int(os.getenv("FLOW_AGENT_PROACTIVE_DEDUP_TTL_SECONDS", "86400")),
+        ),
+        source_file=os.getenv(
+            "FLOW_AGENT_PROACTIVE_SOURCE_FILE",
+            str(project_root / ".flow_agent" / "proactive_items.txt"),
+        ),
+    )
 
     return Settings(
         model=model,
@@ -76,4 +97,5 @@ def load_settings() -> Settings:
         retrieval=retrieval,
         observe=observe,
         memory_policy=memory_policy,
+        proactive=proactive,
     )

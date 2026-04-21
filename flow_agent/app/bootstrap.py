@@ -9,6 +9,12 @@ from flow_agent.llm.client import OpenAILLMClient
 from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
+from flow_agent.proactive.gate import SimplePreGate
+from flow_agent.proactive.runtime import ProactiveRuntime
+from flow_agent.proactive.scheduler import IntervalScheduler
+from flow_agent.proactive.source import LocalFileCandidateSource
+from flow_agent.proactive.store import SQLiteProactiveSentStore
+from flow_agent.proactive.tick import ProactiveTickRunner
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.registry import ToolRegistry
 
@@ -57,4 +63,34 @@ def create_orchestrator() -> Orchestrator:
         retrieval_max_items=settings.retrieval.max_items,
         recorder=recorder,
         organizer=organizer,
+    )
+
+
+def create_proactive_runtime() -> ProactiveRuntime:
+    settings = load_settings()
+    sent_store = SQLiteProactiveSentStore(Path(settings.storage.memory_db_path))
+    source = LocalFileCandidateSource(Path(settings.proactive.source_file))
+    recorder = (
+        TraceRecorder(path=Path(settings.observe.trace_path))
+        if settings.observe.enabled
+        else None
+    )
+    gate = SimplePreGate(
+        sent_store=sent_store,
+        cooldown_seconds=settings.proactive.cooldown_seconds,
+    )
+    tick_runner = ProactiveTickRunner(
+        gate=gate,
+        source=source,
+        sent_store=sent_store,
+        dedup_ttl_seconds=settings.proactive.dedup_ttl_seconds,
+        recorder=recorder,
+    )
+    scheduler = IntervalScheduler(
+        interval_seconds=settings.proactive.interval_seconds,
+        task=tick_runner.tick,
+    )
+    return ProactiveRuntime(
+        scheduler=scheduler,
+        tick_runner=tick_runner,
     )

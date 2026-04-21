@@ -13,6 +13,7 @@ build/
 .flow_agent/
 *.db
 *.db-journal
+.cursor/
 
 # 查看数据库脚本后续删掉
 view_db.sh

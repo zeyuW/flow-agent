@@ -18,6 +18,11 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_MEMORY_POLICY_ENABLED", "false")
     monkeypatch.setenv("FLOW_AGENT_MEMORY_MAX_MESSAGES", "9")
     monkeypatch.setenv("FLOW_AGENT_MEMORY_DEDUPE", "false")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_ENABLED", "true")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_INTERVAL_SECONDS", "15")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_COOLDOWN_SECONDS", "120")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_DEDUP_TTL_SECONDS", "3600")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_SOURCE_FILE", "/tmp/proactive_items.txt")
 
     settings = load_settings()
 
@@ -37,3 +42,8 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.memory_policy.enabled is False
     assert settings.memory_policy.max_messages == 9
     assert settings.memory_policy.dedupe is False
+    assert settings.proactive.enabled is True
+    assert settings.proactive.interval_seconds == 15
+    assert settings.proactive.cooldown_seconds == 120
+    assert settings.proactive.dedup_ttl_seconds == 3600
+    assert settings.proactive.source_file == "/tmp/proactive_items.txt"
