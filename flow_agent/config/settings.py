@@ -31,12 +31,19 @@ class ToolingSettings:
 
 
 @dataclass(slots=True)
+class RetrievalSettings:
+    enabled: bool = True
+    max_items: int = 6
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
     logging: LoggingSettings
     session: SessionSettings
     tooling: ToolingSettings
+    retrieval: RetrievalSettings
 
     @property
     def model_id(self) -> str:

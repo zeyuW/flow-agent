@@ -1,6 +1,7 @@
 from flow_agent.config.settings import (
     LoggingSettings,
     ModelSettings,
+    RetrievalSettings,
     SessionSettings,
     Settings,
     StorageSettings,
@@ -46,6 +47,7 @@ def test_agent_run():
         logging=LoggingSettings(level="INFO"),
         session=SessionSettings(default_session_id="default"),
         tooling=ToolingSettings(enabled=True),
+        retrieval=RetrievalSettings(enabled=True),
     )
     context = ConversationContext()
     client = FakeLLMClient()

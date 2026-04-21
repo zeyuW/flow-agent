@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from flow_agent.config.settings import (
     LoggingSettings,
     ModelSettings,
+    RetrievalSettings,
     SessionSettings,
     Settings,
     StorageSettings,
@@ -43,6 +44,11 @@ def load_settings() -> Settings:
         not in {"0", "false", "no", "off"},
         max_tool_steps=max(1, int(os.getenv("FLOW_AGENT_MAX_TOOL_STEPS", "5"))),
     )
+    retrieval = RetrievalSettings(
+        enabled=os.getenv("FLOW_AGENT_RETRIEVAL_ENABLED", "true").lower()
+        not in {"0", "false", "no", "off"},
+        max_items=max(0, int(os.getenv("FLOW_AGENT_RETRIEVAL_MAX_ITEMS", "6"))),
+    )
 
     return Settings(
         model=model,
@@ -50,4 +56,5 @@ def load_settings() -> Settings:
         logging=logging,
         session=session,
         tooling=tooling,
+        retrieval=retrieval,
     )

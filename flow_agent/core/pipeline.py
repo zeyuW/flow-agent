@@ -4,6 +4,8 @@ from typing import Any
 from flow_agent.core.agent import Agent
 from flow_agent.core.models import AgentResponse
 from flow_agent.llm.client import LLMToolCall
+from flow_agent.memory.models import RetrievedMemory
+from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 
 
@@ -13,6 +15,7 @@ class TurnState:
     session_id: str
     messages: list[dict[str, Any]]
     tools: list[dict[str, Any]]
+    retrieval_trace: list[dict[str, str]]
     tool_trace: list[dict[str, str]]
     final_output: str = ""
 
@@ -22,10 +25,14 @@ class TurnPipeline:
         self,
         agent: Agent,
         tool_registry: ToolRegistry,
+        retriever: MemoryRetriever | None = None,
+        retrieval_max_items: int = 6,
         max_tool_steps: int = 5,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
+        self.retriever = retriever
+        self.retrieval_max_items = retrieval_max_items
         self.max_tool_steps = max_tool_steps
 
     def process_turn(self, user_input: str, session_id: str) -> AgentResponse:
@@ -42,13 +49,41 @@ class TurnPipeline:
             session_id=session_id,
             messages=[],
             tools=[],
+            retrieval_trace=[],
             tool_trace=[],
         )
 
     def build_prompt(self, state: TurnState) -> TurnState:
         state.messages = self.agent.build_turn_messages(user_input=state.user_input)
         state.tools = self.tool_registry.list_openai_tools()
+        if self.retriever is not None and self.retrieval_max_items > 0:
+            retrieved = self.retriever.retrieve(
+                session_id=state.session_id,
+                query=state.user_input,
+                max_items=self.retrieval_max_items,
+            )
+            state.retrieval_trace.append(
+                {"items": str(len(retrieved)), "max_items": str(self.retrieval_max_items)}
+            )
+            if retrieved:
+                state.messages = self._inject_memory_block(state.messages, retrieved)
         return state
+
+    def _inject_memory_block(
+        self,
+        messages: list[dict[str, Any]],
+        retrieved: list[RetrievedMemory],
+    ) -> list[dict[str, Any]]:
+        memory_lines = [
+            f"- ({m.role}, score={m.score:.2f}) {m.content}" for m in retrieved
+        ]
+        memory_block = "Relevant memory:\n" + "\n".join(memory_lines)
+
+        if not messages:
+            return [{"role": "system", "content": memory_block}]
+        if messages[0].get("role") != "system":
+            return [{"role": "system", "content": memory_block}] + list(messages)
+        return [messages[0], {"role": "system", "content": memory_block}] + messages[1:]
 
     def run_llm_tool_loop(self, state: TurnState) -> TurnState:
         current_messages: list[dict[str, Any]] = list(state.messages)

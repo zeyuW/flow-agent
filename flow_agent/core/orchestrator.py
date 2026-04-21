@@ -1,6 +1,7 @@
 from flow_agent.core.agent import Agent
 from flow_agent.core.models import AgentResponse
 from flow_agent.core.pipeline import TurnPipeline
+from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 
 
@@ -10,11 +11,15 @@ class Orchestrator:
         agent: Agent,
         tool_registry: ToolRegistry,
         max_tool_steps: int = 5,
+        retriever: MemoryRetriever | None = None,
+        retrieval_max_items: int = 6,
     ) -> None:
         self.pipeline = TurnPipeline(
             agent=agent,
             tool_registry=tool_registry,
             max_tool_steps=max_tool_steps,
+            retriever=retriever,
+            retrieval_max_items=retrieval_max_items,
         )
 
     def run_turn(self, user_input: str, session_id: str = "default") -> AgentResponse:

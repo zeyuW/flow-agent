@@ -11,6 +11,8 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_DEFAULT_SESSION", "s-test")
     monkeypatch.setenv("FLOW_AGENT_TOOLS_ENABLED", "false")
     monkeypatch.setenv("FLOW_AGENT_MAX_TOOL_STEPS", "7")
+    monkeypatch.setenv("FLOW_AGENT_RETRIEVAL_ENABLED", "false")
+    monkeypatch.setenv("FLOW_AGENT_RETRIEVAL_MAX_ITEMS", "3")
 
     settings = load_settings()
 
@@ -23,3 +25,5 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.session.default_session_id == "s-test"
     assert settings.tooling.enabled is False
     assert settings.tooling.max_tool_steps == 7
+    assert settings.retrieval.enabled is False
+    assert settings.retrieval.max_items == 3
