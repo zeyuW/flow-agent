@@ -1,0 +1,90 @@
+from flow_agent.config.settings import (
+    LoggingSettings,
+    ModelSettings,
+    SessionSettings,
+    Settings,
+    StorageSettings,
+    ToolingSettings,
+)
+from flow_agent.core.agent import Agent
+from flow_agent.core.context import ConversationContext
+from flow_agent.core.pipeline import TurnPipeline
+from flow_agent.llm.client import LLMResult, LLMToolCall
+from flow_agent.tools.base import ToolResult
+from flow_agent.tools.registry import ToolRegistry
+
+
+class ScriptedLLMClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, messages, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            return LLMResult(
+                content="",
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_p1",
+                        name="fake_tool",
+                        arguments_json='{"query":"pipeline"}',
+                        arguments={"query": "pipeline"},
+                    )
+                ],
+            )
+        return LLMResult(content="pipeline final answer")
+
+
+class FakeTool:
+    @property
+    def name(self) -> str:
+        return "fake_tool"
+
+    @property
+    def description(self) -> str:
+        return "fake tool"
+
+    @property
+    def input_schema(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+
+    def run(self, tool_input: dict[str, str]) -> ToolResult:
+        return ToolResult(ok=True, content=f"ok:{tool_input.get('query', '')}")
+
+
+def _build_settings() -> Settings:
+    return Settings(
+        model=ModelSettings(
+            model_id="fake-model",
+            api_key="fake-key",
+            base_url=None,
+            system_prompt="You are helpful.",
+        ),
+        storage=StorageSettings(memory_db_path="/tmp/memory.db"),
+        logging=LoggingSettings(level="INFO"),
+        session=SessionSettings(default_session_id="default"),
+        tooling=ToolingSettings(enabled=True),
+    )
+
+
+def test_pipeline_process_turn():
+    agent = Agent(
+        settings=_build_settings(),
+        llm_client=ScriptedLLMClient(),
+        context=ConversationContext(),
+    )
+    registry = ToolRegistry()
+    registry.register(FakeTool())
+    pipeline = TurnPipeline(agent=agent, tool_registry=registry)
+
+    response = pipeline.process_turn("run pipeline", session_id="pipe")
+
+    assert response.content == "pipeline final answer"
+    assert agent.context.get_history("pipe") == [
+        {"role": "user", "content": "run pipeline"},
+        {"role": "assistant", "content": "pipeline final answer"},
+    ]

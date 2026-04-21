@@ -31,4 +31,8 @@ def create_orchestrator() -> Orchestrator:
         context=context,
     )
 
-    return Orchestrator(agent=agent, tool_registry=tool_registry)
+    return Orchestrator(
+        agent=agent,
+        tool_registry=tool_registry,
+        max_tool_steps=settings.tooling.max_tool_steps,
+    )

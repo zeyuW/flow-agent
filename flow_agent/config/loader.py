@@ -41,6 +41,7 @@ def load_settings() -> Settings:
     tooling = ToolingSettings(
         enabled=os.getenv("FLOW_AGENT_TOOLS_ENABLED", "true").lower()
         not in {"0", "false", "no", "off"},
+        max_tool_steps=max(1, int(os.getenv("FLOW_AGENT_MAX_TOOL_STEPS", "5"))),
     )
 
     return Settings(

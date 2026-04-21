@@ -27,6 +27,7 @@ class SessionSettings:
 @dataclass(slots=True)
 class ToolingSettings:
     enabled: bool = True
+    max_tool_steps: int = 5
 
 
 @dataclass(slots=True)

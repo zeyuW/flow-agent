@@ -10,6 +10,7 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_LOG_LEVEL", "DEBUG")
     monkeypatch.setenv("FLOW_AGENT_DEFAULT_SESSION", "s-test")
     monkeypatch.setenv("FLOW_AGENT_TOOLS_ENABLED", "false")
+    monkeypatch.setenv("FLOW_AGENT_MAX_TOOL_STEPS", "7")
 
     settings = load_settings()
 
@@ -21,3 +22,4 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.logging.level == "DEBUG"
     assert settings.session.default_session_id == "s-test"
     assert settings.tooling.enabled is False
+    assert settings.tooling.max_tool_steps == 7

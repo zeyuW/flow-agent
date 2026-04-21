@@ -16,3 +16,5 @@ build/
 
 # 查看数据库脚本后续删掉
 view_db.sh
+
+stage.md

@@ -127,3 +127,52 @@ def test_orchestrator_switches_sessions():
         {"role": "assistant", "content": "final answer from tool"},
     ]
 
+
+class LoopingLLMClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(
+        self,
+        messages: list[dict[str, object]],
+        tools: list[dict[str, object]] | None = None,
+    ) -> LLMResult:
+        self.calls += 1
+        return LLMResult(
+            content="",
+            tool_calls=[
+                LLMToolCall(
+                    id=f"loop_{self.calls}",
+                    name="fake_tool",
+                    arguments_json='{"query":"same"}',
+                    arguments={"query": "same"},
+                )
+            ],
+        )
+
+
+def test_orchestrator_tool_loop_respects_max_steps():
+    settings = Settings(
+        model=ModelSettings(
+            model_id="fake-model",
+            api_key="fake-key",
+            base_url=None,
+            system_prompt="You are helpful.",
+        ),
+        storage=StorageSettings(memory_db_path="/tmp/memory.db"),
+        logging=LoggingSettings(level="INFO"),
+        session=SessionSettings(default_session_id="default"),
+        tooling=ToolingSettings(enabled=True, max_tool_steps=2),
+    )
+    context = ConversationContext()
+    llm_client = LoopingLLMClient()
+    agent = Agent(settings=settings, llm_client=llm_client, context=context)
+    registry = ToolRegistry()
+    registry.register(FakeTool())
+    orchestrator = Orchestrator(agent=agent, tool_registry=registry, max_tool_steps=2)
+
+    response = orchestrator.run_turn("loop please", session_id="s-loop")
+
+    assert response.content == "工具调用次数超过上限，请调整请求后重试。"
+    assert context.get_history("s-loop")[-1]["content"] == response.content
+
