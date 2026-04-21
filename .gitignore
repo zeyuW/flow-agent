@@ -10,3 +10,9 @@ build/
 .idea/
 .vscode/
 .env
+.flow_agent/
+*.db
+*.db-journal
+
+# 查看数据库脚本后续删掉
+view_db.sh

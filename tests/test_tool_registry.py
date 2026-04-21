@@ -1,0 +1,41 @@
+from flow_agent.tools.base import ToolResult
+from flow_agent.tools.registry import ToolRegistry
+
+
+class EchoTool:
+    @property
+    def name(self) -> str:
+        return "echo"
+
+    @property
+    def description(self) -> str:
+        return "Echo input text"
+
+    @property
+    def input_schema(self) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        }
+
+    def run(self, tool_input: dict[str, str]) -> ToolResult:
+        return ToolResult(ok=True, content=tool_input.get("text", ""))
+
+
+def test_registry_register_and_list_descriptions():
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+
+    assert registry.list_tool_descriptions() == [
+        {"name": "echo", "description": "Echo input text"}
+    ]
+
+
+def test_registry_execute_unknown_tool():
+    registry = ToolRegistry()
+    result = registry.execute("not_exists", {})
+
+    assert result.ok is False
+    assert "Unknown tool: not_exists" in result.content
+

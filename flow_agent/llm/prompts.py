@@ -1,6 +1,3 @@
-from typing import Any
-
-
 def build_messages(
     system_prompt: str,
     user_input: str,
