@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from flow_agent.config.settings import (
     LoggingSettings,
     ModelSettings,
+    ObserveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -49,6 +50,14 @@ def load_settings() -> Settings:
         not in {"0", "false", "no", "off"},
         max_items=max(0, int(os.getenv("FLOW_AGENT_RETRIEVAL_MAX_ITEMS", "6"))),
     )
+    observe = ObserveSettings(
+        enabled=os.getenv("FLOW_AGENT_OBSERVE_ENABLED", "true").lower()
+        not in {"0", "false", "no", "off"},
+        trace_path=os.getenv(
+            "FLOW_AGENT_TRACE_PATH",
+            str(project_root / ".flow_agent" / "trace.jsonl"),
+        ),
+    )
 
     return Settings(
         model=model,
@@ -57,4 +66,5 @@ def load_settings() -> Settings:
         session=session,
         tooling=tooling,
         retrieval=retrieval,
+        observe=observe,
     )

@@ -1,18 +1,26 @@
 from dataclasses import dataclass
+import logging
 from typing import Any
+from uuid import uuid4
 
 from flow_agent.core.agent import Agent
 from flow_agent.core.models import AgentResponse
+from flow_agent.infra.logging import trace_id_var
+from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.models import RetrievedMemory
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class TurnState:
     user_input: str
     session_id: str
+    trace_id: str
     messages: list[dict[str, Any]]
     tools: list[dict[str, Any]]
     retrieval_trace: list[dict[str, str]]
@@ -28,25 +36,63 @@ class TurnPipeline:
         retriever: MemoryRetriever | None = None,
         retrieval_max_items: int = 6,
         max_tool_steps: int = 5,
+        recorder: TraceRecorder | None = None,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
         self.retriever = retriever
         self.retrieval_max_items = retrieval_max_items
         self.max_tool_steps = max_tool_steps
+        self.recorder = recorder
 
     def process_turn(self, user_input: str, session_id: str) -> AgentResponse:
         state = self.prepare_context(user_input=user_input, session_id=session_id)
-        state = self.build_prompt(state)
-        state = self.run_llm_tool_loop(state)
-        self.commit_result(state)
-        return AgentResponse(content=state.final_output)
+        token = trace_id_var.set(state.trace_id)
+        try:
+            self._record_event(
+                {
+                    "type": "turn_start",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "user_input": state.user_input,
+                }
+            )
+            logger.info("turn start session=%s", state.session_id)
+            state = self.build_prompt(state)
+            state = self.run_llm_tool_loop(state)
+            self.commit_result(state)
+            self._record_event(
+                {
+                    "type": "turn_end",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "assistant_output": state.final_output,
+                    "retrieval_trace": state.retrieval_trace,
+                    "tool_trace": state.tool_trace,
+                }
+            )
+            logger.info("turn end session=%s", state.session_id)
+            return AgentResponse(content=state.final_output)
+        except Exception as exc:
+            self._record_event(
+                {
+                    "type": "turn_error",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "error": str(exc),
+                }
+            )
+            logger.exception("turn error session=%s", state.session_id)
+            raise
+        finally:
+            trace_id_var.reset(token)
 
     def prepare_context(self, user_input: str, session_id: str) -> TurnState:
         self.agent.set_session(session_id)
         return TurnState(
             user_input=user_input,
             session_id=session_id,
+            trace_id=uuid4().hex[:12],
             messages=[],
             tools=[],
             retrieval_trace=[],
@@ -64,6 +110,14 @@ class TurnPipeline:
             )
             state.retrieval_trace.append(
                 {"items": str(len(retrieved)), "max_items": str(self.retrieval_max_items)}
+            )
+            self._record_event(
+                {
+                    "type": "retrieval",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "items": len(retrieved),
+                }
             )
             if retrieved:
                 state.messages = self._inject_memory_block(state.messages, retrieved)
@@ -94,6 +148,16 @@ class TurnPipeline:
             if not llm_result.tool_calls:
                 state.final_output = llm_result.content
                 return state
+
+            self._record_event(
+                {
+                    "type": "tool_call",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "step": step + 1,
+                    "count": len(llm_result.tool_calls),
+                }
+            )
 
             current_messages.append(
                 {
@@ -146,6 +210,17 @@ class TurnPipeline:
                             }
                         )
 
+                self._record_event(
+                    {
+                        "type": "tool_result",
+                        "trace_id": state.trace_id,
+                        "session_id": state.session_id,
+                        "step": step + 1,
+                        "tool": tool_call.name,
+                        "status": state.tool_trace[-1]["status"],
+                    }
+                )
+
                 current_messages.append(
                     {
                         "role": "tool",
@@ -156,6 +231,11 @@ class TurnPipeline:
 
         state.final_output = "工具调用次数超过上限，请调整请求后重试。"
         return state
+
+    def _record_event(self, event: dict[str, Any]) -> None:
+        if self.recorder is None:
+            return
+        self.recorder.record(event)
 
     def commit_result(self, state: TurnState) -> None:
         self.agent.commit_turn(

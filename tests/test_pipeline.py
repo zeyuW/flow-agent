@@ -1,6 +1,7 @@
 from flow_agent.config.settings import (
     LoggingSettings,
     ModelSettings,
+    ObserveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -72,6 +73,7 @@ def _build_settings() -> Settings:
         session=SessionSettings(default_session_id="default"),
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
+        observe=ObserveSettings(enabled=False),
     )
 
 

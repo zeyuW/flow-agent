@@ -1,6 +1,7 @@
 from flow_agent.config.settings import (
     LoggingSettings,
     ModelSettings,
+    ObserveSettings,
     RetrievalSettings,
     SessionSettings,
     Settings,
@@ -76,6 +77,7 @@ def test_orchestrator_tool_call_loop():
         session=SessionSettings(default_session_id="default"),
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
+        observe=ObserveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -110,6 +112,7 @@ def test_orchestrator_switches_sessions():
         session=SessionSettings(default_session_id="default"),
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
+        observe=ObserveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -167,6 +170,7 @@ def test_orchestrator_tool_loop_respects_max_steps():
         session=SessionSettings(default_session_id="default"),
         tooling=ToolingSettings(enabled=True, max_tool_steps=2),
         retrieval=RetrievalSettings(enabled=True),
+        observe=ObserveSettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = LoopingLLMClient()

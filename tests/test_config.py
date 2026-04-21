@@ -13,6 +13,8 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_MAX_TOOL_STEPS", "7")
     monkeypatch.setenv("FLOW_AGENT_RETRIEVAL_ENABLED", "false")
     monkeypatch.setenv("FLOW_AGENT_RETRIEVAL_MAX_ITEMS", "3")
+    monkeypatch.setenv("FLOW_AGENT_OBSERVE_ENABLED", "false")
+    monkeypatch.setenv("FLOW_AGENT_TRACE_PATH", "/tmp/trace.jsonl")
 
     settings = load_settings()
 
@@ -27,3 +29,5 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.tooling.max_tool_steps == 7
     assert settings.retrieval.enabled is False
     assert settings.retrieval.max_items == 3
+    assert settings.observe.enabled is False
+    assert settings.observe.trace_path == "/tmp/trace.jsonl"

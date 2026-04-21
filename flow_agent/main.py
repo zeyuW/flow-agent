@@ -2,16 +2,14 @@ import logging
 
 from flow_agent.app.bootstrap import create_orchestrator
 from flow_agent.config.loader import load_settings
+from flow_agent.infra.logging import configure_logging
 
 
 logger = logging.getLogger(__name__)
 
 def main() -> None:
     settings = load_settings()
-    logging.basicConfig(
-        level=getattr(logging, settings.logging.level.upper(), logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
+    configure_logging(settings.logging.level)
 
     try:
         orchestrator = create_orchestrator()

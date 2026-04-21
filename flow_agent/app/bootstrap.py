@@ -4,6 +4,7 @@ from flow_agent.config.loader import load_settings
 from flow_agent.core.agent import Agent
 from flow_agent.core.context import ConversationContext
 from flow_agent.core.orchestrator import Orchestrator
+from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
@@ -23,6 +24,11 @@ def create_orchestrator() -> Orchestrator:
     message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
     context = ConversationContext(store=message_store)
     retriever = KeywordMemoryRetriever(store=message_store) if settings.retrieval.enabled else None
+    recorder = (
+        TraceRecorder(path=Path(settings.observe.trace_path))
+        if settings.observe.enabled
+        else None
+    )
     llm_client = OpenAILLMClient(settings)
     tool_registry = ToolRegistry()
     if settings.tooling.enabled:
@@ -39,4 +45,5 @@ def create_orchestrator() -> Orchestrator:
         max_tool_steps=settings.tooling.max_tool_steps,
         retriever=retriever,
         retrieval_max_items=settings.retrieval.max_items,
+        recorder=recorder,
     )

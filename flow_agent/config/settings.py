@@ -37,6 +37,12 @@ class RetrievalSettings:
 
 
 @dataclass(slots=True)
+class ObserveSettings:
+    enabled: bool = True
+    trace_path: str = ".flow_agent/trace.jsonl"
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
@@ -44,6 +50,7 @@ class Settings:
     session: SessionSettings
     tooling: ToolingSettings
     retrieval: RetrievalSettings
+    observe: ObserveSettings
 
     @property
     def model_id(self) -> str:
