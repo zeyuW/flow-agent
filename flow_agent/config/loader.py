@@ -86,6 +86,17 @@ def load_settings() -> Settings:
             "FLOW_AGENT_PROACTIVE_SOURCE_FILE",
             str(project_root / ".flow_agent" / "proactive_items.txt"),
         ),
+        todo_file=os.getenv(
+            "FLOW_AGENT_PROACTIVE_TODO_FILE",
+            str(project_root / ".flow_agent" / "todo_items.txt"),
+        ),
+        tasks_file=os.getenv(
+            "FLOW_AGENT_PROACTIVE_TASKS_FILE",
+            str(project_root / ".flow_agent" / "tasks.txt"),
+        ),
+        min_priority_to_send=float(
+            os.getenv("FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND", "0.5")
+        ),
     )
 
     return Settings(

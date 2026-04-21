@@ -56,6 +56,9 @@ class ProactiveSettings:
     cooldown_seconds: int = 300
     dedup_ttl_seconds: int = 86400
     source_file: str = ".flow_agent/proactive_items.txt"
+    todo_file: str = ".flow_agent/todo_items.txt"
+    tasks_file: str = ".flow_agent/tasks.txt"
+    min_priority_to_send: float = 0.5
 
 
 @dataclass(slots=True)

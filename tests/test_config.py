@@ -23,6 +23,9 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_COOLDOWN_SECONDS", "120")
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_DEDUP_TTL_SECONDS", "3600")
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_SOURCE_FILE", "/tmp/proactive_items.txt")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_TODO_FILE", "/tmp/todo_items.txt")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_TASKS_FILE", "/tmp/tasks.txt")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND", "0.8")
 
     settings = load_settings()
 
@@ -47,3 +50,6 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.proactive.cooldown_seconds == 120
     assert settings.proactive.dedup_ttl_seconds == 3600
     assert settings.proactive.source_file == "/tmp/proactive_items.txt"
+    assert settings.proactive.todo_file == "/tmp/todo_items.txt"
+    assert settings.proactive.tasks_file == "/tmp/tasks.txt"
+    assert settings.proactive.min_priority_to_send == 0.8

@@ -2,9 +2,12 @@ import logging
 from dataclasses import dataclass
 
 from flow_agent.infra.trace import TraceRecorder
+from flow_agent.proactive.decision import DecisionLayer
+from flow_agent.proactive.drift import LocalDriftRunner
 from flow_agent.proactive.gate import SimplePreGate
-from flow_agent.proactive.models import ProactiveCandidate, ProactiveTickResult
-from flow_agent.proactive.source import LocalFileCandidateSource
+from flow_agent.proactive.gateway import SourceGateway
+from flow_agent.proactive.models import ProactiveTickResult
+from flow_agent.proactive.ranking import CandidateRanker
 from flow_agent.proactive.store import ProactiveSentStore
 
 
@@ -14,7 +17,10 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class ProactiveTickRunner:
     gate: SimplePreGate
-    source: LocalFileCandidateSource
+    gateway: SourceGateway
+    ranker: CandidateRanker
+    decision_layer: DecisionLayer
+    drift_runner: LocalDriftRunner
     sent_store: ProactiveSentStore
     dedup_ttl_seconds: int
     recorder: TraceRecorder | None = None
@@ -25,11 +31,26 @@ class ProactiveTickRunner:
             self._trace("proactive_tick_skipped", {"reason": gate.reason})
             return ProactiveTickResult(sent=False, reason=gate.reason)
 
-        candidates = self.source.fetch_candidates()
+        candidates = self.gateway.fetch_candidates()
         self._trace("proactive_source_fetch", {"count": len(candidates)})
-        candidate = self._select_candidate(candidates)
+        ranked = self.ranker.rank(candidates)
+        candidate = self._select_candidate(ranked)
         if candidate is None:
-            return ProactiveTickResult(sent=False, reason="no_candidate")
+            drift = self.drift_runner.run()
+            self._trace("proactive_drift", {"result": drift})
+            return ProactiveTickResult(sent=False, reason=f"no_candidate:{drift}")
+
+        decision = self.decision_layer.decide(candidate)
+        if decision.action != "send":
+            self._trace(
+                "proactive_decision",
+                {"action": decision.action, "reason": decision.reason, "key": candidate.key},
+            )
+            return ProactiveTickResult(
+                sent=False,
+                reason=f"{decision.action}:{decision.reason}",
+                candidate_key=candidate.key,
+            )
 
         if self.sent_store.was_sent_recently(candidate.key, self.dedup_ttl_seconds):
             self._trace("proactive_dedup_hit", {"key": candidate.key})
@@ -47,8 +68,8 @@ class ProactiveTickRunner:
 
     def _select_candidate(
         self,
-        candidates: list[ProactiveCandidate],
-    ) -> ProactiveCandidate | None:
+        candidates,
+    ):
         return candidates[0] if candidates else None
 
     def _trace(self, event_type: str, payload: dict[str, object]) -> None:

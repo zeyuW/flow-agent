@@ -6,6 +6,8 @@ from datetime import datetime
 class ProactiveCandidate:
     key: str
     content: str
+    source: str = "unknown"
+    priority: float = 0.0
 
 
 @dataclass(slots=True)

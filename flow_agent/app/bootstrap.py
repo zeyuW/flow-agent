@@ -10,11 +10,16 @@ from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
 from flow_agent.proactive.gate import SimplePreGate
+from flow_agent.proactive.gateway import SourceGateway
+from flow_agent.proactive.memory_source import MemoryFollowUpSource
+from flow_agent.proactive.ranking import CandidateRanker
 from flow_agent.proactive.runtime import ProactiveRuntime
 from flow_agent.proactive.scheduler import IntervalScheduler
-from flow_agent.proactive.source import LocalFileCandidateSource
+from flow_agent.proactive.source import LocalFileCandidateSource, LocalTodoCandidateSource
 from flow_agent.proactive.store import SQLiteProactiveSentStore
 from flow_agent.proactive.tick import ProactiveTickRunner
+from flow_agent.proactive.decision import DecisionLayer
+from flow_agent.proactive.drift import LocalDriftRunner
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.registry import ToolRegistry
 
@@ -68,8 +73,16 @@ def create_orchestrator() -> Orchestrator:
 
 def create_proactive_runtime() -> ProactiveRuntime:
     settings = load_settings()
-    sent_store = SQLiteProactiveSentStore(Path(settings.storage.memory_db_path))
-    source = LocalFileCandidateSource(Path(settings.proactive.source_file))
+    db_path = Path(settings.storage.memory_db_path)
+    sent_store = SQLiteProactiveSentStore(db_path=db_path)
+    message_store = SQLiteMessageStore(db_path)
+    gateway = SourceGateway(
+        sources=[
+            MemoryFollowUpSource(store=message_store, session_id=settings.session.default_session_id),
+            LocalTodoCandidateSource(Path(settings.proactive.todo_file)),
+            LocalFileCandidateSource(Path(settings.proactive.source_file)),
+        ]
+    )
     recorder = (
         TraceRecorder(path=Path(settings.observe.trace_path))
         if settings.observe.enabled
@@ -81,7 +94,12 @@ def create_proactive_runtime() -> ProactiveRuntime:
     )
     tick_runner = ProactiveTickRunner(
         gate=gate,
-        source=source,
+        gateway=gateway,
+        ranker=CandidateRanker(),
+        decision_layer=DecisionLayer(
+            min_priority_to_send=settings.proactive.min_priority_to_send
+        ),
+        drift_runner=LocalDriftRunner(Path(settings.proactive.tasks_file)),
         sent_store=sent_store,
         dedup_ttl_seconds=settings.proactive.dedup_ttl_seconds,
         recorder=recorder,
