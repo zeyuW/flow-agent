@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 @dataclass(slots=True)
 class ModelSettings:
-    model_id: str
+    model: str
     api_key: str
     base_url: str | None
     system_prompt: str
@@ -43,6 +43,13 @@ class ObserveSettings:
 
 
 @dataclass(slots=True)
+class MemoryPolicySettings:
+    enabled: bool = True
+    max_messages: int = 200
+    dedupe: bool = True
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
@@ -51,10 +58,11 @@ class Settings:
     tooling: ToolingSettings
     retrieval: RetrievalSettings
     observe: ObserveSettings
+    memory_policy: MemoryPolicySettings
 
     @property
-    def model_id(self) -> str:
-        return self.model.model_id
+    def model_name(self) -> str:
+        return self.model.model
 
     @property
     def api_key(self) -> str:

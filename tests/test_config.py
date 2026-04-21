@@ -2,7 +2,7 @@ from flow_agent.config.loader import load_settings
 
 
 def test_load_settings_from_env(monkeypatch):
-    monkeypatch.setenv("LLM_MODEL_ID", "test-model")
+    monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("LLM_BASE_URL", "https://example.com")
     monkeypatch.setenv("LLM_SYSTEM_PROMPT", "test prompt")
@@ -15,10 +15,13 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_RETRIEVAL_MAX_ITEMS", "3")
     monkeypatch.setenv("FLOW_AGENT_OBSERVE_ENABLED", "false")
     monkeypatch.setenv("FLOW_AGENT_TRACE_PATH", "/tmp/trace.jsonl")
+    monkeypatch.setenv("FLOW_AGENT_MEMORY_POLICY_ENABLED", "false")
+    monkeypatch.setenv("FLOW_AGENT_MEMORY_MAX_MESSAGES", "9")
+    monkeypatch.setenv("FLOW_AGENT_MEMORY_DEDUPE", "false")
 
     settings = load_settings()
 
-    assert settings.model.model_id == "test-model"
+    assert settings.model.model == "test-model"
     assert settings.model.api_key == "test-key"
     assert settings.model.base_url == "https://example.com"
     assert settings.model.system_prompt == "test prompt"
@@ -31,3 +34,6 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.retrieval.max_items == 3
     assert settings.observe.enabled is False
     assert settings.observe.trace_path == "/tmp/trace.jsonl"
+    assert settings.memory_policy.enabled is False
+    assert settings.memory_policy.max_messages == 9
+    assert settings.memory_policy.dedupe is False

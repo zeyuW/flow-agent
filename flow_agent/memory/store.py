@@ -10,6 +10,9 @@ class MessageStore(Protocol):
     def append_message(self, session_id: str, role: str, content: str) -> None:
         ...
 
+    def replace_messages(self, session_id: str, messages: list[dict[str, str]]) -> None:
+        ...
+
 
 class InMemoryMessageStore:
     def __init__(self) -> None:
@@ -21,6 +24,9 @@ class InMemoryMessageStore:
     def append_message(self, session_id: str, role: str, content: str) -> None:
         bucket = self._messages_by_session.setdefault(session_id, [])
         bucket.append({"role": role, "content": content})
+
+    def replace_messages(self, session_id: str, messages: list[dict[str, str]]) -> None:
+        self._messages_by_session[session_id] = list(messages)
 
 
 class SQLiteMessageStore:
@@ -73,4 +79,24 @@ class SQLiteMessageStore:
                 VALUES (?, ?, ?)
                 """,
                 (session_id, role, content),
+            )
+
+    def replace_messages(self, session_id: str, messages: list[dict[str, str]]) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                DELETE FROM messages
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            )
+            conn.executemany(
+                """
+                INSERT INTO messages (session_id, role, content)
+                VALUES (?, ?, ?)
+                """,
+                [
+                    (session_id, msg.get("role", ""), msg.get("content", ""))
+                    for msg in messages
+                ],
             )

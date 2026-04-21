@@ -1,5 +1,6 @@
 from flow_agent.config.settings import (
     LoggingSettings,
+    MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
     RetrievalSettings,
@@ -67,7 +68,7 @@ class FakeTool:
 def test_orchestrator_tool_call_loop():
     settings = Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -78,6 +79,7 @@ def test_orchestrator_tool_call_loop():
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -102,7 +104,7 @@ def test_orchestrator_tool_call_loop():
 def test_orchestrator_switches_sessions():
     settings = Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -113,6 +115,7 @@ def test_orchestrator_switches_sessions():
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = ScriptedLLMClient()
@@ -160,7 +163,7 @@ class LoopingLLMClient:
 def test_orchestrator_tool_loop_respects_max_steps():
     settings = Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -171,6 +174,7 @@ def test_orchestrator_tool_loop_respects_max_steps():
         tooling=ToolingSettings(enabled=True, max_tool_steps=2),
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
     context = ConversationContext()
     llm_client = LoopingLLMClient()

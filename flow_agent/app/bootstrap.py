@@ -6,6 +6,7 @@ from flow_agent.core.context import ConversationContext
 from flow_agent.core.orchestrator import Orchestrator
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient
+from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
 from flow_agent.tools.filesystem import ReadFileTool
@@ -24,6 +25,15 @@ def create_orchestrator() -> Orchestrator:
     message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
     context = ConversationContext(store=message_store)
     retriever = KeywordMemoryRetriever(store=message_store) if settings.retrieval.enabled else None
+    organizer = (
+        SimpleMemoryOrganizer(
+            store=message_store,
+            max_messages=settings.memory_policy.max_messages,
+            dedupe=settings.memory_policy.dedupe,
+        )
+        if settings.memory_policy.enabled
+        else None
+    )
     recorder = (
         TraceRecorder(path=Path(settings.observe.trace_path))
         if settings.observe.enabled
@@ -46,4 +56,5 @@ def create_orchestrator() -> Orchestrator:
         retriever=retriever,
         retrieval_max_items=settings.retrieval.max_items,
         recorder=recorder,
+        organizer=organizer,
     )

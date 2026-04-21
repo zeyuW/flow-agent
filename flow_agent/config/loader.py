@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 from flow_agent.config.settings import (
     LoggingSettings,
+    MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
     RetrievalSettings,
@@ -20,7 +21,7 @@ def load_settings() -> Settings:
     load_dotenv(project_root / ".env")
 
     model = ModelSettings(
-        model_id=os.getenv("LLM_MODEL_ID", "deepseek-chat"),
+        model=os.getenv("LLM_MODEL", "deepseek-chat"),
         api_key=os.getenv("LLM_API_KEY", ""),
         base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
         system_prompt=os.getenv(
@@ -58,6 +59,13 @@ def load_settings() -> Settings:
             str(project_root / ".flow_agent" / "trace.jsonl"),
         ),
     )
+    memory_policy = MemoryPolicySettings(
+        enabled=os.getenv("FLOW_AGENT_MEMORY_POLICY_ENABLED", "true").lower()
+        not in {"0", "false", "no", "off"},
+        max_messages=max(1, int(os.getenv("FLOW_AGENT_MEMORY_MAX_MESSAGES", "200"))),
+        dedupe=os.getenv("FLOW_AGENT_MEMORY_DEDUPE", "true").lower()
+        not in {"0", "false", "no", "off"},
+    )
 
     return Settings(
         model=model,
@@ -67,4 +75,5 @@ def load_settings() -> Settings:
         tooling=tooling,
         retrieval=retrieval,
         observe=observe,
+        memory_policy=memory_policy,
     )

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from flow_agent.config.settings import (
     LoggingSettings,
+    MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
     RetrievalSettings,
@@ -29,7 +30,7 @@ def test_trace_jsonl_written(tmp_path: Path):
     trace_path = tmp_path / "trace.jsonl"
     settings = Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -40,6 +41,7 @@ def test_trace_jsonl_written(tmp_path: Path):
         tooling=ToolingSettings(enabled=False),
         retrieval=RetrievalSettings(enabled=False),
         observe=ObserveSettings(enabled=True, trace_path=str(trace_path)),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
     store = InMemoryMessageStore()
     context = ConversationContext(store=store)

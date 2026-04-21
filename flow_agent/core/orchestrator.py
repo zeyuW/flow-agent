@@ -2,6 +2,7 @@ from flow_agent.core.agent import Agent
 from flow_agent.core.models import AgentResponse
 from flow_agent.core.pipeline import TurnPipeline
 from flow_agent.infra.trace import TraceRecorder
+from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 
@@ -15,6 +16,7 @@ class Orchestrator:
         retriever: MemoryRetriever | None = None,
         retrieval_max_items: int = 6,
         recorder: TraceRecorder | None = None,
+        organizer: MemoryOrganizer | None = None,
     ) -> None:
         self.pipeline = TurnPipeline(
             agent=agent,
@@ -23,6 +25,7 @@ class Orchestrator:
             retriever=retriever,
             retrieval_max_items=retrieval_max_items,
             recorder=recorder,
+            organizer=organizer,
         )
 
     def run_turn(self, user_input: str, session_id: str = "default") -> AgentResponse:

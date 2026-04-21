@@ -1,5 +1,6 @@
 from flow_agent.config.settings import (
     LoggingSettings,
+    MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
     RetrievalSettings,
@@ -63,7 +64,7 @@ class FakeTool:
 def _build_settings() -> Settings:
     return Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -74,6 +75,7 @@ def _build_settings() -> Settings:
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
 
 

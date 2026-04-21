@@ -8,6 +8,7 @@ from flow_agent.core.models import AgentResponse
 from flow_agent.infra.logging import trace_id_var
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
+from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.models import RetrievedMemory
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
@@ -37,6 +38,7 @@ class TurnPipeline:
         retrieval_max_items: int = 6,
         max_tool_steps: int = 5,
         recorder: TraceRecorder | None = None,
+        organizer: MemoryOrganizer | None = None,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -44,6 +46,7 @@ class TurnPipeline:
         self.retrieval_max_items = retrieval_max_items
         self.max_tool_steps = max_tool_steps
         self.recorder = recorder
+        self.organizer = organizer
 
     def process_turn(self, user_input: str, session_id: str) -> AgentResponse:
         state = self.prepare_context(user_input=user_input, session_id=session_id)
@@ -242,6 +245,16 @@ class TurnPipeline:
             user_input=state.user_input,
             assistant_output=state.final_output,
         )
+        if self.organizer is not None:
+            stats = self.organizer.organize(state.session_id)
+            self._record_event(
+                {
+                    "type": "memory_organize",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    **stats,
+                }
+            )
 
     def _tool_call_to_message_item(self, tool_call: LLMToolCall) -> dict[str, Any]:
         return {

@@ -1,5 +1,6 @@
 from flow_agent.config.settings import (
     LoggingSettings,
+    MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
     RetrievalSettings,
@@ -39,7 +40,7 @@ def test_fake_llm_client():
 def test_agent_run():
     settings = Settings(
         model=ModelSettings(
-            model_id="fake-model",
+            model="fake-model",
             api_key="fake-key",
             base_url=None,
             system_prompt="You are helpful.",
@@ -50,6 +51,7 @@ def test_agent_run():
         tooling=ToolingSettings(enabled=True),
         retrieval=RetrievalSettings(enabled=True),
         observe=ObserveSettings(enabled=False),
+        memory_policy=MemoryPolicySettings(enabled=False),
     )
     context = ConversationContext()
     client = FakeLLMClient()

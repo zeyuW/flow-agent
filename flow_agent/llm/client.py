@@ -42,7 +42,7 @@ class OpenAILLMClient:
         if not settings.api_key:
             raise ValueError("API key is required")
 
-        self.model_id = settings.model_id
+        self.model = settings.model_name
         self.client = OpenAI(
             api_key=settings.api_key,
             base_url=settings.base_url,
@@ -55,7 +55,7 @@ class OpenAILLMClient:
     ) -> LLMResult:
         try:
             request_kwargs: dict[str, Any] = {
-                "model": self.model_id,
+                "model": self.model,
                 "messages": messages,
             }
             if tools:
