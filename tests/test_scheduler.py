@@ -1,6 +1,6 @@
 import time
 
-from flow_agent.proactive.scheduler import IntervalScheduler
+from flow_agent.proactive.runtime import IntervalScheduler
 
 
 def test_scheduler_run_once_non_reentrant():

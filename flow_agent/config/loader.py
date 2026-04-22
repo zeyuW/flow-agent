@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 
 from flow_agent.config.settings import (
     LoggingSettings,
+    MCPServerSettings,
+    MCPSettings,
     MemoryPolicySettings,
     ModelSettings,
     ObserveSettings,
@@ -18,6 +20,9 @@ from flow_agent.config.settings import (
 
 
 def load_settings() -> Settings:
+    def _split_csv(value: str) -> list[str]:
+        return [item.strip() for item in value.split(",") if item.strip()]
+
     project_root = Path(__file__).resolve().parents[2]
     load_dotenv(project_root / ".env")
 
@@ -94,9 +99,34 @@ def load_settings() -> Settings:
             "FLOW_AGENT_PROACTIVE_TASKS_FILE",
             str(project_root / ".flow_agent" / "tasks.txt"),
         ),
+        rss_feed_files=_split_csv(os.getenv("FLOW_AGENT_PROACTIVE_RSS_FEED_FILES", ""))
+        or [],
+        web_snapshot_files=_split_csv(
+            os.getenv("FLOW_AGENT_PROACTIVE_WEB_SNAPSHOT_FILES", "")
+        )
+        or [],
+        skills_dir=os.getenv(
+            "FLOW_AGENT_SKILLS_DIR",
+            str(project_root / "skills"),
+        ),
         min_priority_to_send=float(
             os.getenv("FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND", "0.5")
         ),
+    )
+    mcp_enabled = os.getenv("FLOW_AGENT_MCP_ENABLED", "false").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+    mcp_servers_raw = _split_csv(os.getenv("FLOW_AGENT_MCP_SERVERS", ""))
+    mcp_servers = [
+        MCPServerSettings(name=name, enabled=True, tools=[])
+        for name in mcp_servers_raw
+    ]
+    mcp = MCPSettings(
+        enabled=mcp_enabled,
+        servers=mcp_servers,
     )
 
     return Settings(
@@ -109,4 +139,5 @@ def load_settings() -> Settings:
         observe=observe,
         memory_policy=memory_policy,
         proactive=proactive,
+        mcp=mcp,
     )

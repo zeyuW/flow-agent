@@ -25,7 +25,12 @@ def test_load_settings_from_env(monkeypatch):
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_SOURCE_FILE", "/tmp/proactive_items.txt")
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_TODO_FILE", "/tmp/todo_items.txt")
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_TASKS_FILE", "/tmp/tasks.txt")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_RSS_FEED_FILES", "/tmp/a.xml,/tmp/b.xml")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_WEB_SNAPSHOT_FILES", "/tmp/a.txt,/tmp/b.txt")
+    monkeypatch.setenv("FLOW_AGENT_SKILLS_DIR", "/tmp/skills")
     monkeypatch.setenv("FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND", "0.8")
+    monkeypatch.setenv("FLOW_AGENT_MCP_ENABLED", "true")
+    monkeypatch.setenv("FLOW_AGENT_MCP_SERVERS", "ext-a,ext-b")
 
     settings = load_settings()
 
@@ -52,4 +57,9 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.proactive.source_file == "/tmp/proactive_items.txt"
     assert settings.proactive.todo_file == "/tmp/todo_items.txt"
     assert settings.proactive.tasks_file == "/tmp/tasks.txt"
+    assert settings.proactive.rss_feed_files == ["/tmp/a.xml", "/tmp/b.xml"]
+    assert settings.proactive.web_snapshot_files == ["/tmp/a.txt", "/tmp/b.txt"]
+    assert settings.proactive.skills_dir == "/tmp/skills"
     assert settings.proactive.min_priority_to_send == 0.8
+    assert settings.mcp.enabled is True
+    assert [server.name for server in settings.mcp.servers or []] == ["ext-a", "ext-b"]

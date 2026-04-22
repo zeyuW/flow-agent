@@ -16,6 +16,9 @@ class ToolRegistry:
             for tool in self._tools.values()
         ]
 
+    def list_tool_names(self) -> set[str]:
+        return set(self._tools.keys())
+
     def execute(self, tool_name: str, tool_input: dict[str, str]) -> ToolResult:
         tool = self._tools.get(tool_name)
         if tool is None:

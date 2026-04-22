@@ -1,13 +1,15 @@
 from pathlib import Path
 
-from flow_agent.proactive.decision import DecisionLayer
-from flow_agent.proactive.drift import LocalDriftRunner
-from flow_agent.proactive.gateway import SourceGateway
-from flow_agent.proactive.gate import SimplePreGate
-from flow_agent.proactive.ranking import CandidateRanker
-from flow_agent.proactive.source import LocalFileCandidateSource
+from flow_agent.proactive.pipeline import (
+    CandidateRanker,
+    DecisionLayer,
+    DriftRunner,
+    PreGate,
+    ProactiveTickRunner,
+    SourceGateway,
+)
+from flow_agent.proactive.sources import LocalFileSource
 from flow_agent.proactive.store import SQLiteProactiveSentStore
-from flow_agent.proactive.tick import ProactiveTickRunner
 
 
 def test_proactive_tick_send_and_dedup(tmp_path: Path):
@@ -16,14 +18,14 @@ def test_proactive_tick_send_and_dedup(tmp_path: Path):
     db_path = tmp_path / "memory.db"
 
     sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    gate = SimplePreGate(sent_store=sent_store, cooldown_seconds=0)
-    source = LocalFileCandidateSource(source_file)
+    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
+    source = LocalFileSource(source_file)
     runner = ProactiveTickRunner(
         gate=gate,
         gateway=SourceGateway([source]),
         ranker=CandidateRanker(),
         decision_layer=DecisionLayer(min_priority_to_send=0.0),
-        drift_runner=LocalDriftRunner(tmp_path / "tasks.txt"),
+        drift_runner=DriftRunner(tmp_path / "tasks.txt"),
         sent_store=sent_store,
         dedup_ttl_seconds=3600,
     )
@@ -43,14 +45,14 @@ def test_proactive_tick_runs_drift_when_no_candidate(tmp_path: Path):
     tasks_file.write_text("light-check\n", encoding="utf-8")
 
     sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    gate = SimplePreGate(sent_store=sent_store, cooldown_seconds=0)
-    empty_source = LocalFileCandidateSource(tmp_path / "missing.txt")
+    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
+    empty_source = LocalFileSource(tmp_path / "missing.txt")
     runner = ProactiveTickRunner(
         gate=gate,
         gateway=SourceGateway([empty_source]),
         ranker=CandidateRanker(),
         decision_layer=DecisionLayer(min_priority_to_send=0.0),
-        drift_runner=LocalDriftRunner(tasks_file),
+        drift_runner=DriftRunner(tasks_file),
         sent_store=sent_store,
         dedup_ttl_seconds=3600,
     )

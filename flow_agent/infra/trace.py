@@ -13,10 +13,12 @@ logger = logging.getLogger(__name__)
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
+# 事件记录器
 @dataclass(slots=True)
 class TraceRecorder:
+    # 事件记录路径
     path: Path
+    # 记录事件
 
     def record(self, event: dict[str, Any]) -> None:
         try:

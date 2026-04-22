@@ -9,6 +9,8 @@ def _utc_now() -> datetime:
 
 
 class ProactiveSentStore(Protocol):
+    """Store sent keys for dedup and cooldown checks."""
+
     def was_sent_recently(self, key: str, ttl_seconds: int) -> bool:
         ...
 
@@ -20,6 +22,7 @@ class ProactiveSentStore(Protocol):
 
 
 class SQLiteProactiveSentStore:
+    '''主动发送记录存储'''
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

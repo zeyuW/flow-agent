@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
@@ -35,7 +35,7 @@ class RetrievalSettings:
     enabled: bool = True
     max_items: int = 6
 
-
+'''事件记录器设置'''
 @dataclass(slots=True)
 class ObserveSettings:
     enabled: bool = True
@@ -58,7 +58,23 @@ class ProactiveSettings:
     source_file: str = ".flow_agent/proactive_items.txt"
     todo_file: str = ".flow_agent/todo_items.txt"
     tasks_file: str = ".flow_agent/tasks.txt"
+    rss_feed_files: list[str] | None = None
+    web_snapshot_files: list[str] | None = None
+    skills_dir: str = "skills"
     min_priority_to_send: float = 0.5
+
+
+@dataclass(slots=True)
+class MCPServerSettings:
+    name: str
+    enabled: bool = True
+    tools: list[str] | None = None
+
+
+@dataclass(slots=True)
+class MCPSettings:
+    enabled: bool = False
+    servers: list[MCPServerSettings] | None = None
 
 
 @dataclass(slots=True)
@@ -72,6 +88,7 @@ class Settings:
     observe: ObserveSettings
     memory_policy: MemoryPolicySettings
     proactive: ProactiveSettings
+    mcp: MCPSettings = field(default_factory=MCPSettings)
 
     @property
     def model_name(self) -> str:
