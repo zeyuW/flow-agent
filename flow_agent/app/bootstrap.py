@@ -1,4 +1,5 @@
 from pathlib import Path
+from dataclasses import asdict
 
 from flow_agent.config.loader import load_settings
 from flow_agent.mcp.client import MCPClient
@@ -14,6 +15,7 @@ from flow_agent.llm.assembler import PromptAssembler, PromptBudget
 from flow_agent.llm.router import LLMRouter
 from flow_agent.behavior.persona import PersonaProfile, PersonaResolver
 from flow_agent.memory.organizer import SimpleMemoryOrganizer
+from flow_agent.memory.consolidation import MemoryConsolidator
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
 from flow_agent.dashboard.store import InMemoryDashboardStore
@@ -21,8 +23,11 @@ from flow_agent.dashboard.api import DashboardServer
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
 from flow_agent.background.jobs import JobSpec
+from flow_agent.background.consolidation_worker import ConsolidationWorker
 from flow_agent.infra.paths import DATA_DIR
 from flow_agent.infra.persistence import PersistenceManager
+from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
+from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import ProactiveRuntime
 from flow_agent.proactive.runtime import IntervalScheduler
@@ -42,6 +47,7 @@ from flow_agent.proactive.pipeline import (
     ProactiveTickRunner,
     SourceGateway,
 )
+from flow_agent.proactive.judge import ProactiveJudge
 from flow_agent.proactive.store import SQLiteProactiveSentStore
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
@@ -197,6 +203,7 @@ def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) ->
         decision_layer=DecisionLayer(
             min_priority_to_send=settings.proactive.min_priority_to_send
         ),
+        judge=ProactiveJudge(),
         drift_runner=DriftRunner(
             Path(settings.proactive.tasks_file),
             skill_registry=skill_registry,
@@ -226,12 +233,20 @@ def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) ->
 
 def create_dashboard_runtime(
     dashboard: InMemoryDashboardStore,
+    runtime_service: RuntimeService | None = None,
     host: str = "127.0.0.1",
     port: int = 8787,
 ) -> DashboardServer:
     """Create and return a dashboard server (not started)."""
 
-    return DashboardServer(host=host, port=port, store=dashboard)
+    return DashboardServer(
+        host=host,
+        port=port,
+        store=dashboard,
+        runtime_snapshot_provider=(
+            (lambda: asdict(runtime_service.snapshot())) if runtime_service is not None else None
+        ),
+    )
 
 
 def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -> BackgroundRuntime:
@@ -252,6 +267,15 @@ def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -
         create_proactive_runtime().tick_runner.tick()
 
     registry.register(JobSpec(name="proactive_tick", func=proactive_tick_job, max_retries=0))
+    message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
+    ConsolidationWorker(
+        consolidator=MemoryConsolidator(
+            store=message_store,
+            max_messages=settings.memory_policy.max_messages,
+            dedupe=settings.memory_policy.dedupe,
+        ),
+        session_id=settings.session.default_session_id,
+    ).register(registry)
     return runtime
 
 
@@ -261,6 +285,7 @@ def create_app_runtime() -> tuple[
     DashboardServer,
     BackgroundRuntime,
     SubagentRuntime,
+    RuntimeService,
 ]:
     """Create a shared runtime across channels/dashboard/background/subagent."""
 
@@ -268,8 +293,10 @@ def create_app_runtime() -> tuple[
     orchestrator = create_orchestrator(dashboard=dashboard)
     proactive_runtime = create_proactive_runtime(dashboard=dashboard)
     settings = load_settings()
+    runtime_service = RuntimeService(dashboard=dashboard)
     dashboard_server = create_dashboard_runtime(
         dashboard=dashboard,
+        runtime_service=runtime_service,
         host=settings.channels.dashboard_host,
         port=settings.channels.dashboard_port,
     )
@@ -280,7 +307,96 @@ def create_app_runtime() -> tuple[
         tasks_file=settings.subagent.tasks_file,
         max_concurrency=settings.subagent.max_concurrency,
     )
-    return orchestrator, proactive_runtime, dashboard_server, background_runtime, subagent_runtime
+    runtime_service.register(
+        RuntimeUnit(
+            name="turn",
+            health_fn=lambda: RuntimeHealth(name="turn", ok=True, detail="orchestrator ready"),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(name="turn", running=True, details={}),
+        )
+    )
+    runtime_service.register(
+        RuntimeUnit(
+            name="proactive",
+            start_fn=proactive_runtime.scheduler.start,
+            stop_fn=proactive_runtime.scheduler.stop,
+            health_fn=lambda: RuntimeHealth(
+                name="proactive",
+                ok=True,
+                detail=f"running={proactive_runtime.scheduler.status().running}",
+            ),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(
+                name="proactive",
+                running=proactive_runtime.scheduler.status().running,
+                details={
+                    "is_executing": proactive_runtime.scheduler.status().is_executing,
+                    "last_started_at": (
+                        proactive_runtime.scheduler.status().last_started_at.isoformat()
+                        if proactive_runtime.scheduler.status().last_started_at
+                        else None
+                    ),
+                    "last_finished_at": (
+                        proactive_runtime.scheduler.status().last_finished_at.isoformat()
+                        if proactive_runtime.scheduler.status().last_finished_at
+                        else None
+                    ),
+                },
+            ),
+        )
+    )
+    runtime_service.register(
+        RuntimeUnit(
+            name="background",
+            health_fn=lambda: RuntimeHealth(name="background", ok=True, detail="ready"),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(
+                name="background",
+                running=True,
+                details={
+                    "recent_runs": len(background_runtime.store.list_runs()),
+                },
+            ),
+        )
+    )
+    runtime_service.register(
+        RuntimeUnit(
+            name="subagent",
+            health_fn=lambda: RuntimeHealth(name="subagent", ok=True, detail="manager ready"),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(
+                name="subagent",
+                running=True,
+                details={
+                    "recent_tasks": len(subagent_runtime.manager.list_recent_tasks(limit=20)),
+                },
+            ),
+        )
+    )
+    runtime_service.register(
+        RuntimeUnit(
+            name="dashboard",
+            start_fn=dashboard_server.start,
+            stop_fn=dashboard_server.stop,
+            health_fn=lambda: RuntimeHealth(
+                name="dashboard",
+                ok=True,
+                detail=f"bound={dashboard_server._server is not None}",
+            ),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(
+                name="dashboard",
+                running=dashboard_server._server is not None,
+                details={
+                    "host": settings.channels.dashboard_host,
+                    "port": settings.channels.dashboard_port,
+                },
+            ),
+        )
+    )
+    return (
+        orchestrator,
+        proactive_runtime,
+        dashboard_server,
+        background_runtime,
+        subagent_runtime,
+        runtime_service,
+    )
 
 
 # 创建MCP注册表

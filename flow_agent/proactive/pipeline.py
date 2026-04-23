@@ -7,6 +7,7 @@ import time
 
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.guard.guards import ProactiveFrequencyGuard, SourceIsolationGuard
+from flow_agent.proactive.judge import ProactiveJudge
 from flow_agent.proactive.sources import ProactiveSource, record_to_candidate
 from flow_agent.proactive.store import ProactiveSentStore
 from flow_agent.proactive.types import (
@@ -148,6 +149,7 @@ class ProactiveTickRunner:
     drift_runner: DriftRunner
     sent_store: ProactiveSentStore
     dedup_ttl_seconds: int
+    judge: ProactiveJudge | None = None
     content_store: ContentStore | None = None
     recorder: TraceRecorder | None = None
     frequency_guard: ProactiveFrequencyGuard | None = None
@@ -184,6 +186,22 @@ class ProactiveTickRunner:
                 reason=f"{decision.action}:{decision.reason}",
                 candidate_key=candidate.key,
             )
+        if self.judge is not None:
+            judge_decision = self.judge.decide(candidate)
+            if judge_decision.action != "send":
+                self._trace(
+                    "proactive_judge",
+                    {
+                        "action": judge_decision.action,
+                        "reason": judge_decision.reason,
+                        "key": candidate.key,
+                    },
+                )
+                return ProactiveTickResult(
+                    sent=False,
+                    reason=f"{judge_decision.action}:{judge_decision.reason}",
+                    candidate_key=candidate.key,
+                )
         if self.sent_store.was_sent_recently(candidate.key, self.dedup_ttl_seconds):
             self._trace("proactive_dedup_hit", {"key": candidate.key})
             return ProactiveTickResult(sent=False, reason="dedup_hit", candidate_key=candidate.key)

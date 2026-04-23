@@ -3,7 +3,7 @@ import logging
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Callable
+from typing import Any, Callable
 
 from flow_agent.dashboard.store import InMemoryDashboardStore
 
@@ -18,6 +18,7 @@ class DashboardServer:
     host: str
     port: int
     store: InMemoryDashboardStore
+    runtime_snapshot_provider: Callable[[], dict[str, Any]] | None = None
     _server: HTTPServer | None = None
     _thread: threading.Thread | None = None
 
@@ -43,18 +44,25 @@ class DashboardServer:
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802
-                if self.path not in {"/", "/snapshot"}:
+                if self.path not in {"/", "/snapshot", "/runtime"}:
                     self.send_response(404)
                     self.end_headers()
                     return
-                snap = parent.store.snapshot()
-                payload = {
-                    "turns": snap.turns,
-                    "tools": snap.tools,
-                    "proactive": snap.proactive,
-                    "jobs": snap.jobs,
-                    "subagents": snap.subagents,
-                }
+                if self.path == "/runtime":
+                    payload = (
+                        parent.runtime_snapshot_provider()
+                        if parent.runtime_snapshot_provider is not None
+                        else {}
+                    )
+                else:
+                    snap = parent.store.snapshot()
+                    payload = {
+                        "turns": snap.turns,
+                        "tools": snap.tools,
+                        "proactive": snap.proactive,
+                        "jobs": snap.jobs,
+                        "subagents": snap.subagents,
+                    }
                 raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

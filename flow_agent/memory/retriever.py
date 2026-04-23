@@ -2,6 +2,8 @@ import re
 from typing import Protocol
 
 from flow_agent.memory.models import RetrievedMemory
+from flow_agent.memory.query_builder import RetrievalQueryBuilder
+from flow_agent.memory.query_rewriter import QueryRewriter
 from flow_agent.memory.store import MessageStore
 
 # 记忆检索器接口
@@ -13,12 +15,16 @@ class MemoryRetriever(Protocol):
 class KeywordMemoryRetriever:
     def __init__(self, store: MessageStore) -> None:
         self.store = store
+        self.rewriter = QueryRewriter()
+        self.builder = RetrievalQueryBuilder()
     # 检索关键词相关的记忆
     def retrieve(self, session_id: str, query: str, max_items: int) -> list[RetrievedMemory]:
         if max_items <= 0:
             return []
 
-        query_tokens = _tokenize(query)
+        rewrite = self.rewriter.rewrite(query)
+        plan = self.builder.build(rewrite, max_items=max_items)
+        query_tokens = _tokenize(plan.query)
         if not query_tokens:
             return []
 
@@ -32,7 +38,7 @@ class KeywordMemoryRetriever:
             memories.append(RetrievedMemory(role=role, content=content, score=score))
 
         memories.sort(key=lambda m: m.score, reverse=True)
-        return memories[:max_items]
+        return memories[: plan.max_items]
 
 # 正则表达：提取中文、英文、数字
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)

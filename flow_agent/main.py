@@ -24,7 +24,14 @@ def main() -> None:
     )
 
     try:
-        orchestrator, proactive_runtime, dashboard_server, background_runtime, subagent_runtime = create_app_runtime()
+        (
+            orchestrator,
+            proactive_runtime,
+            dashboard_server,
+            background_runtime,
+            subagent_runtime,
+            runtime_service,
+        ) = create_app_runtime()
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
         print("初始化失败：请检查 .env 中的 API Key 配置。")
@@ -36,6 +43,7 @@ def main() -> None:
     print("Use '/proactive tick|start|stop|status' to control proactive runtime")
     print("Use '/dashboard start|stop' to control dashboard server")
     print("Use '/http start|stop' to control http channel")
+    print("Use '/runtime snapshot|health' to inspect unified runtime")
     current_session = settings.session.default_session_id
 
     def handle_inbound(msg: InboundMessage) -> OutboundMessage:
@@ -104,6 +112,20 @@ def main() -> None:
                 print("Agent: http channel stopped")
             else:
                 print("Agent: http command should be start|stop")
+            continue
+        if user_input.startswith("/runtime "):
+            cmd = user_input.removeprefix("/runtime ").strip().lower()
+            if cmd == "snapshot":
+                snap = runtime_service.snapshot()
+                print(f"Agent: runtime snapshot -> metrics={snap.metrics}, events={snap.event_summary}")
+            elif cmd == "health":
+                rows = runtime_service.health_check()
+                print(
+                    "Agent: runtime health -> "
+                    + ", ".join(f"{row.name}:{'ok' if row.ok else 'bad'}" for row in rows)
+                )
+            else:
+                print("Agent: runtime command should be snapshot|health")
             continue
         if user_input.startswith("/session "):
             new_session = user_input.removeprefix("/session ").strip()

@@ -13,6 +13,7 @@ class SubagentTask:
     task_id: str
     kind: str
     payload: dict[str, object]
+    parent_trace_id: str | None = None
     status: str = "created"  # created | running | completed | failed
     created_at: datetime = field(default_factory=_utc_now)
     started_at: datetime | None = None
