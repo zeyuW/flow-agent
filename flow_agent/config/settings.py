@@ -108,6 +108,34 @@ class ConfigGovernanceSettings:
 
 
 @dataclass(slots=True)
+class PersonaSettings:
+    name: str = "FlowAgent"
+    passive_tone: str = "professional, concise, helpful"
+    proactive_tone: str = "friendly, brief, actionable"
+    style: str = "structured"
+
+
+@dataclass(slots=True)
+class ProviderSettings:
+    fast_model: str | None = None
+    provider_fallback_enabled: bool = True
+
+
+@dataclass(slots=True)
+class PromptBudgetSettings:
+    max_chars: int = 8000
+    history_chars: int = 3000
+    memory_chars: int = 1500
+    tool_trace_chars: int = 1000
+
+
+@dataclass(slots=True)
+class DelegationPolicySettings:
+    max_local_chars: int = 500
+    enabled: bool = True
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
@@ -122,6 +150,10 @@ class Settings:
     jobs: JobsSettings = field(default_factory=JobsSettings)
     subagent: SubagentSettings = field(default_factory=SubagentSettings)
     governance: ConfigGovernanceSettings = field(default_factory=ConfigGovernanceSettings)
+    persona: PersonaSettings = field(default_factory=PersonaSettings)
+    provider: ProviderSettings = field(default_factory=ProviderSettings)
+    prompt_budget: PromptBudgetSettings = field(default_factory=PromptBudgetSettings)
+    delegation_policy: DelegationPolicySettings = field(default_factory=DelegationPolicySettings)
     mcp: MCPSettings = field(default_factory=MCPSettings)
 
     @property

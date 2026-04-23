@@ -12,6 +12,10 @@ from flow_agent.config.settings import (
     JobsSettings,
     SubagentSettings,
     ConfigGovernanceSettings,
+    PersonaSettings,
+    ProviderSettings,
+    PromptBudgetSettings,
+    DelegationPolicySettings,
     MCPServerSettings,
     MCPSettings,
     MemoryPolicySettings,
@@ -218,6 +222,76 @@ def load_settings() -> Settings:
         or str(_deep_get(external_config, "governance", "profile") or "dev"),
         external_config_path=external_path or None,
     )
+    persona = PersonaSettings(
+        name=os.getenv("FLOW_AGENT_PERSONA_NAME", "")
+        or str(_deep_get(external_config, "persona", "name") or "FlowAgent"),
+        passive_tone=os.getenv("FLOW_AGENT_PERSONA_PASSIVE_TONE", "")
+        or str(_deep_get(external_config, "persona", "passive_tone") or "professional, concise, helpful"),
+        proactive_tone=os.getenv("FLOW_AGENT_PERSONA_PROACTIVE_TONE", "")
+        or str(_deep_get(external_config, "persona", "proactive_tone") or "friendly, brief, actionable"),
+        style=os.getenv("FLOW_AGENT_PERSONA_STYLE", "")
+        or str(_deep_get(external_config, "persona", "style") or "structured"),
+    )
+    provider = ProviderSettings(
+        fast_model=os.getenv("FLOW_AGENT_FAST_MODEL", "")
+        or str(_deep_get(external_config, "provider", "fast_model") or "")
+        or None,
+        provider_fallback_enabled=_to_bool(
+            os.getenv("FLOW_AGENT_PROVIDER_FALLBACK_ENABLED", ""),
+            bool(
+                _deep_get(external_config, "provider", "provider_fallback_enabled")
+                if _deep_get(external_config, "provider", "provider_fallback_enabled") is not None
+                else True
+            ),
+        ),
+    )
+    prompt_budget = PromptBudgetSettings(
+        max_chars=max(
+            2000,
+            int(
+                os.getenv("FLOW_AGENT_PROMPT_MAX_CHARS", "")
+                or str(_deep_get(external_config, "prompt_budget", "max_chars") or "8000")
+            ),
+        ),
+        history_chars=max(
+            500,
+            int(
+                os.getenv("FLOW_AGENT_PROMPT_HISTORY_CHARS", "")
+                or str(_deep_get(external_config, "prompt_budget", "history_chars") or "3000")
+            ),
+        ),
+        memory_chars=max(
+            200,
+            int(
+                os.getenv("FLOW_AGENT_PROMPT_MEMORY_CHARS", "")
+                or str(_deep_get(external_config, "prompt_budget", "memory_chars") or "1500")
+            ),
+        ),
+        tool_trace_chars=max(
+            200,
+            int(
+                os.getenv("FLOW_AGENT_PROMPT_TOOL_TRACE_CHARS", "")
+                or str(_deep_get(external_config, "prompt_budget", "tool_trace_chars") or "1000")
+            ),
+        ),
+    )
+    delegation_policy = DelegationPolicySettings(
+        max_local_chars=max(
+            100,
+            int(
+                os.getenv("FLOW_AGENT_DELEGATION_MAX_LOCAL_CHARS", "")
+                or str(_deep_get(external_config, "delegation_policy", "max_local_chars") or "500")
+            ),
+        ),
+        enabled=_to_bool(
+            os.getenv("FLOW_AGENT_DELEGATION_ENABLED", ""),
+            bool(
+                _deep_get(external_config, "delegation_policy", "enabled")
+                if _deep_get(external_config, "delegation_policy", "enabled") is not None
+                else True
+            ),
+        ),
+    )
     mcp_enabled = os.getenv("FLOW_AGENT_MCP_ENABLED", "false").lower() not in {
         "0",
         "false",
@@ -248,5 +322,9 @@ def load_settings() -> Settings:
         jobs=jobs,
         subagent=subagent,
         governance=governance,
+        persona=persona,
+        provider=provider,
+        prompt_budget=prompt_budget,
+        delegation_policy=delegation_policy,
         mcp=mcp,
     )

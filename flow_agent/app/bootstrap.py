@@ -5,10 +5,14 @@ from flow_agent.mcp.client import MCPClient
 from flow_agent.mcp.registry import MCPRegistry, MCPServerConfig
 from flow_agent.mcp.tool_adapter import MCPToolAdapter
 from flow_agent.core.agent import Agent
+from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.context import ConversationContext
 from flow_agent.core.orchestrator import Orchestrator
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient
+from flow_agent.llm.assembler import PromptAssembler, PromptBudget
+from flow_agent.llm.router import LLMRouter
+from flow_agent.behavior.persona import PersonaProfile, PersonaResolver
 from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
@@ -83,6 +87,28 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
     )
     # 创建LLM客户端
     llm_client = OpenAILLMClient(settings)
+    fast_client = (
+        OpenAILLMClient(settings, model_override=settings.provider.fast_model)
+        if settings.provider.fast_model
+        else None
+    )
+    llm_router = LLMRouter(main_client=llm_client, fast_client=fast_client)
+    prompt_assembler = PromptAssembler(
+        PromptBudget(
+            max_chars=settings.prompt_budget.max_chars,
+            history_chars=settings.prompt_budget.history_chars,
+            memory_chars=settings.prompt_budget.memory_chars,
+            tool_trace_chars=settings.prompt_budget.tool_trace_chars,
+        )
+    )
+    persona_resolver = PersonaResolver(
+        PersonaProfile(
+            name=settings.persona.name,
+            tone_passive=settings.persona.passive_tone,
+            tone_proactive=settings.persona.proactive_tone,
+            default_style=settings.persona.style,
+        )
+    )
     # 创建工具注册表
     tool_registry = ToolRegistry()
     tool_registry.set_guard(
@@ -102,6 +128,9 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
     agent = Agent(
         settings=settings,
         llm_client=llm_client,
+        llm_router=llm_router,
+        prompt_assembler=prompt_assembler,
+        persona_resolver=persona_resolver,
         context=context,
     )
     # 创建总指挥
@@ -114,6 +143,9 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
         recorder=recorder,
         organizer=organizer,
         dashboard=dashboard_store,
+        delegation_policy=DelegationPolicy(
+            max_local_chars=settings.delegation_policy.max_local_chars
+        ),
     )
 
 # 创建主动运行时

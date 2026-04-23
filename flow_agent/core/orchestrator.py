@@ -6,6 +6,7 @@ from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.dashboard.store import InMemoryDashboardStore
+from flow_agent.core.delegation import DelegationPolicy
 
 
 class Orchestrator:
@@ -19,6 +20,7 @@ class Orchestrator:
         recorder: TraceRecorder | None = None,
         organizer: MemoryOrganizer | None = None,
         dashboard: InMemoryDashboardStore | None = None,
+        delegation_policy: DelegationPolicy | None = None,
     ) -> None:
         self.pipeline = TurnPipeline(
             agent=agent,
@@ -29,6 +31,7 @@ class Orchestrator:
             recorder=recorder,
             organizer=organizer,
             dashboard=dashboard,
+            delegation_policy=delegation_policy,
         )
 
     def run_turn(self, user_input: str, session_id: str = "default") -> AgentResponse:

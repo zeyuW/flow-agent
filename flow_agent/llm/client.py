@@ -40,11 +40,11 @@ class LLMClient(Protocol):
 
 # OpenAILLMClient 是 OpenAI 模型的客户端实现
 class OpenAILLMClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, model_override: str | None = None) -> None:
         if not settings.api_key:
             raise ValueError("API key is required")
 
-        self.model = settings.model_name
+        self.model = model_override or settings.model_name
         # 创建 OpenAI 客户端
         self.client = OpenAI(
             api_key=settings.api_key,

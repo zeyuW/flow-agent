@@ -5,6 +5,8 @@ from typing import Any
 from uuid import uuid4
 
 from flow_agent.core.agent import Agent
+from flow_agent.core.context_store import ContextStore
+from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.models import AgentResponse
 from flow_agent.infra.logging import trace_id_var
 from flow_agent.infra.trace import TraceRecorder
@@ -28,6 +30,8 @@ class TurnState:
     tools: list[dict[str, Any]]
     retrieval_trace: list[dict[str, str]]
     tool_trace: list[dict[str, str]]
+    delegation_action: str = "handle_locally"
+    channel: str = "cli"
     final_output: str = ""
 
 
@@ -42,6 +46,7 @@ class TurnPipeline:
         recorder: TraceRecorder | None = None,
         organizer: MemoryOrganizer | None = None,
         dashboard: InMemoryDashboardStore | None = None,
+        delegation_policy: DelegationPolicy | None = None,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -51,6 +56,12 @@ class TurnPipeline:
         self.recorder = recorder
         self.organizer = organizer
         self.dashboard = dashboard
+        self.delegation_policy = delegation_policy or DelegationPolicy()
+        self.context_store = ContextStore(
+            agent=agent,
+            retriever=retriever,
+            retrieval_max_items=retrieval_max_items,
+        )
 
     def process_turn(self, user_input: str, session_id: str) -> AgentResponse:
         state = self.prepare_context(user_input=user_input, session_id=session_id)
@@ -66,9 +77,9 @@ class TurnPipeline:
                 }
             )
             logger.info("turn start session=%s", state.session_id)
-            state = self.build_prompt(state)
-            state = self.run_llm_tool_loop(state)
-            self.commit_result(state)
+            state = self.context_prepare(state)
+            state = self.reasoner_run_turn(state)
+            self.context_commit(state)
             self._record_event(
                 {
                     "type": "turn_end",
@@ -115,47 +126,87 @@ class TurnPipeline:
             tool_trace=[],
         )
 
-    def build_prompt(self, state: TurnState) -> TurnState:
-        state.messages = self.agent.build_turn_messages(user_input=state.user_input)
-        state.tools = self.tool_registry.list_openai_tools()
-        if self.retriever is not None and self.retrieval_max_items > 0:
-            retrieval_started = time.perf_counter()
-            retrieved = self.retriever.retrieve(
-                session_id=state.session_id,
-                query=state.user_input,
-                max_items=self.retrieval_max_items,
+    def context_prepare(self, state: TurnState) -> TurnState:
+        proactive_mode = state.channel == "proactive"
+        persona_block = ""
+        if self.agent.persona_resolver is not None:
+            persona_block = self.agent.persona_resolver.render_block(
+                channel=state.channel,
+                proactive_mode=proactive_mode,
             )
-            state.retrieval_trace.append(
-                {"items": str(len(retrieved)), "max_items": str(self.retrieval_max_items)}
-            )
+        retrieval_started = time.perf_counter()
+        bundle = self.context_store.prepare(
+            session_id=state.session_id,
+            user_input=state.user_input,
+            channel_metadata={"channel": state.channel},
+            persona_block=persona_block,
+        )
+        state.retrieval_trace = bundle.retrieval_trace
+        if bundle.retrieved:
             self._record_event(
                 {
                     "type": "retrieval",
                     "trace_id": state.trace_id,
                     "session_id": state.session_id,
-                    "items": len(retrieved),
+                    "items": len(bundle.retrieved),
                     "latency_ms": round((time.perf_counter() - retrieval_started) * 1000, 2),
                 }
             )
-            if retrieved:
-                state.messages = self._inject_memory_block(state.messages, retrieved)
+        memory_block = self._render_memory_block(bundle.retrieved)
+        retrieval_block = self._render_retrieval_block(bundle.retrieved)
+        runtime_block = f"channel={state.channel}; session={state.session_id}"
+        state.messages = self.agent.build_turn_messages(
+            user_input=state.user_input,
+            persona_block=persona_block,
+            memory_block=memory_block,
+            retrieval_block=retrieval_block,
+            runtime_block=runtime_block,
+        )
+        state.tools = self.tool_registry.list_openai_tools()
         return state
 
-    def _inject_memory_block(
-        self,
-        messages: list[dict[str, Any]],
-        retrieved: list[RetrievedMemory],
-    ) -> list[dict[str, Any]]:
-        memory_lines = [
-            f"- ({m.role}, score={m.score:.2f}) {m.content}" for m in retrieved
-        ]
-        memory_block = "Relevant memory:\n" + "\n".join(memory_lines)
+    # Backward-compatible alias used by existing tests/code.
+    def build_prompt(self, state: TurnState) -> TurnState:
+        return self.context_prepare(state)
 
-        if not messages:
-            return [{"role": "system", "content": memory_block}]
-        if messages[0].get("role") != "system":
-            return [{"role": "system", "content": memory_block}] + list(messages)
-        return [messages[0], {"role": "system", "content": memory_block}] + messages[1:]
+    def _render_memory_block(self, retrieved: list[RetrievedMemory]) -> str:
+        if not retrieved:
+            return ""
+        memory_lines = [f"- ({m.role}, score={m.score:.2f}) {m.content}" for m in retrieved]
+        return "Relevant memory:\n" + "\n".join(memory_lines)
+
+    def _render_retrieval_block(self, retrieved: list[RetrievedMemory]) -> str:
+        if not retrieved:
+            return ""
+        retrieval_lines = [f"- {m.content[:120]}" for m in retrieved]
+        return "Retrieval results:\n" + "\n".join(retrieval_lines)
+
+    def reasoner_run_turn(self, state: TurnState) -> TurnState:
+        decision = self.delegation_policy.decide(
+            user_input=state.user_input,
+            tool_step_budget=self.max_tool_steps,
+        )
+        state.delegation_action = decision.action
+        self._record_event(
+            {
+                "type": "delegation_decision",
+                "trace_id": state.trace_id,
+                "session_id": state.session_id,
+                "action": decision.action,
+                "reason": decision.reason,
+            }
+        )
+        if decision.action == "reject":
+            state.final_output = "请求被策略拒绝，请调整后重试。"
+            return state
+        if decision.action == "background_job":
+            state.final_output = "任务已转为后台执行。"
+            return state
+        if decision.action == "spawn_subagent":
+            state.final_output = "任务已委派给子代理执行。"
+            return state
+
+        return self.run_llm_tool_loop(state)
 
     def run_llm_tool_loop(self, state: TurnState) -> TurnState:
         current_messages: list[dict[str, Any]] = list(state.messages)
@@ -279,8 +330,8 @@ class TurnPipeline:
             return
         self.recorder.record(event)
 
-    def commit_result(self, state: TurnState) -> None:
-        self.agent.commit_turn(
+    def context_commit(self, state: TurnState) -> None:
+        self.context_store.commit(
             user_input=state.user_input,
             assistant_output=state.final_output,
         )
@@ -294,6 +345,10 @@ class TurnPipeline:
                     **stats,
                 }
             )
+
+    # Backward-compatible alias used by existing tests/code.
+    def commit_result(self, state: TurnState) -> None:
+        self.context_commit(state)
 
     def _tool_call_to_message_item(self, tool_call: LLMToolCall) -> dict[str, Any]:
         return {
