@@ -1,0 +1,2 @@
+"""Subagent: delegation task skeleton."""
+

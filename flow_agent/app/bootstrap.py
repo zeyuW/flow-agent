@@ -12,6 +12,13 @@ from flow_agent.llm.client import OpenAILLMClient
 from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
+from flow_agent.dashboard.store import InMemoryDashboardStore
+from flow_agent.dashboard.api import DashboardServer
+from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
+from flow_agent.background.store import InMemoryJobStore
+from flow_agent.background.jobs import JobSpec
+from flow_agent.infra.paths import DATA_DIR
+from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import ProactiveRuntime
 from flow_agent.proactive.runtime import IntervalScheduler
 from flow_agent.proactive.sources import (
@@ -45,7 +52,7 @@ from flow_agent.tools.registry import ToolRegistry
 5、将智能体交给总指挥
 '''
 # 创建总指挥
-def create_orchestrator() -> Orchestrator:
+def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
     # 加载配置
     settings = load_settings()
     # 创建消息存储
@@ -64,6 +71,7 @@ def create_orchestrator() -> Orchestrator:
         if settings.memory_policy.enabled
         else None
     )
+    dashboard_store = dashboard or InMemoryDashboardStore()
     # 创建事件记录器
     recorder = (
         TraceRecorder(path=Path(settings.observe.trace_path))
@@ -95,10 +103,11 @@ def create_orchestrator() -> Orchestrator:
         retrieval_max_items=settings.retrieval.max_items,
         recorder=recorder,
         organizer=organizer,
+        dashboard=dashboard_store,
     )
 
 # 创建主动运行时
-def create_proactive_runtime() -> ProactiveRuntime:
+def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) -> ProactiveRuntime:
     # 加载配置
     settings = load_settings()
     # 创建消息存储
@@ -160,13 +169,56 @@ def create_proactive_runtime() -> ProactiveRuntime:
     # 创建定时器
     scheduler = IntervalScheduler(
         interval_seconds=settings.proactive.interval_seconds,
-        task=tick_runner.tick,
+        task=lambda: (tick_runner.tick(), None)[1],
     )
     # 创建主动运行时
     return ProactiveRuntime(
         scheduler=scheduler,
         tick_runner=tick_runner,
     )
+
+
+def create_dashboard_runtime(
+    dashboard: InMemoryDashboardStore,
+    host: str = "127.0.0.1",
+    port: int = 8787,
+) -> DashboardServer:
+    """Create and return a dashboard server (not started)."""
+
+    return DashboardServer(host=host, port=port, store=dashboard)
+
+
+def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -> BackgroundRuntime:
+    """Create a minimal background runtime and register built-in jobs."""
+
+    registry = InMemoryJobRegistry()
+    store = InMemoryJobStore()
+    runtime = BackgroundRuntime(registry=registry, store=store, dashboard=dashboard)
+
+    # stage12: register proactive tick as a managed job (sync execution).
+    def proactive_tick_job() -> None:
+        create_proactive_runtime().tick_runner.tick()
+
+    registry.register(JobSpec(name="proactive_tick", func=proactive_tick_job, max_retries=0))
+    return runtime
+
+
+def create_app_runtime() -> tuple[
+    Orchestrator,
+    ProactiveRuntime,
+    DashboardServer,
+    BackgroundRuntime,
+    SubagentRuntime,
+]:
+    """Create a shared runtime across channels/dashboard/background/subagent."""
+
+    dashboard = InMemoryDashboardStore()
+    orchestrator = create_orchestrator(dashboard=dashboard)
+    proactive_runtime = create_proactive_runtime(dashboard=dashboard)
+    dashboard_server = create_dashboard_runtime(dashboard=dashboard)
+    background_runtime = create_background_runtime(dashboard=dashboard)
+    subagent_runtime = create_subagent_runtime(DATA_DIR, dashboard=dashboard)
+    return orchestrator, proactive_runtime, dashboard_server, background_runtime, subagent_runtime
 
 
 # 创建MCP注册表
