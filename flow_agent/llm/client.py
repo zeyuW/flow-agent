@@ -7,6 +7,8 @@ from typing import Protocol
 from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
 
 from flow_agent.config.settings import Settings
+from flow_agent.runtime.fallback import with_fallback
+from flow_agent.runtime.retry import RetryPolicy, retry_call
 
 
 logger = logging.getLogger(__name__)
@@ -55,14 +57,25 @@ class OpenAILLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResult:
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+        }
+        if tools:
+            request_kwargs["tools"] = tools
+
+        def _request():
+            return retry_call(
+                lambda: self.client.chat.completions.create(**request_kwargs),  # type: ignore[arg-type]
+                policy=RetryPolicy(max_attempts=2, delay_seconds=0.1, backoff_factor=1.8),
+                should_retry=lambda exc: isinstance(exc, (APIConnectionError, APITimeoutError)),
+            )
+
         try:
-            request_kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": messages,
-            }
-            if tools:
-                request_kwargs["tools"] = tools
-            response = self.client.chat.completions.create(**request_kwargs)  # type: ignore[arg-type]
+            response = with_fallback(
+                _request,
+                lambda exc: (_raise(exc)),
+            )
         except AuthenticationError as exc:
             logger.exception("LLM authentication failed, please check API key")
             return LLMResult(content="认证失败：请检查 API Key 是否正确。")
@@ -114,6 +127,10 @@ class OpenAILLMClient:
             if isinstance(key, str):
                 normalized[key] = str(value)
         return normalized
+
+
+def _raise(exc: Exception):
+    raise exc
 
 
 class FakeLLMClient:

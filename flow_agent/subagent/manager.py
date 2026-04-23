@@ -1,11 +1,12 @@
 import json
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
 from flow_agent.dashboard.store import InMemoryDashboardStore
+from flow_agent.guard.guards import SubagentConcurrencyGuard
 from flow_agent.subagent.models import SubagentTask
 
 
@@ -18,6 +19,9 @@ class SubagentManager:
 
     tasks_path: Path
     dashboard: InMemoryDashboardStore | None = None
+    concurrency_guard: SubagentConcurrencyGuard = field(
+        default_factory=lambda: SubagentConcurrencyGuard(max_concurrency=2)
+    )
 
     def create_task(self, kind: str, payload: dict[str, object]) -> SubagentTask:
         task = SubagentTask(task_id=uuid4().hex[:12], kind=kind, payload=payload)
@@ -33,6 +37,21 @@ class SubagentManager:
         """Run a task in background thread."""
 
         def _run() -> None:
+            decision = self.concurrency_guard.acquire()
+            if not decision.allowed:
+                task.status = "failed"
+                task.error = decision.reason
+                task.finished_at = _utc_now()
+                self._persist(task)
+                self._record(
+                    {
+                        "type": "subagent_task_finished",
+                        "task_id": task.task_id,
+                        "kind": task.kind,
+                        "status": task.status,
+                    }
+                )
+                return
             task.status = "running"
             task.started_at = _utc_now()
             self._persist(task)
@@ -57,6 +76,7 @@ class SubagentManager:
                         "status": task.status,
                     }
                 )
+                self.concurrency_guard.release()
 
         threading.Thread(target=_run, daemon=True).start()
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flow_agent.infra.trace import TraceRecorder
+from flow_agent.guard.guards import ProactiveFrequencyGuard, SourceIsolationGuard
 from flow_agent.proactive.sources import ProactiveSource, record_to_candidate
 from flow_agent.proactive.store import ProactiveSentStore
 from flow_agent.proactive.types import (
@@ -65,6 +66,10 @@ class SourceGateway:
     def fetch_records(self) -> list[SourceRecord]:
         records: list[SourceRecord] = []
         for source in self.sources:
+            source_check = SourceIsolationGuard.check_source_name(source.name)
+            if not source_check.allowed:
+                logger.warning("source blocked by guard: %s", source_check.reason)
+                continue
             try:
                 records.extend(source.fetch_records())
             except Exception:
@@ -144,8 +149,14 @@ class ProactiveTickRunner:
     dedup_ttl_seconds: int
     content_store: ContentStore | None = None
     recorder: TraceRecorder | None = None
+    frequency_guard: ProactiveFrequencyGuard | None = None
 
     def tick(self) -> ProactiveTickResult:
+        if self.frequency_guard is not None:
+            decision = self.frequency_guard.check()
+            if not decision.allowed:
+                self._trace("proactive_tick_skipped", {"reason": decision.reason})
+                return ProactiveTickResult(sent=False, reason=decision.reason)
         gate = self.gate.check()
         if not gate.allowed:
             self._trace("proactive_tick_skipped", {"reason": gate.reason})

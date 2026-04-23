@@ -1,11 +1,12 @@
 import logging
 import threading
-import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import InMemoryJobStore, JobRun
 from flow_agent.dashboard.store import InMemoryDashboardStore
+from flow_agent.guard.guards import BackgroundReentryGuard
+from flow_agent.runtime.retry import RetryPolicy, retry_call
 
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,8 @@ class BackgroundRuntime:
     registry: InMemoryJobRegistry
     store: InMemoryJobStore
     dashboard: InMemoryDashboardStore | None = None
-    _lock: threading.Lock = threading.Lock()
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    reentry_guard: BackgroundReentryGuard = field(default_factory=BackgroundReentryGuard)
 
     def run_job(self, job_name: str) -> JobRun:
         """Run a job synchronously with retry and trace."""
@@ -41,6 +43,10 @@ class BackgroundRuntime:
             raise ValueError(f"unknown job: {job_name}")
         if not self._lock.acquire(blocking=False):
             raise RuntimeError("background runtime busy")
+        guard_decision = self.reentry_guard.acquire()
+        if not guard_decision.allowed:
+            self._lock.release()
+            raise RuntimeError(guard_decision.reason)
         run = JobRun(job_name=job_name, ok=False, attempts=0)
         self._record({"type": "job_start", "job": job_name})
         try:
@@ -49,7 +55,10 @@ class BackgroundRuntime:
                 attempts += 1
                 run.attempts = attempts
                 try:
-                    job.func()
+                    retry_call(
+                        job.func,
+                        policy=RetryPolicy(max_attempts=max(1, job.max_retries + 1)),
+                    )
                     run.ok = True
                     run.error = None
                     break
@@ -57,9 +66,7 @@ class BackgroundRuntime:
                     run.ok = False
                     run.error = str(exc)
                     logger.exception("job failed name=%s attempt=%s", job_name, attempts)
-                    if attempts > job.max_retries:
-                        break
-                    time.sleep(0.05)
+                    break
             return run
         finally:
             run.finished_at = run.finished_at or _utc_now()
@@ -73,6 +80,7 @@ class BackgroundRuntime:
                     "error": run.error,
                 }
             )
+            self.reentry_guard.release()
             self._lock.release()
 
     def run_job_async(self, job_name: str) -> None:

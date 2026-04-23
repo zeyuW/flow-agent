@@ -38,6 +38,7 @@ from flow_agent.proactive.pipeline import (
     SourceGateway,
 )
 from flow_agent.proactive.store import SQLiteProactiveSentStore
+from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
@@ -82,6 +83,13 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
     llm_client = OpenAILLMClient(settings)
     # 创建工具注册表
     tool_registry = ToolRegistry()
+    tool_registry.set_guard(
+        ToolGuard(
+            whitelist={"read_file"} | {f"mcp:{s.name}:{t}" for s in (settings.mcp.servers or []) for t in (s.tools or [])}
+            if settings.tooling.enabled
+            else None
+        )
+    )
     if settings.tooling.enabled:
         tool_registry.register(ReadFileTool())
     # 创建MCP注册表
@@ -165,6 +173,9 @@ def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) ->
         dedup_ttl_seconds=settings.proactive.dedup_ttl_seconds,
         content_store=ContentStore(),
         recorder=recorder,
+        frequency_guard=ProactiveFrequencyGuard(
+            min_interval_seconds=max(0, settings.proactive.cooldown_seconds // 2)
+        ),
     )
     # 创建定时器
     scheduler = IntervalScheduler(
