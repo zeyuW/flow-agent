@@ -2,6 +2,8 @@ import sqlite3
 from pathlib import Path
 from typing import Protocol
 
+from flow_agent.infra.persistence import PersistenceManager
+
 
 class MessageStore(Protocol):
     def list_messages(self, session_id: str) -> list[dict[str, str]]:
@@ -32,31 +34,14 @@ class InMemoryMessageStore:
 class SQLiteMessageStore:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.persistence = PersistenceManager(db_path=self.db_path)
+        self.persistence.initialize()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_messages_session_id_id
-                ON messages(session_id, id)
-                """
-            )
+        self.persistence.initialize()
 
     def list_messages(self, session_id: str) -> list[dict[str, str]]:
         with self._connect() as conn:

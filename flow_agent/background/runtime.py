@@ -32,8 +32,11 @@ class BackgroundRuntime:
     registry: InMemoryJobRegistry
     store: InMemoryJobStore
     dashboard: InMemoryDashboardStore | None = None
+    max_async_queue: int = 64
     _lock: threading.Lock = field(default_factory=threading.Lock)
     reentry_guard: BackgroundReentryGuard = field(default_factory=BackgroundReentryGuard)
+    _pending_async: int = 0
+    _pending_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def run_job(self, job_name: str) -> JobRun:
         """Run a job synchronously with retry and trace."""
@@ -84,7 +87,20 @@ class BackgroundRuntime:
             self._lock.release()
 
     def run_job_async(self, job_name: str) -> None:
-        threading.Thread(target=self.run_job, args=(job_name,), daemon=True).start()
+        with self._pending_lock:
+            if self._pending_async >= max(1, self.max_async_queue):
+                raise RuntimeError("background_async_queue_full")
+            self._pending_async += 1
+        self._record({"type": "job_queue", "job": job_name, "pending": self._pending_async})
+
+        def _run() -> None:
+            try:
+                self.run_job(job_name)
+            finally:
+                with self._pending_lock:
+                    self._pending_async = max(0, self._pending_async - 1)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _record(self, event: dict[str, object]) -> None:
         if self.dashboard is None:

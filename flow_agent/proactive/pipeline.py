@@ -3,6 +3,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import time
 
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.guard.guards import ProactiveFrequencyGuard, SourceIsolationGuard
@@ -152,6 +153,7 @@ class ProactiveTickRunner:
     frequency_guard: ProactiveFrequencyGuard | None = None
 
     def tick(self) -> ProactiveTickResult:
+        started = time.perf_counter()
         if self.frequency_guard is not None:
             decision = self.frequency_guard.check()
             if not decision.allowed:
@@ -187,7 +189,14 @@ class ProactiveTickRunner:
             return ProactiveTickResult(sent=False, reason="dedup_hit", candidate_key=candidate.key)
         self.sent_store.mark_sent(candidate.key)
         logger.info("proactive sent candidate key=%s", candidate.key)
-        self._trace("proactive_sent", {"key": candidate.key, "content": candidate.content})
+        self._trace(
+            "proactive_sent",
+            {
+                "key": candidate.key,
+                "content": candidate.content,
+                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+            },
+        )
         return ProactiveTickResult(sent=True, reason="sent", candidate_key=candidate.key)
 
     def _trace(self, event_type: str, payload: dict[str, object]) -> None:

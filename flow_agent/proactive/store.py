@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
+from flow_agent.infra.persistence import PersistenceManager
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -25,30 +27,14 @@ class SQLiteProactiveSentStore:
     '''主动发送记录存储'''
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._init_schema()
+        self.persistence = PersistenceManager(db_path=self.db_path)
+        self.persistence.initialize()
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
     def _init_schema(self) -> None:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS proactive_sent (
-                    key TEXT PRIMARY KEY,
-                    sent_at TEXT NOT NULL
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS proactive_meta (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    last_sent_at TEXT
-                )
-                """
-            )
+        self.persistence.initialize()
 
     def was_sent_recently(self, key: str, ttl_seconds: int) -> bool:
         with self._connect() as conn:

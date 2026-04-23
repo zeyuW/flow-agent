@@ -78,6 +78,36 @@ class MCPSettings:
 
 
 @dataclass(slots=True)
+class ChannelsSettings:
+    cli_enabled: bool = True
+    http_enabled: bool = False
+    http_host: str = "127.0.0.1"
+    http_port: int = 8788
+    dashboard_enabled: bool = False
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 8787
+
+
+@dataclass(slots=True)
+class JobsSettings:
+    max_async_queue: int = 64
+    timeout_seconds: float = 30.0
+
+
+@dataclass(slots=True)
+class SubagentSettings:
+    max_concurrency: int = 2
+    tasks_file: str = ".flow_agent/subagent_tasks.jsonl"
+
+
+@dataclass(slots=True)
+class ConfigGovernanceSettings:
+    config_version: str = "v1"
+    profile: str = "dev"
+    external_config_path: str | None = None
+
+
+@dataclass(slots=True)
 class Settings:
     model: ModelSettings
     storage: StorageSettings
@@ -88,6 +118,10 @@ class Settings:
     observe: ObserveSettings
     memory_policy: MemoryPolicySettings
     proactive: ProactiveSettings
+    channels: ChannelsSettings = field(default_factory=ChannelsSettings)
+    jobs: JobsSettings = field(default_factory=JobsSettings)
+    subagent: SubagentSettings = field(default_factory=SubagentSettings)
+    governance: ConfigGovernanceSettings = field(default_factory=ConfigGovernanceSettings)
     mcp: MCPSettings = field(default_factory=MCPSettings)
 
     @property

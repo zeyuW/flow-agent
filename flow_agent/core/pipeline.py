@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import logging
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -54,6 +55,7 @@ class TurnPipeline:
     def process_turn(self, user_input: str, session_id: str) -> AgentResponse:
         state = self.prepare_context(user_input=user_input, session_id=session_id)
         token = trace_id_var.set(state.trace_id)
+        turn_started = time.perf_counter()
         try:
             self._record_event(
                 {
@@ -78,6 +80,14 @@ class TurnPipeline:
                 }
             )
             logger.info("turn end session=%s", state.session_id)
+            self._record_event(
+                {
+                    "type": "turn_perf",
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "latency_ms": round((time.perf_counter() - turn_started) * 1000, 2),
+                }
+            )
             return AgentResponse(content=state.final_output)
         except Exception as exc:
             self._record_event(
@@ -109,6 +119,7 @@ class TurnPipeline:
         state.messages = self.agent.build_turn_messages(user_input=state.user_input)
         state.tools = self.tool_registry.list_openai_tools()
         if self.retriever is not None and self.retrieval_max_items > 0:
+            retrieval_started = time.perf_counter()
             retrieved = self.retriever.retrieve(
                 session_id=state.session_id,
                 query=state.user_input,
@@ -123,6 +134,7 @@ class TurnPipeline:
                     "trace_id": state.trace_id,
                     "session_id": state.session_id,
                     "items": len(retrieved),
+                    "latency_ms": round((time.perf_counter() - retrieval_started) * 1000, 2),
                 }
             )
             if retrieved:
@@ -148,11 +160,21 @@ class TurnPipeline:
     def run_llm_tool_loop(self, state: TurnState) -> TurnState:
         current_messages: list[dict[str, Any]] = list(state.messages)
         seen_calls: set[str] = set()
+        loop_started = time.perf_counter()
 
         for step in range(self.max_tool_steps):
             llm_result = self.agent.generate_from_messages(current_messages, tools=state.tools)
             if not llm_result.tool_calls:
                 state.final_output = llm_result.content
+                self._record_event(
+                    {
+                        "type": "tool_loop_perf",
+                        "trace_id": state.trace_id,
+                        "session_id": state.session_id,
+                        "steps": step + 1,
+                        "latency_ms": round((time.perf_counter() - loop_started) * 1000, 2),
+                    }
+                )
                 return state
 
             self._record_event(
@@ -236,6 +258,15 @@ class TurnPipeline:
                 )
 
         state.final_output = "工具调用次数超过上限，请调整请求后重试。"
+        self._record_event(
+            {
+                "type": "tool_loop_perf",
+                "trace_id": state.trace_id,
+                "session_id": state.session_id,
+                "steps": self.max_tool_steps,
+                "latency_ms": round((time.perf_counter() - loop_started) * 1000, 2),
+            }
+        )
         return state
 
     def _record_event(self, event: dict[str, Any]) -> None:

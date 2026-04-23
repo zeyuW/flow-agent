@@ -18,6 +18,7 @@ from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
 from flow_agent.background.jobs import JobSpec
 from flow_agent.infra.paths import DATA_DIR
+from flow_agent.infra.persistence import PersistenceManager
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import ProactiveRuntime
 from flow_agent.proactive.runtime import IntervalScheduler
@@ -56,6 +57,7 @@ from flow_agent.tools.registry import ToolRegistry
 def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
     # 加载配置
     settings = load_settings()
+    PersistenceManager(Path(settings.storage.memory_db_path)).initialize()
     # 创建消息存储
     message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
     # 创建上下文
@@ -118,6 +120,7 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
 def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) -> ProactiveRuntime:
     # 加载配置
     settings = load_settings()
+    PersistenceManager(Path(settings.storage.memory_db_path)).initialize()
     # 创建消息存储
     db_path = Path(settings.storage.memory_db_path)
     sent_store = SQLiteProactiveSentStore(db_path=db_path)
@@ -202,9 +205,15 @@ def create_dashboard_runtime(
 def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -> BackgroundRuntime:
     """Create a minimal background runtime and register built-in jobs."""
 
+    settings = load_settings()
     registry = InMemoryJobRegistry()
     store = InMemoryJobStore()
-    runtime = BackgroundRuntime(registry=registry, store=store, dashboard=dashboard)
+    runtime = BackgroundRuntime(
+        registry=registry,
+        store=store,
+        dashboard=dashboard,
+        max_async_queue=settings.jobs.max_async_queue,
+    )
 
     # stage12: register proactive tick as a managed job (sync execution).
     def proactive_tick_job() -> None:
@@ -226,9 +235,19 @@ def create_app_runtime() -> tuple[
     dashboard = InMemoryDashboardStore()
     orchestrator = create_orchestrator(dashboard=dashboard)
     proactive_runtime = create_proactive_runtime(dashboard=dashboard)
-    dashboard_server = create_dashboard_runtime(dashboard=dashboard)
+    settings = load_settings()
+    dashboard_server = create_dashboard_runtime(
+        dashboard=dashboard,
+        host=settings.channels.dashboard_host,
+        port=settings.channels.dashboard_port,
+    )
     background_runtime = create_background_runtime(dashboard=dashboard)
-    subagent_runtime = create_subagent_runtime(DATA_DIR, dashboard=dashboard)
+    subagent_runtime = create_subagent_runtime(
+        DATA_DIR,
+        dashboard=dashboard,
+        tasks_file=settings.subagent.tasks_file,
+        max_concurrency=settings.subagent.max_concurrency,
+    )
     return orchestrator, proactive_runtime, dashboard_server, background_runtime, subagent_runtime
 
 

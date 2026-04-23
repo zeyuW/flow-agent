@@ -13,6 +13,15 @@ logger = logging.getLogger(__name__)
 def main() -> None:
     settings = load_settings()
     configure_logging(settings.logging.level)
+    print(
+        "Config summary: "
+        f"version={settings.governance.config_version}, "
+        f"profile={settings.governance.profile}, "
+        f"http_enabled={settings.channels.http_enabled}, "
+        f"dashboard_enabled={settings.channels.dashboard_enabled}, "
+        f"jobs_queue={settings.jobs.max_async_queue}, "
+        f"subagent_max={settings.subagent.max_concurrency}"
+    )
 
     try:
         orchestrator, proactive_runtime, dashboard_server, background_runtime, subagent_runtime = create_app_runtime()
@@ -34,8 +43,16 @@ def main() -> None:
         return OutboundMessage(channel=msg.channel, session_id=msg.session_id, text=response.content)
 
     cli = CLIChannel(handler=handle_inbound, default_session_id=current_session)
-    http = HTTPChannel(host="127.0.0.1", port=8788, handler=handle_inbound)
+    http = HTTPChannel(
+        host=settings.channels.http_host,
+        port=settings.channels.http_port,
+        handler=handle_inbound,
+    )
     cli.start()
+    if settings.channels.dashboard_enabled:
+        dashboard_server.start()
+    if settings.channels.http_enabled:
+        http.start()
 
     while True:
         user_input = input("You: ")
@@ -66,7 +83,9 @@ def main() -> None:
             cmd = user_input.removeprefix("/dashboard ").strip().lower()
             if cmd == "start":
                 dashboard_server.start()
-                print("Agent: dashboard started on 127.0.0.1:8787")
+                print(
+                    f"Agent: dashboard started on {settings.channels.dashboard_host}:{settings.channels.dashboard_port}"
+                )
             elif cmd == "stop":
                 dashboard_server.stop()
                 print("Agent: dashboard stopped")
@@ -77,7 +96,9 @@ def main() -> None:
             cmd = user_input.removeprefix("/http ").strip().lower()
             if cmd == "start":
                 http.start()
-                print("Agent: http channel started on 127.0.0.1:8788")
+                print(
+                    f"Agent: http channel started on {settings.channels.http_host}:{settings.channels.http_port}"
+                )
             elif cmd == "stop":
                 http.stop()
                 print("Agent: http channel stopped")
