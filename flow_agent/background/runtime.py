@@ -24,6 +24,9 @@ class InMemoryJobRegistry:
     def get(self, name: str) -> JobSpec | None:
         return self._jobs.get(name)
 
+    def list_names(self) -> list[str]:
+        return sorted(self._jobs.keys())
+
 
 @dataclass(slots=True)
 class BackgroundRuntime:

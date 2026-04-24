@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import time
+from dataclasses import asdict
+from pathlib import Path
+
+from flow_agent.config.loader import load_settings
+from flow_agent.config.profiles import apply_profile
+from flow_agent.plugins.manager import PluginManager
+from flow_agent.runtime.workspace import (
+    apply_workspace_env,
+    init_workspace,
+    persist_workspace_profile,
+    require_workspace,
+)
+from flow_agent.skills.manager import SkillManager
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="flow-agent")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    init_cmd = sub.add_parser("init", help="initialize workspace")
+    init_cmd.add_argument("--workspace", default=".", help="workspace directory")
+
+    run_cmd = sub.add_parser("run", help="run agent")
+    run_cmd.add_argument("mode", nargs="?", choices=["dev", "prod"], default=None)
+    run_cmd.add_argument("--profile", default=None, choices=["dev", "prod"])
+
+    sub.add_parser("dashboard", help="start dashboard server")
+
+    runtime_cmd = sub.add_parser("runtime", help="runtime controls")
+    runtime_sub = runtime_cmd.add_subparsers(dest="runtime_action", required=True)
+    for action in ("snapshot", "health", "reload", "restart", "stop", "start"):
+        runtime_sub.add_parser(action)
+
+    jobs_cmd = sub.add_parser("jobs", help="jobs commands")
+    jobs_sub = jobs_cmd.add_subparsers(dest="jobs_action", required=True)
+    jobs_sub.add_parser("list")
+
+    channels_cmd = sub.add_parser("channels", help="channels commands")
+    channels_sub = channels_cmd.add_subparsers(dest="channels_action", required=True)
+    channels_sub.add_parser("list")
+
+    sources_cmd = sub.add_parser("sources", help="sources commands")
+    sources_sub = sources_cmd.add_subparsers(dest="sources_action", required=True)
+    sources_sub.add_parser("list")
+
+    skills_cmd = sub.add_parser("skills", help="skills management")
+    skills_sub = skills_cmd.add_subparsers(dest="skills_action", required=True)
+    skills_sub.add_parser("list")
+    skill_install = skills_sub.add_parser("install")
+    skill_install.add_argument("path")
+    skill_enable = skills_sub.add_parser("enable")
+    skill_enable.add_argument("name")
+    skill_disable = skills_sub.add_parser("disable")
+    skill_disable.add_argument("name")
+
+    plugins_cmd = sub.add_parser("plugins", help="plugins management")
+    plugins_sub = plugins_cmd.add_subparsers(dest="plugins_action", required=True)
+    plugins_sub.add_parser("list")
+    plugin_install = plugins_sub.add_parser("install")
+    plugin_install.add_argument("path")
+    plugin_uninstall = plugins_sub.add_parser("uninstall")
+    plugin_uninstall.add_argument("name")
+    plugin_enable = plugins_sub.add_parser("enable")
+    plugin_enable.add_argument("name")
+    plugin_disable = plugins_sub.add_parser("disable")
+    plugin_disable.add_argument("name")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "init":
+        layout = init_workspace(Path(args.workspace))
+        print(f"workspace initialized: {layout.root}")
+        return 0
+
+    layout = require_workspace()
+    apply_workspace_env(layout)
+
+    if args.command == "run":
+        from flow_agent.main import main as interactive_main
+
+        profile = args.profile or args.mode or os.getenv("FLOW_AGENT_PROFILE", "dev")
+        persist_workspace_profile(layout, profile)
+        apply_profile(profile)
+        interactive_main()
+        return 0
+
+    if args.command == "dashboard":
+        from flow_agent.app.bootstrap import create_app_runtime
+
+        settings = load_settings()
+        _, _, server, _, _, _ = create_app_runtime()
+        server.start()
+        print(f"dashboard started on {settings.channels.dashboard_host}:{settings.channels.dashboard_port}")
+        try:
+            while True:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            server.stop()
+            print("dashboard stopped")
+        return 0
+
+    if args.command == "runtime":
+        from flow_agent.app.bootstrap import create_app_runtime
+
+        _, _, _, _, _, runtime_service = create_app_runtime()
+        if args.runtime_action == "snapshot":
+            print(json.dumps(asdict(runtime_service.snapshot()), ensure_ascii=False, indent=2))
+        elif args.runtime_action == "health":
+            rows = [asdict(item) for item in runtime_service.health_check()]
+            print(json.dumps(rows, ensure_ascii=False, indent=2))
+        elif args.runtime_action == "start":
+            for name in ("proactive", "dashboard"):
+                runtime_service.start(name)
+            print("runtime start applied for proactive/dashboard")
+        elif args.runtime_action == "stop":
+            for name in ("proactive", "dashboard"):
+                runtime_service.stop(name)
+            print("runtime stop applied for proactive/dashboard")
+        elif args.runtime_action == "restart":
+            for name in ("proactive", "dashboard"):
+                runtime_service.stop(name)
+                runtime_service.start(name)
+            print("runtime restart applied for proactive/dashboard")
+        elif args.runtime_action == "reload":
+            settings = load_settings()
+            print(f"runtime reload complete with profile={settings.governance.profile}")
+        return 0
+
+    if args.command == "jobs" and args.jobs_action == "list":
+        from flow_agent.app.bootstrap import create_background_runtime
+
+        runtime = create_background_runtime()
+        print(json.dumps(runtime.registry.list_names(), ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "channels" and args.channels_action == "list":
+        settings = load_settings()
+        payload = {
+            "cli_enabled": settings.channels.cli_enabled,
+            "http_enabled": settings.channels.http_enabled,
+            "dashboard_enabled": settings.channels.dashboard_enabled,
+            "http_host": settings.channels.http_host,
+            "http_port": settings.channels.http_port,
+            "dashboard_host": settings.channels.dashboard_host,
+            "dashboard_port": settings.channels.dashboard_port,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "sources" and args.sources_action == "list":
+        settings = load_settings()
+        payload = {
+            "memory_followup": True,
+            "local_todo": settings.proactive.todo_file,
+            "file_feed": settings.proactive.source_file,
+            "rss_feed": settings.proactive.rss_feed_files or [],
+            "web_fetch": settings.proactive.web_snapshot_files or [],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.command == "skills":
+        manager = SkillManager(layout.skills_dir)
+        if args.skills_action == "list":
+            print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
+        elif args.skills_action == "install":
+            manifest = manager.install(Path(args.path))
+            print(f"skill installed: {manifest.name}@{manifest.version}")
+        elif args.skills_action == "enable":
+            manager.enable(args.name)
+            print(f"skill enabled: {args.name}")
+        elif args.skills_action == "disable":
+            manager.disable(args.name)
+            print(f"skill disabled: {args.name}")
+        return 0
+
+    if args.command == "plugins":
+        manager = PluginManager(layout.plugins_dir)
+        if args.plugins_action == "list":
+            print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
+        elif args.plugins_action == "install":
+            manifest = manager.install(Path(args.path))
+            print(f"plugin installed: {manifest.name}@{manifest.version}")
+        elif args.plugins_action == "uninstall":
+            manager.uninstall(args.name)
+            print(f"plugin uninstalled: {args.name}")
+        elif args.plugins_action == "enable":
+            manager.enable(args.name)
+            print(f"plugin enabled: {args.name}")
+        elif args.plugins_action == "disable":
+            manager.disable(args.name)
+            print(f"plugin disabled: {args.name}")
+        return 0
+
+    parser.print_help()
+    return 1
