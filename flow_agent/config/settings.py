@@ -62,6 +62,7 @@ class ProactiveSettings:
     web_snapshot_files: list[str] | None = None
     skills_dir: str = "skills"
     min_priority_to_send: float = 0.5
+    qq_target_user_id: str = ""
 
 
 @dataclass(slots=True)

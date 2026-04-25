@@ -161,6 +161,10 @@ def load_settings() -> Settings:
         min_priority_to_send=float(
             os.getenv("FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND", "0.5")
         ),
+        qq_target_user_id=os.getenv(
+            "FLOW_AGENT_PROACTIVE_QQ_TARGET_USER_ID",
+            str(_deep_get(external_config, "proactive", "qq_target_user_id") or ""),
+        ),
     )
     channels = ChannelsSettings(
         cli_enabled=_to_bool(

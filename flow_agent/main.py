@@ -7,6 +7,7 @@ from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
 from flow_agent.channels.qq import QQChannel
 from flow_agent.channels.models import OutboundMessage, InboundMessage
+from flow_agent.proactive.dispatcher import QQProactiveDispatcher
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,11 @@ def main() -> None:
         api_base=settings.channels.qq_api_base,
         access_token=settings.channels.qq_access_token,
     )
+    if settings.proactive.qq_target_user_id.strip().isdigit():
+        proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
+            qq_user_id=int(settings.proactive.qq_target_user_id.strip()),
+            send_private_msg=qq._send_private_msg,
+        )
     cli.start()
     if settings.channels.dashboard_enabled:
         dashboard_server.start()

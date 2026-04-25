@@ -8,6 +8,7 @@ import time
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.guard.guards import ProactiveFrequencyGuard, SourceIsolationGuard
 from flow_agent.proactive.judge import ProactiveJudge
+from flow_agent.proactive.dispatcher import ProactiveDispatcher
 from flow_agent.proactive.sources import ProactiveSource, record_to_candidate
 from flow_agent.proactive.store import ProactiveSentStore
 from flow_agent.proactive.types import (
@@ -153,6 +154,7 @@ class ProactiveTickRunner:
     content_store: ContentStore | None = None
     recorder: TraceRecorder | None = None
     frequency_guard: ProactiveFrequencyGuard | None = None
+    dispatcher: ProactiveDispatcher | None = None
 
     def tick(self) -> ProactiveTickResult:
         started = time.perf_counter()
@@ -205,6 +207,24 @@ class ProactiveTickRunner:
         if self.sent_store.was_sent_recently(candidate.key, self.dedup_ttl_seconds):
             self._trace("proactive_dedup_hit", {"key": candidate.key})
             return ProactiveTickResult(sent=False, reason="dedup_hit", candidate_key=candidate.key)
+        if self.dispatcher is not None:
+            try:
+                self.dispatcher.dispatch(candidate)
+                self._trace(
+                    "proactive_dispatch",
+                    {"key": candidate.key, "target": "dispatcher"},
+                )
+            except Exception as exc:
+                logger.exception("proactive dispatch failed key=%s", candidate.key)
+                self._trace(
+                    "proactive_dispatch_failed",
+                    {"key": candidate.key, "error": str(exc)},
+                )
+                return ProactiveTickResult(
+                    sent=False,
+                    reason="dispatch_failed",
+                    candidate_key=candidate.key,
+                )
         self.sent_store.mark_sent(candidate.key)
         logger.info("proactive sent candidate key=%s", candidate.key)
         self._trace(

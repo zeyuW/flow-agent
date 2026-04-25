@@ -39,6 +39,35 @@ def test_proactive_tick_send_and_dedup(tmp_path: Path):
     assert second.reason == "dedup_hit"
 
 
+def test_proactive_tick_dispatcher_called(tmp_path: Path):
+    source_file = tmp_path / "proactive_items.txt"
+    source_file.write_text("ping qq now\n", encoding="utf-8")
+    db_path = tmp_path / "memory.db"
+    sent_store = SQLiteProactiveSentStore(db_path=db_path)
+    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
+    source = LocalFileSource(source_file)
+    captured: list[str] = []
+
+    class _Dispatcher:
+        def dispatch(self, candidate) -> None:
+            captured.append(candidate.content)
+
+    runner = ProactiveTickRunner(
+        gate=gate,
+        gateway=SourceGateway([source]),
+        ranker=CandidateRanker(),
+        decision_layer=DecisionLayer(min_priority_to_send=0.0),
+        drift_runner=DriftRunner(tmp_path / "tasks.txt"),
+        sent_store=sent_store,
+        dedup_ttl_seconds=3600,
+        dispatcher=_Dispatcher(),
+    )
+    result = runner.tick()
+    assert result.sent is True
+    assert len(captured) == 1
+    assert "ping qq now" in captured[0]
+
+
 def test_proactive_tick_runs_drift_when_no_candidate(tmp_path: Path):
     db_path = tmp_path / "memory.db"
     tasks_file = tmp_path / "tasks.txt"
