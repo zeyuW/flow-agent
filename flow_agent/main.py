@@ -5,6 +5,7 @@ from flow_agent.config.loader import load_settings
 from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
+from flow_agent.channels.qq import QQChannel
 from flow_agent.channels.models import OutboundMessage, InboundMessage
 
 
@@ -43,6 +44,7 @@ def main() -> None:
     print("Use '/proactive tick|start|stop|status' to control proactive runtime")
     print("Use '/dashboard start|stop' to control dashboard server")
     print("Use '/http start|stop' to control http channel")
+    print("Use '/qq start|stop|status' to control qq channel")
     print("Use '/runtime snapshot|health' to inspect unified runtime")
     current_session = settings.session.default_session_id
 
@@ -56,11 +58,20 @@ def main() -> None:
         port=settings.channels.http_port,
         handler=handle_inbound,
     )
+    qq = QQChannel(
+        host=settings.channels.qq_host,
+        port=settings.channels.qq_port,
+        handler=handle_inbound,
+        api_base=settings.channels.qq_api_base,
+        access_token=settings.channels.qq_access_token,
+    )
     cli.start()
     if settings.channels.dashboard_enabled:
         dashboard_server.start()
     if settings.channels.http_enabled:
         http.start()
+    if settings.channels.qq_enabled:
+        qq.start()
 
     while True:
         user_input = input("You: ")
@@ -112,6 +123,20 @@ def main() -> None:
                 print("Agent: http channel stopped")
             else:
                 print("Agent: http command should be start|stop")
+            continue
+        if user_input.startswith("/qq "):
+            cmd = user_input.removeprefix("/qq ").strip().lower()
+            if cmd == "start":
+                qq.start()
+                print(f"Agent: qq channel started on {settings.channels.qq_host}:{settings.channels.qq_port}")
+            elif cmd == "stop":
+                qq.stop()
+                print("Agent: qq channel stopped")
+            elif cmd == "status":
+                s = qq.status()
+                print(f"Agent: qq channel running={s.running}, last_error={s.last_error}")
+            else:
+                print("Agent: qq command should be start|stop|status")
             continue
         if user_input.startswith("/runtime "):
             cmd = user_input.removeprefix("/runtime ").strip().lower()

@@ -86,6 +86,11 @@ class ChannelsSettings:
     dashboard_enabled: bool = False
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8787
+    qq_enabled: bool = False
+    qq_host: str = "127.0.0.1"
+    qq_port: int = 8790
+    qq_api_base: str = "http://127.0.0.1:3000"
+    qq_access_token: str = ""
 
 
 @dataclass(slots=True)

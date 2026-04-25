@@ -9,7 +9,12 @@ from pathlib import Path
 
 from flow_agent.config.loader import load_settings
 from flow_agent.config.profiles import apply_profile
+from flow_agent.marketplace.index import MarketplaceIndex
+from flow_agent.marketplace.installer import MarketplaceInstaller
+from flow_agent.ops.audit import AuditLogger
+from flow_agent.ops.metrics import MetricsStore
 from flow_agent.plugins.manager import PluginManager
+from flow_agent.security.policy import SecurityPolicy
 from flow_agent.runtime.workspace import (
     apply_workspace_env,
     init_workspace,
@@ -70,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     plugin_enable.add_argument("name")
     plugin_disable = plugins_sub.add_parser("disable")
     plugin_disable.add_argument("name")
+
+    market_cmd = sub.add_parser("marketplace", help="marketplace index management")
+    market_sub = market_cmd.add_subparsers(dest="market_action", required=True)
+    market_sub.add_parser("list")
+    market_sub.add_parser("rebuild")
     return parser
 
 
@@ -83,6 +93,11 @@ def main(argv: list[str] | None = None) -> int:
 
     layout = require_workspace()
     apply_workspace_env(layout)
+    audit = AuditLogger(layout.logs_dir / "audit.jsonl")
+    metrics = MetricsStore()
+    security = SecurityPolicy()
+    actor = os.getenv("FLOW_AGENT_ACTOR", "local-user")
+    role = os.getenv("FLOW_AGENT_ACTOR_ROLE", "admin")
 
     if args.command == "run":
         from flow_agent.main import main as interactive_main
@@ -90,6 +105,7 @@ def main(argv: list[str] | None = None) -> int:
         profile = args.profile or args.mode or os.getenv("FLOW_AGENT_PROFILE", "dev")
         persist_workspace_profile(layout, profile)
         apply_profile(profile)
+        audit.record("run", actor, {"profile": profile, "workspace": str(layout.root)})
         interactive_main()
         return 0
 
@@ -109,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "runtime":
+        if args.runtime_action in {"start", "stop", "restart", "reload"}:
+            _ensure_allowed(security, role, f"runtime.{args.runtime_action}")
         from flow_agent.app.bootstrap import create_app_runtime
 
         _, _, _, _, _, runtime_service = create_app_runtime()
@@ -120,18 +138,22 @@ def main(argv: list[str] | None = None) -> int:
         elif args.runtime_action == "start":
             for name in ("proactive", "dashboard"):
                 runtime_service.start(name)
+            audit.record("runtime.start", actor, {"targets": ["proactive", "dashboard"]})
             print("runtime start applied for proactive/dashboard")
         elif args.runtime_action == "stop":
             for name in ("proactive", "dashboard"):
                 runtime_service.stop(name)
+            audit.record("runtime.stop", actor, {"targets": ["proactive", "dashboard"]})
             print("runtime stop applied for proactive/dashboard")
         elif args.runtime_action == "restart":
             for name in ("proactive", "dashboard"):
                 runtime_service.stop(name)
                 runtime_service.start(name)
+            audit.record("runtime.restart", actor, {"targets": ["proactive", "dashboard"]})
             print("runtime restart applied for proactive/dashboard")
         elif args.runtime_action == "reload":
             settings = load_settings()
+            audit.record("runtime.reload", actor, {"profile": settings.governance.profile})
             print(f"runtime reload complete with profile={settings.governance.profile}")
         return 0
 
@@ -139,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         from flow_agent.app.bootstrap import create_background_runtime
 
         runtime = create_background_runtime()
+        metrics.inc("jobs.list")
         print(json.dumps(runtime.registry.list_names(), ensure_ascii=False, indent=2))
         return 0
 
@@ -148,10 +171,14 @@ def main(argv: list[str] | None = None) -> int:
             "cli_enabled": settings.channels.cli_enabled,
             "http_enabled": settings.channels.http_enabled,
             "dashboard_enabled": settings.channels.dashboard_enabled,
+            "qq_enabled": settings.channels.qq_enabled,
             "http_host": settings.channels.http_host,
             "http_port": settings.channels.http_port,
             "dashboard_host": settings.channels.dashboard_host,
             "dashboard_port": settings.channels.dashboard_port,
+            "qq_host": settings.channels.qq_host,
+            "qq_port": settings.channels.qq_port,
+            "qq_api_base": settings.channels.qq_api_base,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
@@ -173,13 +200,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.skills_action == "list":
             print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
         elif args.skills_action == "install":
+            _ensure_allowed(security, role, "skills.install")
             manifest = manager.install(Path(args.path))
+            audit.record("skills.install", actor, {"name": manifest.name, "version": manifest.version})
             print(f"skill installed: {manifest.name}@{manifest.version}")
         elif args.skills_action == "enable":
+            _ensure_allowed(security, role, "skills.enable")
             manager.enable(args.name)
+            audit.record("skills.enable", actor, {"name": args.name})
             print(f"skill enabled: {args.name}")
         elif args.skills_action == "disable":
+            _ensure_allowed(security, role, "skills.disable")
             manager.disable(args.name)
+            audit.record("skills.disable", actor, {"name": args.name})
             print(f"skill disabled: {args.name}")
         return 0
 
@@ -188,18 +221,47 @@ def main(argv: list[str] | None = None) -> int:
         if args.plugins_action == "list":
             print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
         elif args.plugins_action == "install":
+            _ensure_allowed(security, role, "plugins.install")
             manifest = manager.install(Path(args.path))
+            audit.record("plugins.install", actor, {"name": manifest.name, "version": manifest.version})
             print(f"plugin installed: {manifest.name}@{manifest.version}")
         elif args.plugins_action == "uninstall":
+            _ensure_allowed(security, role, "plugins.uninstall")
             manager.uninstall(args.name)
+            audit.record("plugins.uninstall", actor, {"name": args.name})
             print(f"plugin uninstalled: {args.name}")
         elif args.plugins_action == "enable":
+            _ensure_allowed(security, role, "plugins.enable")
             manager.enable(args.name)
+            audit.record("plugins.enable", actor, {"name": args.name})
             print(f"plugin enabled: {args.name}")
         elif args.plugins_action == "disable":
+            _ensure_allowed(security, role, "plugins.disable")
             manager.disable(args.name)
+            audit.record("plugins.disable", actor, {"name": args.name})
             print(f"plugin disabled: {args.name}")
+        return 0
+
+    if args.command == "marketplace":
+        installer = MarketplaceInstaller(
+            index=MarketplaceIndex(layout.data_dir / "marketplace-index.json"),
+            skills=SkillManager(layout.skills_dir),
+            plugins=PluginManager(layout.plugins_dir),
+        )
+        if args.market_action == "rebuild":
+            rows = installer.rebuild_local_index()
+            audit.record("marketplace.rebuild", actor, {"count": len(rows)})
+            print(json.dumps([asdict(row) for row in rows], ensure_ascii=False, indent=2))
+        elif args.market_action == "list":
+            rows = installer.index.load()
+            print(json.dumps([asdict(row) for row in rows], ensure_ascii=False, indent=2))
         return 0
 
     parser.print_help()
     return 1
+
+
+def _ensure_allowed(security: SecurityPolicy, role: str, action: str) -> None:
+    allowed, reason = security.check_command(role=role, action=action)
+    if not allowed:
+        raise PermissionError(reason)

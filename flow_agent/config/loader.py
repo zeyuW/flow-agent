@@ -187,6 +187,24 @@ def load_settings() -> Settings:
             os.getenv("FLOW_AGENT_CHANNEL_DASHBOARD_PORT", "")
             or str(_deep_get(external_config, "channels", "dashboard_port") or "8787")
         ),
+        qq_enabled=_to_bool(
+            os.getenv("FLOW_AGENT_CHANNEL_QQ_ENABLED", ""),
+            bool(
+                _deep_get(external_config, "channels", "qq_enabled")
+                if _deep_get(external_config, "channels", "qq_enabled") is not None
+                else False
+            ),
+        ),
+        qq_host=os.getenv("FLOW_AGENT_CHANNEL_QQ_HOST", "")
+        or str(_deep_get(external_config, "channels", "qq_host") or "127.0.0.1"),
+        qq_port=int(
+            os.getenv("FLOW_AGENT_CHANNEL_QQ_PORT", "")
+            or str(_deep_get(external_config, "channels", "qq_port") or "8790")
+        ),
+        qq_api_base=os.getenv("FLOW_AGENT_CHANNEL_QQ_API_BASE", "")
+        or str(_deep_get(external_config, "channels", "qq_api_base") or "http://127.0.0.1:3000"),
+        qq_access_token=os.getenv("FLOW_AGENT_CHANNEL_QQ_ACCESS_TOKEN", "U-H0ZF3FmVRg3AxE")
+        or str(_deep_get(external_config, "channels", "qq_access_token") or ""),
     )
     jobs = JobsSettings(
         max_async_queue=max(

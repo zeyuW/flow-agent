@@ -3,10 +3,14 @@ import logging
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from time import perf_counter
 from typing import Callable
 
 from flow_agent.channels.base import ChannelStatus, InboundHandler
 from flow_agent.channels.models import InboundMessage
+from flow_agent.ops.metrics import MetricsStore
+from flow_agent.security.auth import APIKeyAuth
+from flow_agent.security.policy import SecurityPolicy
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +34,9 @@ class HTTPChannel:
     host: str
     port: int
     handler: InboundHandler
+    auth: APIKeyAuth | None = None
+    security_policy: SecurityPolicy | None = None
+    metrics: MetricsStore | None = None
     _server: HTTPServer | None = None
     _thread: threading.Thread | None = None
     _running: bool = False
@@ -68,11 +75,35 @@ class HTTPChannel:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:  # noqa: N802
+                started = perf_counter()
                 try:
                     if self.path != "/inbound":
                         self.send_response(404)
                         self.end_headers()
                         return
+                    source = self.headers.get("X-Source", "") or self.client_address[0]
+                    if parent.security_policy is not None:
+                        allowed, reason = parent.security_policy.check_channel_source(source)
+                        if not allowed:
+                            payload = {"ok": False, "error": reason}
+                            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                            self.send_response(403)
+                            self.send_header("Content-Type", "application/json; charset=utf-8")
+                            self.send_header("Content-Length", str(len(raw)))
+                            self.end_headers()
+                            self.wfile.write(raw)
+                            return
+                    if parent.auth is not None:
+                        provided = self.headers.get("X-API-Key")
+                        if not parent.auth.verify(provided):
+                            payload = {"ok": False, "error": "unauthorized"}
+                            raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+                            self.send_response(401)
+                            self.send_header("Content-Type", "application/json; charset=utf-8")
+                            self.send_header("Content-Length", str(len(raw)))
+                            self.end_headers()
+                            self.wfile.write(raw)
+                            return
                     data = _read_json(self)
                     session_id = str(data.get("session_id") or "default")
                     text = str(data.get("text") or "")
@@ -86,6 +117,8 @@ class HTTPChannel:
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
                     self.wfile.write(raw)
+                    if parent.metrics is not None:
+                        parent.metrics.inc("channel.http.request_ok")
                 except Exception as exc:
                     parent._last_error = str(exc)
                     logger.exception("http channel request failed")
@@ -96,6 +129,12 @@ class HTTPChannel:
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
                     self.wfile.write(raw)
+                    if parent.metrics is not None:
+                        parent.metrics.inc("channel.http.request_failed")
+                finally:
+                    if parent.metrics is not None:
+                        elapsed_ms = round((perf_counter() - started) * 1000)
+                        parent.metrics.inc(f"channel.http.latency_bucket_ms_{min(1000, elapsed_ms // 100 * 100)}")
 
             def log_message(self, format: str, *args) -> None:  # noqa: A002
                 return
