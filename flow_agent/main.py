@@ -1,7 +1,7 @@
 import logging
 
 from flow_agent.app.bootstrap import create_app_runtime
-from flow_agent.config.loader import load_settings
+from flow_agent.config.settings import settings
 from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
@@ -13,16 +13,16 @@ from flow_agent.proactive.dispatcher import QQProactiveDispatcher
 logger = logging.getLogger(__name__)
 
 def main() -> None:
-    settings = load_settings()
-    configure_logging(settings.logging.level)
+    cfg = settings.get()
+    configure_logging(cfg.logging.level)
     print(
         "Config summary: "
-        f"version={settings.governance.config_version}, "
-        f"profile={settings.governance.profile}, "
-        f"http_enabled={settings.channels.http_enabled}, "
-        f"dashboard_enabled={settings.channels.dashboard_enabled}, "
-        f"jobs_queue={settings.jobs.max_async_queue}, "
-        f"subagent_max={settings.subagent.max_concurrency}"
+        f"version={cfg.governance.config_version}, "
+        f"config_file={cfg.governance.external_config_path or '.env/default'}, "
+        f"http_enabled={cfg.channels.http_enabled}, "
+        f"dashboard_enabled={cfg.channels.dashboard_enabled}, "
+        f"jobs_queue={cfg.jobs.max_async_queue}, "
+        f"subagent_max={cfg.subagent.max_concurrency}"
     )
 
     try:
@@ -47,7 +47,7 @@ def main() -> None:
     print("Use '/http start|stop' to control http channel")
     print("Use '/qq start|stop|status' to control qq channel")
     print("Use '/runtime snapshot|health' to inspect unified runtime")
-    current_session = settings.session.default_session_id
+    current_session = cfg.session.default_session_id
 
     def handle_inbound(msg: InboundMessage) -> OutboundMessage:
         response = orchestrator.run_turn(msg.text, session_id=msg.session_id)
@@ -55,28 +55,28 @@ def main() -> None:
 
     cli = CLIChannel(handler=handle_inbound, default_session_id=current_session)
     http = HTTPChannel(
-        host=settings.channels.http_host,
-        port=settings.channels.http_port,
+        host=cfg.channels.http_host,
+        port=cfg.channels.http_port,
         handler=handle_inbound,
     )
     qq = QQChannel(
-        host=settings.channels.qq_host,
-        port=settings.channels.qq_port,
+        host=cfg.channels.qq_host,
+        port=cfg.channels.qq_port,
         handler=handle_inbound,
-        api_base=settings.channels.qq_api_base,
-        access_token=settings.channels.qq_access_token,
+        api_base=cfg.channels.qq_api_base,
+        access_token=cfg.channels.qq_access_token,
     )
-    if settings.proactive.qq_target_user_id.strip().isdigit():
+    if cfg.proactive.qq_target_user_id.strip().isdigit():
         proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
-            qq_user_id=int(settings.proactive.qq_target_user_id.strip()),
+            qq_user_id=int(cfg.proactive.qq_target_user_id.strip()),
             send_private_msg=qq._send_private_msg,
         )
     cli.start()
-    if settings.channels.dashboard_enabled:
+    if cfg.channels.dashboard_enabled:
         dashboard_server.start()
-    if settings.channels.http_enabled:
+    if cfg.channels.http_enabled:
         http.start()
-    if settings.channels.qq_enabled:
+    if cfg.channels.qq_enabled:
         qq.start()
 
     while True:
@@ -109,7 +109,7 @@ def main() -> None:
             if cmd == "start":
                 dashboard_server.start()
                 print(
-                    f"Agent: dashboard started on {settings.channels.dashboard_host}:{settings.channels.dashboard_port}"
+                    f"Agent: dashboard started on {cfg.channels.dashboard_host}:{cfg.channels.dashboard_port}"
                 )
             elif cmd == "stop":
                 dashboard_server.stop()
@@ -122,7 +122,7 @@ def main() -> None:
             if cmd == "start":
                 http.start()
                 print(
-                    f"Agent: http channel started on {settings.channels.http_host}:{settings.channels.http_port}"
+                    f"Agent: http channel started on {cfg.channels.http_host}:{cfg.channels.http_port}"
                 )
             elif cmd == "stop":
                 http.stop()
@@ -134,7 +134,7 @@ def main() -> None:
             cmd = user_input.removeprefix("/qq ").strip().lower()
             if cmd == "start":
                 qq.start()
-                print(f"Agent: qq channel started on {settings.channels.qq_host}:{settings.channels.qq_port}")
+                print(f"Agent: qq channel started on {cfg.channels.qq_host}:{cfg.channels.qq_port}")
             elif cmd == "stop":
                 qq.stop()
                 print("Agent: qq channel stopped")

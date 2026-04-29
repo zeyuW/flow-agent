@@ -40,15 +40,22 @@ class LLMClient(Protocol):
 
 # OpenAILLMClient 是 OpenAI 模型的客户端实现
 class OpenAILLMClient:
-    def __init__(self, settings: Settings, model_override: str | None = None) -> None:
-        if not settings.api_key:
+    def __init__(
+        self,
+        settings: Settings,
+        model_override: str | None = None,
+        api_key_override: str | None = None,
+        base_url_override: str | None = None,
+    ) -> None:
+        api_key = api_key_override or settings.api_key
+        if not api_key:
             raise ValueError("API key is required")
 
         self.model = model_override or settings.model_name
         # 创建 OpenAI 客户端
         self.client = OpenAI(
-            api_key=settings.api_key,
-            base_url=settings.base_url,
+            api_key=api_key,
+            base_url=base_url_override or settings.base_url,
         )
 
     # 生成文本
@@ -94,7 +101,7 @@ class OpenAILLMClient:
             return LLMResult(content="模型没有返回有效内容，请重试一次。")
 
         message = response.choices[0].message
-        raw_tool_calls = message.tool_calls or []
+        raw_tool_calls: list[Any] = list(message.tool_calls or [])
         parsed_tool_calls: list[LLMToolCall] = []
         for tool_call in raw_tool_calls:
             arguments_json = tool_call.function.arguments

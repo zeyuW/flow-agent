@@ -1,7 +1,8 @@
-from flow_agent.config.loader import load_settings
+from flow_agent.config.loader import clear_settings_cache, load_settings
 
 
 def test_load_settings_from_env(monkeypatch):
+    clear_settings_cache()
     monkeypatch.setenv("LLM_MODEL", "test-model")
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("LLM_BASE_URL", "https://example.com")
@@ -63,3 +64,91 @@ def test_load_settings_from_env(monkeypatch):
     assert settings.proactive.min_priority_to_send == 0.8
     assert settings.mcp.enabled is True
     assert [server.name for server in settings.mcp.servers or []] == ["ext-a", "ext-b"]
+
+
+def test_load_settings_from_external_file(monkeypatch, tmp_path):
+    clear_settings_cache()
+    config_file = tmp_path / "config.toml"
+    config_file.write_text(
+        """
+[channels]
+http_enabled = true
+http_host = "0.0.0.0"
+http_port = 9900
+
+[jobs]
+max_async_queue = 9
+
+[proactive]
+qq_target_user_id = "123456"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FLOW_AGENT_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv("FLOW_AGENT_CHANNEL_HTTP_ENABLED", "")
+    monkeypatch.setenv("FLOW_AGENT_CHANNEL_HTTP_HOST", "")
+    monkeypatch.setenv("FLOW_AGENT_CHANNEL_HTTP_PORT", "")
+    monkeypatch.setenv("FLOW_AGENT_JOBS_MAX_ASYNC_QUEUE", "")
+    monkeypatch.setenv("FLOW_AGENT_PROACTIVE_QQ_TARGET_USER_ID", "")
+
+    settings = load_settings()
+
+    assert settings.channels.http_enabled is True
+    assert settings.channels.http_host == "0.0.0.0"
+    assert settings.channels.http_port == 9900
+    assert settings.jobs.max_async_queue == 9
+    assert settings.proactive.qq_target_user_id == "123456"
+
+
+def test_load_settings_llm_routing_style_config(monkeypatch, tmp_path):
+    clear_settings_cache()
+    config_file = tmp_path / "llm.toml"
+    config_file.write_text(
+        """
+[llm]
+provider = "qwen"
+
+[llm.main]
+model = "qwen3.6-plus"
+api_key = "${QWEN_API_KEY}"
+base_url = "https://coding.dashscope.aliyuncs.com/v1"
+enable_thinking = false
+
+[llm.fast]
+model = "qwen-flash"
+api_key = "${QWEN_API_KEY}"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("FLOW_AGENT_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv("QWEN_API_KEY", "qwen-secret")
+    monkeypatch.setenv("LLM_MODEL", "")
+    monkeypatch.setenv("LLM_API_KEY", "")
+    monkeypatch.setenv("LLM_BASE_URL", "")
+    monkeypatch.setenv("FLOW_AGENT_FAST_MODEL", "")
+    monkeypatch.setenv("FLOW_AGENT_FAST_API_KEY", "")
+    monkeypatch.setenv("FLOW_AGENT_FAST_BASE_URL", "")
+
+    settings = load_settings()
+
+    assert settings.model.model == "qwen3.6-plus"
+    assert settings.model.api_key == "qwen-secret"
+    assert settings.model.base_url == "https://coding.dashscope.aliyuncs.com/v1"
+    assert settings.model.enable_thinking is False
+    assert settings.provider.fast_model == "qwen-flash"
+    assert settings.provider.fast_api_key == "qwen-secret"
+    assert settings.provider.fast_base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+def test_load_settings_cache_and_force_reload(monkeypatch):
+    clear_settings_cache()
+    monkeypatch.setenv("LLM_MODEL", "cache-a")
+    first = load_settings()
+    monkeypatch.setenv("LLM_MODEL", "cache-b")
+    second = load_settings()
+    third = load_settings(force_reload=True)
+
+    assert first is second
+    assert second.model.model == "cache-a"
+    assert third.model.model == "cache-b"

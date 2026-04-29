@@ -2,13 +2,15 @@ from dataclasses import dataclass
 from typing import Any
 from typing import Protocol
 
+from flow_agent.llm.client import LLMResult
+
 
 class _ClientLike(Protocol):
     def generate(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-    ):
+    ) -> LLMResult:
         ...
 
 
@@ -23,14 +25,14 @@ class LLMRouter:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-    ):
+    ) -> LLMResult:
         return self.main_client.generate(messages, tools=tools)
 
     def generate_fast(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-    ):
+    ) -> LLMResult:
         if self.fast_client is None:
             return self.main_client.generate(messages, tools=tools)
         try:

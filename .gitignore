@@ -19,3 +19,9 @@ build/
 view_db.sh
 
 stage.md
+
+docs/
+config/
+
+AKASHIC_AGENT_CODEBASE.md
+FLOW_AGENT_CODEBASE.md

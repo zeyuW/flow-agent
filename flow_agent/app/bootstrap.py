@@ -1,7 +1,7 @@
 from pathlib import Path
 from dataclasses import asdict
 
-from flow_agent.config.loader import load_settings
+from flow_agent.config.settings import settings
 from flow_agent.mcp.client import MCPClient
 from flow_agent.mcp.registry import MCPRegistry, MCPServerConfig
 from flow_agent.mcp.tool_adapter import MCPToolAdapter
@@ -66,73 +66,78 @@ from flow_agent.tools.registry import ToolRegistry
 # 创建总指挥
 def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
     # 加载配置
-    settings = load_settings()
-    PersistenceManager(Path(settings.storage.memory_db_path)).initialize()
+    cfg = settings.get()
+    PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
     # 创建消息存储
-    message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
+    message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
     # 创建上下文
     context = ConversationContext(store=message_store)
     # 创建记忆检索器
-    retriever = KeywordMemoryRetriever(store=message_store) if settings.retrieval.enabled else None
+    retriever = KeywordMemoryRetriever(store=message_store) if cfg.retrieval.enabled else None
     # 创建记忆整理器
     organizer = (
         SimpleMemoryOrganizer(
             store=message_store,
-            max_messages=settings.memory_policy.max_messages,
-            dedupe=settings.memory_policy.dedupe,
+            max_messages=cfg.memory_policy.max_messages,
+            dedupe=cfg.memory_policy.dedupe,
         )
-        if settings.memory_policy.enabled
+        if cfg.memory_policy.enabled
         else None
     )
     dashboard_store = dashboard or InMemoryDashboardStore()
     # 创建事件记录器
     recorder = (
-        TraceRecorder(path=Path(settings.observe.trace_path))
-        if settings.observe.enabled
+        TraceRecorder(path=Path(cfg.observe.trace_path))
+        if cfg.observe.enabled
         else None
     )
     # 创建LLM客户端
-    llm_client = OpenAILLMClient(settings)
+    llm_client = OpenAILLMClient(cfg)
     fast_client = (
-        OpenAILLMClient(settings, model_override=settings.provider.fast_model)
-        if settings.provider.fast_model
+        OpenAILLMClient(
+            cfg,
+            model_override=cfg.provider.fast_model,
+            api_key_override=cfg.provider.fast_api_key,
+            base_url_override=cfg.provider.fast_base_url,
+        )
+        if cfg.provider.fast_model
         else None
     )
     llm_router = LLMRouter(main_client=llm_client, fast_client=fast_client)
     prompt_assembler = PromptAssembler(
         PromptBudget(
-            max_chars=settings.prompt_budget.max_chars,
-            history_chars=settings.prompt_budget.history_chars,
-            memory_chars=settings.prompt_budget.memory_chars,
-            tool_trace_chars=settings.prompt_budget.tool_trace_chars,
+            max_chars=cfg.prompt_budget.max_chars,
+            history_chars=cfg.prompt_budget.history_chars,
+            memory_chars=cfg.prompt_budget.memory_chars,
+            tool_trace_chars=cfg.prompt_budget.tool_trace_chars,
         )
     )
     persona_resolver = PersonaResolver(
         PersonaProfile(
-            name=settings.persona.name,
-            tone_passive=settings.persona.passive_tone,
-            tone_proactive=settings.persona.proactive_tone,
-            default_style=settings.persona.style,
+            name=cfg.persona.name,
+            tone_passive=cfg.persona.passive_tone,
+            tone_proactive=cfg.persona.proactive_tone,
+            default_style=cfg.persona.style,
         )
     )
     # 创建工具注册表
     tool_registry = ToolRegistry()
     tool_registry.set_guard(
         ToolGuard(
-            whitelist={"read_file"} | {f"mcp:{s.name}:{t}" for s in (settings.mcp.servers or []) for t in (s.tools or [])}
-            if settings.tooling.enabled
+            whitelist={"read_file"} | {f"mcp:{s.name}:{t}" for s in (cfg.mcp.servers or []) for t in (s.tools or [])}
+            if cfg.tooling.enabled
             else None
         )
     )
-    if settings.tooling.enabled:
+    if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
     # 创建MCP注册表
-    mcp_registry = _build_mcp_registry(settings)
+    mcp_registry = _build_mcp_registry(cfg)
     # 注册MCP工具
     _register_mcp_tools(tool_registry, mcp_registry)
     # 创建智能体
     agent = Agent(
-        settings=settings,
+        settings=cfg,
         llm_client=llm_client,
         llm_router=llm_router,
         prompt_assembler=prompt_assembler,
@@ -143,57 +148,57 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
     return Orchestrator(
         agent=agent,
         tool_registry=tool_registry,
-        max_tool_steps=settings.tooling.max_tool_steps,
+        max_tool_steps=cfg.tooling.max_tool_steps,
         retriever=retriever,
-        retrieval_max_items=settings.retrieval.max_items,
+        retrieval_max_items=cfg.retrieval.max_items,
         recorder=recorder,
         organizer=organizer,
         dashboard=dashboard_store,
         delegation_policy=DelegationPolicy(
-            max_local_chars=settings.delegation_policy.max_local_chars
+            max_local_chars=cfg.delegation_policy.max_local_chars
         ),
     )
 
 # 创建主动运行时
 def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) -> ProactiveRuntime:
     # 加载配置
-    settings = load_settings()
-    PersistenceManager(Path(settings.storage.memory_db_path)).initialize()
+    cfg = settings.get()
+    PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
     # 创建消息存储
-    db_path = Path(settings.storage.memory_db_path)
+    db_path = Path(cfg.storage.memory_db_path)
     sent_store = SQLiteProactiveSentStore(db_path=db_path)
     message_store = SQLiteMessageStore(db_path)
     # 创建源
     sources = [
-        MemoryFollowUpSource(store=message_store, session_id=settings.session.default_session_id),
-        LocalTodoSource(Path(settings.proactive.todo_file)),
-        LocalFileSource(Path(settings.proactive.source_file)),
-        RSSFeedSource([Path(p) for p in settings.proactive.rss_feed_files or []]),
-        WebSnapshotSource([Path(p) for p in settings.proactive.web_snapshot_files or []]),
+        MemoryFollowUpSource(store=message_store, session_id=cfg.session.default_session_id),
+        LocalTodoSource(Path(cfg.proactive.todo_file)),
+        LocalFileSource(Path(cfg.proactive.source_file)),
+        RSSFeedSource([Path(p) for p in cfg.proactive.rss_feed_files or []]),
+        WebSnapshotSource([Path(p) for p in cfg.proactive.web_snapshot_files or []]),
     ]
     gateway = SourceGateway(sources=sources)
     # 创建事件记录器
     recorder = (
-        TraceRecorder(path=Path(settings.observe.trace_path))
-        if settings.observe.enabled
+        TraceRecorder(path=Path(cfg.observe.trace_path))
+        if cfg.observe.enabled
         else None
     )
     # 创建MCP注册表
-    mcp_registry = _build_mcp_registry(settings)
+    mcp_registry = _build_mcp_registry(cfg)
     # 创建技能加载器
-    skill_loader = SkillLoader(Path(settings.proactive.skills_dir))
+    skill_loader = SkillLoader(Path(cfg.proactive.skills_dir))
     # 创建技能注册表
     skill_registry = SkillRegistry(skill_loader.load())
     # 创建工具注册表
     local_tool_registry = ToolRegistry()
-    if settings.tooling.enabled:
+    if cfg.tooling.enabled:
         local_tool_registry.register(ReadFileTool())
     # 创建预门的作用:
     # 预门(PreGate)用于在发送主动消息前检测冷却时间，防止发送频率过高。
     # 它会检查距离上一次主动消息已过去的时间是否超过cooldown_seconds，若未超时则跳过本轮发送。
     pre_gate = PreGate(
         sent_store=sent_store,
-        cooldown_seconds=settings.proactive.cooldown_seconds,
+        cooldown_seconds=cfg.proactive.cooldown_seconds,
     )
     # 创建主动运行时
     tick_runner = ProactiveTickRunner(
@@ -201,27 +206,27 @@ def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) ->
         gateway=gateway,
         ranker=CandidateRanker(),
         decision_layer=DecisionLayer(
-            min_priority_to_send=settings.proactive.min_priority_to_send
+            min_priority_to_send=cfg.proactive.min_priority_to_send
         ),
         judge=ProactiveJudge(),
         drift_runner=DriftRunner(
-            Path(settings.proactive.tasks_file),
+            Path(cfg.proactive.tasks_file),
             skill_registry=skill_registry,
             available_tools=local_tool_registry.list_tool_names(),
             available_sources={source.name for source in sources},
             available_mcp=set(mcp_registry.mounted_servers()),
         ),
         sent_store=sent_store,
-        dedup_ttl_seconds=settings.proactive.dedup_ttl_seconds,
+        dedup_ttl_seconds=cfg.proactive.dedup_ttl_seconds,
         content_store=ContentStore(),
         recorder=recorder,
         frequency_guard=ProactiveFrequencyGuard(
-            min_interval_seconds=max(0, settings.proactive.cooldown_seconds // 2)
+            min_interval_seconds=max(0, cfg.proactive.cooldown_seconds // 2)
         ),
     )
     # 创建定时器
     scheduler = IntervalScheduler(
-        interval_seconds=settings.proactive.interval_seconds,
+        interval_seconds=cfg.proactive.interval_seconds,
         task=lambda: (tick_runner.tick(), None)[1],
     )
     # 创建主动运行时
@@ -252,14 +257,14 @@ def create_dashboard_runtime(
 def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -> BackgroundRuntime:
     """Create a minimal background runtime and register built-in jobs."""
 
-    settings = load_settings()
+    cfg = settings.get()
     registry = InMemoryJobRegistry()
     store = InMemoryJobStore()
     runtime = BackgroundRuntime(
         registry=registry,
         store=store,
         dashboard=dashboard,
-        max_async_queue=settings.jobs.max_async_queue,
+        max_async_queue=cfg.jobs.max_async_queue,
     )
 
     # stage12: register proactive tick as a managed job (sync execution).
@@ -267,14 +272,14 @@ def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -
         create_proactive_runtime().tick_runner.tick()
 
     registry.register(JobSpec(name="proactive_tick", func=proactive_tick_job, max_retries=0))
-    message_store = SQLiteMessageStore(Path(settings.storage.memory_db_path))
+    message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
     ConsolidationWorker(
         consolidator=MemoryConsolidator(
             store=message_store,
-            max_messages=settings.memory_policy.max_messages,
-            dedupe=settings.memory_policy.dedupe,
+            max_messages=cfg.memory_policy.max_messages,
+            dedupe=cfg.memory_policy.dedupe,
         ),
-        session_id=settings.session.default_session_id,
+        session_id=cfg.session.default_session_id,
     ).register(registry)
     return runtime
 
@@ -292,20 +297,20 @@ def create_app_runtime() -> tuple[
     dashboard = InMemoryDashboardStore()
     orchestrator = create_orchestrator(dashboard=dashboard)
     proactive_runtime = create_proactive_runtime(dashboard=dashboard)
-    settings = load_settings()
+    cfg = settings.get()
     runtime_service = RuntimeService(dashboard=dashboard)
     dashboard_server = create_dashboard_runtime(
         dashboard=dashboard,
         runtime_service=runtime_service,
-        host=settings.channels.dashboard_host,
-        port=settings.channels.dashboard_port,
+        host=cfg.channels.dashboard_host,
+        port=cfg.channels.dashboard_port,
     )
     background_runtime = create_background_runtime(dashboard=dashboard)
     subagent_runtime = create_subagent_runtime(
         DATA_DIR,
         dashboard=dashboard,
-        tasks_file=settings.subagent.tasks_file,
-        max_concurrency=settings.subagent.max_concurrency,
+        tasks_file=cfg.subagent.tasks_file,
+        max_concurrency=cfg.subagent.max_concurrency,
     )
     runtime_service.register(
         RuntimeUnit(
@@ -314,6 +319,26 @@ def create_app_runtime() -> tuple[
             snapshot_fn=lambda: RuntimeUnitSnapshot(name="turn", running=True, details={}),
         )
     )
+    def _proactive_snapshot() -> RuntimeUnitSnapshot:
+        status = proactive_runtime.scheduler.status()
+        return RuntimeUnitSnapshot(
+            name="proactive",
+            running=status.running,
+            details={
+                "is_executing": status.is_executing,
+                "last_started_at": (
+                    status.last_started_at.isoformat()
+                    if status.last_started_at is not None
+                    else None
+                ),
+                "last_finished_at": (
+                    status.last_finished_at.isoformat()
+                    if status.last_finished_at is not None
+                    else None
+                ),
+            },
+        )
+
     runtime_service.register(
         RuntimeUnit(
             name="proactive",
@@ -324,23 +349,7 @@ def create_app_runtime() -> tuple[
                 ok=True,
                 detail=f"running={proactive_runtime.scheduler.status().running}",
             ),
-            snapshot_fn=lambda: RuntimeUnitSnapshot(
-                name="proactive",
-                running=proactive_runtime.scheduler.status().running,
-                details={
-                    "is_executing": proactive_runtime.scheduler.status().is_executing,
-                    "last_started_at": (
-                        proactive_runtime.scheduler.status().last_started_at.isoformat()
-                        if proactive_runtime.scheduler.status().last_started_at
-                        else None
-                    ),
-                    "last_finished_at": (
-                        proactive_runtime.scheduler.status().last_finished_at.isoformat()
-                        if proactive_runtime.scheduler.status().last_finished_at
-                        else None
-                    ),
-                },
-            ),
+            snapshot_fn=_proactive_snapshot,
         )
     )
     runtime_service.register(
@@ -383,8 +392,8 @@ def create_app_runtime() -> tuple[
                 name="dashboard",
                 running=dashboard_server._server is not None,
                 details={
-                    "host": settings.channels.dashboard_host,
-                    "port": settings.channels.dashboard_port,
+                    "host": cfg.channels.dashboard_host,
+                    "port": cfg.channels.dashboard_port,
                 },
             ),
         )

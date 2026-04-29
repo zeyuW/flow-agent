@@ -7,8 +7,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from flow_agent.config.loader import load_settings
-from flow_agent.config.profiles import apply_profile
+from flow_agent.config.settings import settings
 from flow_agent.marketplace.index import MarketplaceIndex
 from flow_agent.marketplace.installer import MarketplaceInstaller
 from flow_agent.ops.audit import AuditLogger
@@ -18,7 +17,6 @@ from flow_agent.security.policy import SecurityPolicy
 from flow_agent.runtime.workspace import (
     apply_workspace_env,
     init_workspace,
-    persist_workspace_profile,
     require_workspace,
 )
 from flow_agent.skills.manager import SkillManager
@@ -31,9 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_cmd = sub.add_parser("init", help="initialize workspace")
     init_cmd.add_argument("--workspace", default=".", help="workspace directory")
 
-    run_cmd = sub.add_parser("run", help="run agent")
-    run_cmd.add_argument("mode", nargs="?", choices=["dev", "prod"], default=None)
-    run_cmd.add_argument("--profile", default=None, choices=["dev", "prod"])
+    sub.add_parser("run", help="run agent")
 
     sub.add_parser("dashboard", help="start dashboard server")
 
@@ -102,20 +98,25 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         from flow_agent.main import main as interactive_main
 
-        profile = args.profile or args.mode or os.getenv("FLOW_AGENT_PROFILE", "dev")
-        persist_workspace_profile(layout, profile)
-        apply_profile(profile)
-        audit.record("run", actor, {"profile": profile, "workspace": str(layout.root)})
+        cfg = settings.get()
+        audit.record(
+            "run",
+            actor,
+            {
+                "config_file": cfg.governance.external_config_path or ".env/default",
+                "workspace": str(layout.root),
+            },
+        )
         interactive_main()
         return 0
 
     if args.command == "dashboard":
         from flow_agent.app.bootstrap import create_app_runtime
 
-        settings = load_settings()
+        cfg = settings.get()
         _, _, server, _, _, _ = create_app_runtime()
         server.start()
-        print(f"dashboard started on {settings.channels.dashboard_host}:{settings.channels.dashboard_port}")
+        print(f"dashboard started on {cfg.channels.dashboard_host}:{cfg.channels.dashboard_port}")
         try:
             while True:
                 time.sleep(0.5)
@@ -152,9 +153,16 @@ def main(argv: list[str] | None = None) -> int:
             audit.record("runtime.restart", actor, {"targets": ["proactive", "dashboard"]})
             print("runtime restart applied for proactive/dashboard")
         elif args.runtime_action == "reload":
-            settings = load_settings()
-            audit.record("runtime.reload", actor, {"profile": settings.governance.profile})
-            print(f"runtime reload complete with profile={settings.governance.profile}")
+            cfg = settings.reload()
+            audit.record(
+                "runtime.reload",
+                actor,
+                {"config_file": cfg.governance.external_config_path or ".env/default"},
+            )
+            print(
+                "runtime reload complete with "
+                f"config_file={cfg.governance.external_config_path or '.env/default'}"
+            )
         return 0
 
     if args.command == "jobs" and args.jobs_action == "list":
@@ -166,31 +174,31 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.command == "channels" and args.channels_action == "list":
-        settings = load_settings()
+        cfg = settings.get()
         payload = {
-            "cli_enabled": settings.channels.cli_enabled,
-            "http_enabled": settings.channels.http_enabled,
-            "dashboard_enabled": settings.channels.dashboard_enabled,
-            "qq_enabled": settings.channels.qq_enabled,
-            "http_host": settings.channels.http_host,
-            "http_port": settings.channels.http_port,
-            "dashboard_host": settings.channels.dashboard_host,
-            "dashboard_port": settings.channels.dashboard_port,
-            "qq_host": settings.channels.qq_host,
-            "qq_port": settings.channels.qq_port,
-            "qq_api_base": settings.channels.qq_api_base,
+            "cli_enabled": cfg.channels.cli_enabled,
+            "http_enabled": cfg.channels.http_enabled,
+            "dashboard_enabled": cfg.channels.dashboard_enabled,
+            "qq_enabled": cfg.channels.qq_enabled,
+            "http_host": cfg.channels.http_host,
+            "http_port": cfg.channels.http_port,
+            "dashboard_host": cfg.channels.dashboard_host,
+            "dashboard_port": cfg.channels.dashboard_port,
+            "qq_host": cfg.channels.qq_host,
+            "qq_port": cfg.channels.qq_port,
+            "qq_api_base": cfg.channels.qq_api_base,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "sources" and args.sources_action == "list":
-        settings = load_settings()
+        cfg = settings.get()
         payload = {
             "memory_followup": True,
-            "local_todo": settings.proactive.todo_file,
-            "file_feed": settings.proactive.source_file,
-            "rss_feed": settings.proactive.rss_feed_files or [],
-            "web_fetch": settings.proactive.web_snapshot_files or [],
+            "local_todo": cfg.proactive.todo_file,
+            "file_feed": cfg.proactive.source_file,
+            "rss_feed": cfg.proactive.rss_feed_files or [],
+            "web_fetch": cfg.proactive.web_snapshot_files or [],
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0
