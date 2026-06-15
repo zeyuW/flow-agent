@@ -83,8 +83,19 @@ class SourceGateway:
 class CandidateRanker:
     """Sort candidates by priority and stable key."""
 
+    def __init__(self) -> None:
+        self._source_weights: dict[str, float] = {}
+
+    def mark_feedback(self, source: str, *, sent: bool) -> None:
+        prev = self._source_weights.get(source, 0.0)
+        delta = 0.08 if sent else -0.03
+        self._source_weights[source] = min(0.4, max(-0.2, prev + delta))
+
     def rank(self, candidates: list[ProactiveCandidate]) -> list[ProactiveCandidate]:
-        return sorted(candidates, key=lambda c: (-c.priority, c.key))
+        return sorted(
+            candidates,
+            key=lambda c: (-(c.priority + self._source_weights.get(c.source, 0.0)), c.key),
+        )
 
 
 @dataclass(slots=True)
@@ -130,13 +141,13 @@ class DriftRunner:
                 available_mcp=self.available_mcp,
             )
             if selected is not None:
-                return f"skill:{selected.name}"
+                return f"plan:readonly_skill:{selected.name}"
         if not self.tasks_file.exists():
             return "no_task"
         for line in self.tasks_file.read_text(encoding="utf-8").splitlines():
             task = line.strip()
             if task and not task.startswith("#"):
-                return f"selected:{task}"
+                return f"plan:readonly_task:{task}"
         return "no_task"
 
 
@@ -155,6 +166,7 @@ class ProactiveTickRunner:
     recorder: TraceRecorder | None = None
     frequency_guard: ProactiveFrequencyGuard | None = None
     dispatcher: ProactiveDispatcher | None = None
+    send_budget_per_hour: int = 3
 
     def tick(self) -> ProactiveTickResult:
         started = time.perf_counter()
@@ -167,6 +179,11 @@ class ProactiveTickRunner:
         if not gate.allowed:
             self._trace("proactive_tick_skipped", {"reason": gate.reason})
             return ProactiveTickResult(sent=False, reason=gate.reason)
+        if self.send_budget_per_hour > 0:
+            recent = self.sent_store.count_recent_sends(within_seconds=3600)
+            if recent >= self.send_budget_per_hour:
+                self._trace("proactive_tick_skipped", {"reason": "send_budget_exceeded", "recent_sends": recent})
+                return ProactiveTickResult(sent=False, reason="send_budget_exceeded")
         records = self.gateway.fetch_records()
         self._trace("proactive_source_fetch", {"count": len(records)})
         new_records = self.content_store.ingest(records) if self.content_store else records
@@ -179,6 +196,7 @@ class ProactiveTickRunner:
             return ProactiveTickResult(sent=False, reason=f"no_candidate:{drift}")
         decision = self.decision_layer.decide(candidate)
         if decision.action != "send":
+            self.ranker.mark_feedback(candidate.source, sent=False)
             self._trace(
                 "proactive_decision",
                 {"action": decision.action, "reason": decision.reason, "key": candidate.key},
@@ -191,6 +209,7 @@ class ProactiveTickRunner:
         if self.judge is not None:
             judge_decision = self.judge.decide(candidate)
             if judge_decision.action != "send":
+                self.ranker.mark_feedback(candidate.source, sent=False)
                 self._trace(
                     "proactive_judge",
                     {
@@ -226,6 +245,7 @@ class ProactiveTickRunner:
                     candidate_key=candidate.key,
                 )
         self.sent_store.mark_sent(candidate.key)
+        self.ranker.mark_feedback(candidate.source, sent=True)
         logger.info("proactive sent candidate key=%s", candidate.key)
         self._trace(
             "proactive_sent",

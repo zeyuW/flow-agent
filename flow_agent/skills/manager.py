@@ -8,6 +8,15 @@ from flow_agent.skills.manifest import SkillManifest
 
 
 @dataclass(slots=True)
+class InstallReport:
+    name: str
+    installed: bool
+    rollback_performed: bool
+    reason: str = "ok"
+    metadata: dict[str, str] | None = None
+
+
+@dataclass(slots=True)
 class SkillManager:
     skills_dir: Path
 
@@ -20,17 +29,48 @@ class SkillManager:
         return rows
 
     def install(self, source: Path) -> SkillManifest:
+        report = self.install_with_report(source)
+        if not report.installed:
+            raise ValueError(report.reason)
+        source_manifest = source / "skill.json"
+        return SkillManifest.from_file(source_manifest)
+
+    def install_with_report(self, source: Path) -> InstallReport:
         if not source.exists() or not source.is_dir():
-            raise ValueError(f"invalid skill path: {source}")
+            return InstallReport(name=source.name, installed=False, rollback_performed=False, reason=f"invalid skill path: {source}")
         source_manifest = source / "skill.json"
         if not source_manifest.exists():
-            raise ValueError("skill.json not found in skill path")
+            return InstallReport(name=source.name, installed=False, rollback_performed=False, reason="skill.json not found in skill path")
         manifest = SkillManifest.from_file(source_manifest)
         target = self.skills_dir / manifest.name
+        backup = self.skills_dir / f".{manifest.name}.bak"
+        rollback = False
         if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(source, target)
-        return manifest
+            if backup.exists():
+                shutil.rmtree(backup)
+            shutil.move(target, backup)
+        try:
+            shutil.copytree(source, target)
+            if backup.exists():
+                shutil.rmtree(backup)
+            return InstallReport(
+                name=manifest.name,
+                installed=True,
+                rollback_performed=False,
+                metadata={"version": manifest.version, "compatibility": manifest.compatibility},
+            )
+        except Exception as exc:
+            rollback = True
+            if target.exists():
+                shutil.rmtree(target)
+            if backup.exists():
+                shutil.move(backup, target)
+            return InstallReport(
+                name=manifest.name,
+                installed=False,
+                rollback_performed=rollback,
+                reason=str(exc),
+            )
 
     def uninstall(self, name: str) -> None:
         target = self.skills_dir / name

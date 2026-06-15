@@ -26,11 +26,13 @@ class SessionSettings(BaseModel):
 class ToolingSettings(BaseModel):
     enabled: bool = True
     max_tool_steps: int = 5
+    tool_selection_max: int = 8
 
 
 class RetrievalSettings(BaseModel):
     enabled: bool = True
     max_items: int = 6
+    min_score: float = 0.18
 
 
 class ObserveSettings(BaseModel):
@@ -56,6 +58,12 @@ class ProactiveSettings(BaseModel):
     web_snapshot_files: list[str] = Field(default_factory=list)
     skills_dir: str = "skills"
     min_priority_to_send: float = 0.5
+    min_effective_priority: float = 0.55
+    active_hours_start: int = 8
+    active_hours_end: int = 22
+    send_budget_per_hour: int = 3
+    energy_recover_per_tick: float = 0.1
+    max_energy: float = 1.0
     qq_target_user_id: str = ""
 
 

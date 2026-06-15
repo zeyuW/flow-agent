@@ -131,6 +131,17 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
     )
     if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
+    risk_by_tool = {"read_file": "read-only"}
+    for server in (cfg.mcp.servers or []):
+        for tool_name in (server.tools or []):
+            risk_by_tool[f"mcp:{server.name}:{tool_name}"] = "external-side-effect"
+    tool_registry.set_execution_policy(
+        ToolRegistry.ToolExecutionPolicy(
+            default_max_retries=0,
+            max_retries_by_risk={"read-only": 1, "write": 0, "external-side-effect": 0},
+            risk_by_tool=risk_by_tool,
+        )
+    )
     # 创建MCP注册表
     mcp_registry = _build_mcp_registry(cfg)
     # 注册MCP工具
@@ -157,6 +168,7 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
         delegation_policy=DelegationPolicy(
             max_local_chars=cfg.delegation_policy.max_local_chars
         ),
+        tool_selection_max=cfg.tooling.tool_selection_max,
     )
 
 # 创建主动运行时

@@ -14,3 +14,12 @@ def test_keyword_retriever_returns_relevant_messages():
     assert results
     assert any("小明" in r.content for r in results)
 
+
+def test_keyword_retriever_dedupes_same_content():
+    store = InMemoryMessageStore()
+    store.append_message("s2", "user", "今天要开会")
+    store.append_message("s2", "assistant", "今天要开会")
+    retriever = KeywordMemoryRetriever(store=store)
+    results = retriever.retrieve(session_id="s2", query="今天开会吗", max_items=5)
+    assert len(results) == 1
+

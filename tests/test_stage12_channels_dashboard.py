@@ -56,6 +56,20 @@ def test_dashboard_server_snapshot():
     server.stop()
 
 
+def test_dashboard_server_ui_page():
+    store = InMemoryDashboardStore()
+    server = DashboardServer(host="127.0.0.1", port=0, store=store)
+    server.start()
+    port = server._server.server_address[1]  # type: ignore[union-attr]
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/ui", timeout=2) as resp:
+        body = resp.read().decode("utf-8")
+        content_type = resp.headers.get("Content-Type", "")
+    assert "text/html" in content_type
+    assert "Flow Agent 功能控制台" in body
+    assert "/runtime/quality" in body
+    server.stop()
+
+
 def test_qq_channel_private_message_roundtrip():
     pushed: list[dict[str, object]] = []
 

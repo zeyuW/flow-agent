@@ -19,8 +19,37 @@ class MemoryConsolidator:
         self.organizer = SimpleMemoryOrganizer(store=store, max_messages=max_messages, dedupe=dedupe)
         self.store = store
         self.extractor = ProfileExtractor()
+        self.min_messages_to_run = 20
+        self.max_queue_pressure = 0.8
 
-    def consolidate(self, session_id: str) -> ConsolidationResult:
+    def should_consolidate(
+        self,
+        session_id: str,
+        *,
+        queue_pressure: float = 0.0,
+        force: bool = False,
+    ) -> bool:
+        if force:
+            return True
+        if queue_pressure > self.max_queue_pressure:
+            return False
+        history = self.store.list_messages(session_id)
+        return len(history) >= self.min_messages_to_run
+
+    def consolidate(
+        self,
+        session_id: str,
+        *,
+        queue_pressure: float = 0.0,
+        force: bool = False,
+    ) -> ConsolidationResult:
+        if not self.should_consolidate(session_id, queue_pressure=queue_pressure, force=force):
+            history = self.store.list_messages(session_id)
+            return ConsolidationResult(
+                before=len(history),
+                after=len(history),
+                extracted_profile_items=0,
+            )
         stats = self.organizer.organize(session_id)
         history = self.store.list_messages(session_id)
         profile = self.extractor.extract(history)

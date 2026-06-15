@@ -21,8 +21,10 @@ class EventEnvelope:
     trace_id: str | None
 
     def to_dict(self) -> dict[str, Any]:
+        category = classify_event(self.event_type)
         return {
             "type": self.event_type,
+            "category": category,
             "timestamp": self.timestamp,
             "correlation_id": self.correlation_id,
             "parent_id": self.parent_id,
@@ -35,6 +37,9 @@ class EventEnvelope:
 def to_envelope(event: dict[str, Any]) -> EventEnvelope:
     event_type = str(event.get("type") or "unknown")
     payload = {k: v for k, v in event.items() if k not in _RESERVED}
+    payload.setdefault("component", _infer_component(event_type))
+    payload.setdefault("status", "ok")
+    payload.setdefault("phase", "")
     return EventEnvelope(
         event_type=event_type,
         payload=payload,
@@ -58,6 +63,18 @@ def classify_event(event_type: str) -> str:
     if event_type.startswith("job_"):
         return "job"
     return "turn"
+
+
+def _infer_component(event_type: str) -> str:
+    if event_type.startswith("tool_"):
+        return "tool_loop"
+    if event_type.startswith("proactive_"):
+        return "proactive"
+    if event_type.startswith("subagent_"):
+        return "subagent"
+    if event_type.startswith("job_"):
+        return "job"
+    return "turn_pipeline"
 
 
 def _optional_str(value: object) -> str | None:

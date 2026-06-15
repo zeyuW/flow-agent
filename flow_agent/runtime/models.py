@@ -9,6 +9,8 @@ class RuntimeHealth:
     name: str
     ok: bool
     detail: str = ""
+    status: str = "healthy"
+    restart_policy: str = "manual"
 
 
 @dataclass(slots=True)
@@ -16,6 +18,8 @@ class RuntimeUnitSnapshot:
     name: str
     running: bool
     details: dict[str, Any] = field(default_factory=dict)
+    health: str = "unknown"
+    restart_policy: str = "manual"
 
 
 @dataclass(slots=True)

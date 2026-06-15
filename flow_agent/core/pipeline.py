@@ -47,6 +47,7 @@ class TurnPipeline:
         organizer: MemoryOrganizer | None = None,
         dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
+        tool_selection_max: int = 8,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -57,6 +58,7 @@ class TurnPipeline:
         self.organizer = organizer
         self.dashboard = dashboard
         self.delegation_policy = delegation_policy or DelegationPolicy()
+        self.tool_selection_max = max(1, tool_selection_max)
         self.context_store = ContextStore(
             agent=agent,
             retriever=retriever,
@@ -77,9 +79,9 @@ class TurnPipeline:
                 }
             )
             logger.info("turn start session=%s", state.session_id)
-            state = self.context_prepare(state)
-            state = self.reasoner_run_turn(state)
-            self.context_commit(state)
+            state = self._run_phase(state, "prepare", self.context_prepare)
+            state = self._run_phase(state, "reason", self.reasoner_run_turn)
+            self._run_phase(state, "commit", self._commit_phase)
             self._record_event(
                 {
                     "type": "turn_end",
@@ -107,6 +109,8 @@ class TurnPipeline:
                     "trace_id": state.trace_id,
                     "session_id": state.session_id,
                     "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "failure_stage": "process_turn",
                 }
             )
             logger.exception("turn error session=%s", state.session_id)
@@ -142,16 +146,16 @@ class TurnPipeline:
             persona_block=persona_block,
         )
         state.retrieval_trace = bundle.retrieval_trace
-        if bundle.retrieved:
-            self._record_event(
-                {
-                    "type": "retrieval",
-                    "trace_id": state.trace_id,
-                    "session_id": state.session_id,
-                    "items": len(bundle.retrieved),
-                    "latency_ms": round((time.perf_counter() - retrieval_started) * 1000, 2),
-                }
-            )
+        self._record_event(
+            {
+                "type": "retrieval",
+                "trace_id": state.trace_id,
+                "session_id": state.session_id,
+                "items": len(bundle.retrieved),
+                "hit": bool(bundle.retrieved),
+                "latency_ms": round((time.perf_counter() - retrieval_started) * 1000, 2),
+            }
+        )
         memory_block = self._render_memory_block(bundle.retrieved)
         retrieval_block = self._render_retrieval_block(bundle.retrieved)
         runtime_block = f"channel={state.channel}; session={state.session_id}"
@@ -162,7 +166,19 @@ class TurnPipeline:
             retrieval_block=retrieval_block,
             runtime_block=runtime_block,
         )
-        state.tools = self.tool_registry.list_openai_tools()
+        state.tools = self.tool_registry.select_openai_tools(
+            state.user_input,
+            max_tools=self.tool_selection_max,
+        )
+        self._record_event(
+            {
+                "type": "tool_selection",
+                "trace_id": state.trace_id,
+                "session_id": state.session_id,
+                "selected": len(state.tools),
+                "available": len(self.tool_registry.list_openai_tools()),
+            }
+        )
         return state
 
     # Backward-compatible alias used by existing tests/code.
@@ -264,30 +280,20 @@ class TurnPipeline:
                     )
                 else:
                     seen_calls.add(signature)
-                    try:
-                        tool_result = self.tool_registry.execute(
-                            tool_name=tool_call.name,
-                            tool_input=tool_call.arguments,
-                        )
-                        tool_message = (
-                            f"Tool `{tool_call.name}` ok={tool_result.ok}: {tool_result.content}"
-                        )
-                        state.tool_trace.append(
-                            {
-                                "step": str(step + 1),
-                                "tool": tool_call.name,
-                                "status": "ok" if tool_result.ok else "failed",
-                            }
-                        )
-                    except Exception as exc:
-                        tool_message = f"Tool `{tool_call.name}` failed with exception: {exc}"
-                        state.tool_trace.append(
-                            {
-                                "step": str(step + 1),
-                                "tool": tool_call.name,
-                                "status": "exception",
-                            }
-                        )
+                    tool_result, metadata = self.tool_registry.execute_with_policy(
+                        tool_name=tool_call.name,
+                        tool_input=tool_call.arguments,
+                    )
+                    tool_message = f"Tool `{tool_call.name}` ok={tool_result.ok}: {tool_result.content}"
+                    state.tool_trace.append(
+                        {
+                            "step": str(step + 1),
+                            "tool": tool_call.name,
+                            "status": "ok" if tool_result.ok else "failed",
+                            "risk": str(metadata.get("risk", "read-only")),
+                            "attempts": str(metadata.get("attempts", 1)),
+                        }
+                    )
 
                 self._record_event(
                     {
@@ -297,6 +303,8 @@ class TurnPipeline:
                         "step": step + 1,
                         "tool": tool_call.name,
                         "status": state.tool_trace[-1]["status"],
+                        "risk": state.tool_trace[-1].get("risk", "read-only"),
+                        "attempts": int(state.tool_trace[-1].get("attempts", "1")),
                     }
                 )
 
@@ -329,6 +337,50 @@ class TurnPipeline:
         if self.recorder is None:
             return
         self.recorder.record(event)
+
+    def _run_phase(self, state: TurnState, phase: str, fn):
+        started = time.perf_counter()
+        self._record_event(
+            {
+                "type": "turn_phase_start",
+                "phase": phase,
+                "trace_id": state.trace_id,
+                "session_id": state.session_id,
+                "status": "start",
+            }
+        )
+        try:
+            result = fn(state)
+            self._record_event(
+                {
+                    "type": "turn_phase_end",
+                    "phase": phase,
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "status": "ok",
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+            return result
+        except Exception as exc:
+            self._record_event(
+                {
+                    "type": "turn_phase_error",
+                    "phase": phase,
+                    "trace_id": state.trace_id,
+                    "session_id": state.session_id,
+                    "status": "error",
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "failure_stage": phase,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
+            raise
+
+    def _commit_phase(self, state: TurnState) -> TurnState:
+        self.context_commit(state)
+        return state
 
     def context_commit(self, state: TurnState) -> None:
         self.context_store.commit(

@@ -22,6 +22,9 @@ class ProactiveSentStore(Protocol):
     def get_last_sent_at(self) -> datetime | None:
         ...
 
+    def count_recent_sends(self, within_seconds: int) -> int:
+        ...
+
 
 class SQLiteProactiveSentStore:
     '''主动发送记录存储'''
@@ -75,3 +78,12 @@ class SQLiteProactiveSentStore:
         if row is None or row[0] is None:
             return None
         return datetime.fromisoformat(row[0])
+
+    def count_recent_sends(self, within_seconds: int) -> int:
+        boundary = (_utc_now() - timedelta(seconds=max(0, within_seconds))).isoformat()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(1) FROM proactive_sent WHERE sent_at >= ?",
+                (boundary,),
+            ).fetchone()
+        return int(row[0] if row else 0)

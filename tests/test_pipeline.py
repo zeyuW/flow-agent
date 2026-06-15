@@ -16,6 +16,7 @@ from flow_agent.core.pipeline import TurnPipeline
 from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import InMemoryMessageStore
+from flow_agent.dashboard.store import InMemoryDashboardStore
 from flow_agent.tools.base import ToolResult
 from flow_agent.tools.registry import ToolRegistry
 
@@ -62,6 +63,16 @@ class FakeTool:
         return ToolResult(ok=True, content=f"ok:{tool_input.get('query', '')}")
 
 
+class WeatherTool(FakeTool):
+    @property
+    def name(self) -> str:
+        return "weather_lookup"
+
+    @property
+    def description(self) -> str:
+        return "lookup weather forecast by city"
+
+
 def _build_settings() -> Settings:
     return Settings(
         model=ModelSettings(
@@ -100,6 +111,25 @@ def test_pipeline_process_turn():
     ]
 
 
+def test_pipeline_records_phase_events():
+    agent = Agent(
+        settings=_build_settings(),
+        llm_client=ScriptedLLMClient(),
+        context=ConversationContext(),
+    )
+    registry = ToolRegistry()
+    registry.register(FakeTool())
+    dashboard = InMemoryDashboardStore()
+    pipeline = TurnPipeline(agent=agent, tool_registry=registry, dashboard=dashboard)
+
+    pipeline.process_turn("phase check", session_id="phase")
+    events = dashboard.all_events()
+    phase_starts = [e for e in events if e.get("type") == "turn_phase_start"]
+    phase_ends = [e for e in events if e.get("type") == "turn_phase_end"]
+    assert {e.get("phase") for e in phase_starts} >= {"prepare", "reason", "commit"}
+    assert {e.get("phase") for e in phase_ends} >= {"prepare", "reason", "commit"}
+
+
 def test_pipeline_injects_memory_block():
     store = InMemoryMessageStore()
     store.append_message("s1", "user", "我叫小明")
@@ -120,3 +150,18 @@ def test_pipeline_injects_memory_block():
     system_messages = [m for m in state.messages if m.get("role") == "system"]
     assert len(system_messages) >= 2
     assert "Relevant memory" in system_messages[1]["content"]
+
+
+def test_pipeline_prefers_relevant_tools():
+    agent = Agent(
+        settings=_build_settings(),
+        llm_client=ScriptedLLMClient(),
+        context=ConversationContext(),
+    )
+    registry = ToolRegistry()
+    registry.register(WeatherTool())
+    registry.register(FakeTool())
+    pipeline = TurnPipeline(agent=agent, tool_registry=registry, tool_selection_max=1)
+    state = pipeline.build_prompt(pipeline.prepare_context(user_input="查询天气", session_id="s2"))
+    assert len(state.tools) == 1
+    assert state.tools[0]["function"]["name"] == "weather_lookup"

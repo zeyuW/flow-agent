@@ -21,6 +21,7 @@ class Orchestrator:
         organizer: MemoryOrganizer | None = None,
         dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
+        tool_selection_max: int = 8,
     ) -> None:
         self.pipeline = TurnPipeline(
             agent=agent,
@@ -32,6 +33,7 @@ class Orchestrator:
             organizer=organizer,
             dashboard=dashboard,
             delegation_policy=delegation_policy,
+            tool_selection_max=tool_selection_max,
         )
 
     def run_turn(self, user_input: str, session_id: str = "default") -> AgentResponse:

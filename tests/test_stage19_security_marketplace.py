@@ -17,6 +17,19 @@ def test_security_policy_blocks_user_runtime_start():
     assert "forbidden" in reason
 
 
+def test_security_policy_evaluate_with_channel_and_tool_risk():
+    policy = SecurityPolicy(channel_allowlist={"cli"})
+    allowed, reason = policy.evaluate(
+        role="admin",
+        action="runtime.health",
+        source="cli",
+        tool_name="webhook_send",
+        tool_risk="external-side-effect",
+    )
+    assert allowed is False
+    assert reason == "high_risk_tool_blocked"
+
+
 def test_marketplace_rebuild_collects_skill_plugin(tmp_path: Path):
     layout = init_workspace(tmp_path)
     skill_src = tmp_path / "src_skill"

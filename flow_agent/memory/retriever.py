@@ -17,6 +17,8 @@ class KeywordMemoryRetriever:
         self.store = store
         self.rewriter = QueryRewriter()
         self.builder = RetrievalQueryBuilder()
+        self.role_weight = {"user": 1.0, "assistant": 0.85}
+        self.min_confidence = 0.18
     # 检索关键词相关的记忆
     def retrieve(self, session_id: str, query: str, max_items: int) -> list[RetrievedMemory]:
         if max_items <= 0:
@@ -24,21 +26,31 @@ class KeywordMemoryRetriever:
 
         rewrite = self.rewriter.rewrite(query)
         plan = self.builder.build(rewrite, max_items=max_items)
-        query_tokens = _tokenize(plan.query)
+        if not plan.query:
+            plan = self.builder.build(query, max_items=max_items)
+        query_tokens = _tokenize(plan.query) | _tokenize(query)
         if not query_tokens:
             return []
 
         memories: list[RetrievedMemory] = []
-        for msg in self.store.list_messages(session_id):
+        all_messages = self.store.list_messages(session_id)
+        total_messages = len(all_messages)
+        for idx, msg in enumerate(all_messages):
             content = msg.get("content", "")
             role = msg.get("role", "")
-            score = _keyword_overlap_score(query_tokens, _tokenize(content))
+            overlap = _keyword_overlap_score(query_tokens, _tokenize(content))
+            recency = _recency_score(index=idx, total=total_messages)
+            role_boost = self.role_weight.get(role, 0.7)
+            score = (0.7 * overlap + 0.3 * recency) * role_boost
             if score <= 0:
                 continue
             memories.append(RetrievedMemory(role=role, content=content, score=score))
 
         memories.sort(key=lambda m: m.score, reverse=True)
-        return memories[: plan.max_items]
+        top = _dedupe_by_content(memories)[: plan.max_items]
+        if top and top[0].score < self.min_confidence:
+            return []
+        return top
 
 # 正则表达：提取中文、英文、数字
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
@@ -68,4 +80,22 @@ def _keyword_overlap_score(query_tokens: set[str], doc_tokens: set[str]) -> floa
         return 0.0
     overlap = query_tokens & doc_tokens
     return float(len(overlap)) / float(len(query_tokens))
+
+
+def _recency_score(index: int, total: int) -> float:
+    if total <= 1:
+        return 1.0
+    return float(index + 1) / float(total)
+
+
+def _dedupe_by_content(memories: list[RetrievedMemory]) -> list[RetrievedMemory]:
+    deduped: list[RetrievedMemory] = []
+    seen: set[str] = set()
+    for item in memories:
+        key = " ".join(item.content.split()).strip().lower()[:120]
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
 

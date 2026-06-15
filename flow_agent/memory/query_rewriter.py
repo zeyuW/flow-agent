@@ -29,5 +29,9 @@ class QueryRewriter:
         tokens = self._token_re.findall(text)
         rewritten = " ".join(tokens[:12])
         intent = hints[0] if hints else "general"
+        if len(tokens) <= 1 and len(text) > 6:
+            # Tokenization can occasionally fail on punctuation-heavy prompts.
+            rewritten = text
+            hints.append("fallback_raw_query")
         return QueryRewriteResult(rewritten_query=rewritten, intent=intent, hints=hints)
 
