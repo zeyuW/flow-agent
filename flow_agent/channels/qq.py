@@ -7,8 +7,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 
-from flow_agent.channels.base import ChannelStatus, InboundHandler
-from flow_agent.channels.models import InboundMessage
+from flow_agent.channels.base import ChannelStatus, MessageBusChannel
+from flow_agent.channels.models import InboundMessage, OutboundMessage
+from flow_agent.messaging.message_bus import MessageBus
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,6 @@ def _read_body(handler: BaseHTTPRequestHandler) -> bytes:
 
 def _read_chunked(handler: BaseHTTPRequestHandler) -> bytes:
     body = bytearray()
-    # Minimal chunked decoder for HTTP/1.1 requests.
     while True:
         line = handler.rfile.readline()
         if not line:
@@ -42,39 +42,25 @@ def _read_chunked(handler: BaseHTTPRequestHandler) -> bytes:
         except ValueError:
             break
         if size <= 0:
-            # consume trailer CRLF
             handler.rfile.readline()
             break
         chunk = handler.rfile.read(size)
         body.extend(chunk)
-        # consume CRLF after chunk
         handler.rfile.read(2)
     return bytes(body)
 
 
-@dataclass(slots=True)
-class QQChannel:
-    """
-    OneBot-compatible QQ private message channel.
+@dataclass
+class QQChannel(MessageBusChannel):
+    """QQ 渠道：基于 MessageBus 的 OneBot 兼容渠道。
 
-    Inbound:
-    - POST /onebot/event
-      body example:
-      {
-        "post_type":"message",
-        "message_type":"private",
-        "user_id":12345,
-        "raw_message":"hello"
-      }
-
-    Outbound:
-    - POST {api_base}/send_private_msg
-      body: {"user_id": 12345, "message": "..."}
+    入站：接收 OneBot HTTP POST → 封装 InboundMessage → publish_inbound
+    出站：通过 subscribe_outbound 订阅 → on_outbound → POST send_private_msg
     """
 
     host: str
     port: int
-    handler: InboundHandler
+    message_bus: MessageBus
     api_base: str
     access_token: str = ""
     _server: HTTPServer | None = None
@@ -90,15 +76,18 @@ class QQChannel:
         if self._running:
             return
         self._last_error = None
+        # 订阅出站消息
+        self.message_bus.subscribe_outbound(self)
         self._server = HTTPServer((self.host, self.port), self._make_handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self._running = True
-        logger.info("qq channel webhook started on %s:%s", self.host, self.port)
+        logger.info("qq channel webhook started on %s:%s (message bus connected)", self.host, self.port)
 
     def stop(self) -> None:
         if not self._running:
             return
+        self.message_bus.outbound.unsubscribe(self)
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -110,11 +99,25 @@ class QQChannel:
     def status(self) -> ChannelStatus:
         return ChannelStatus(running=self._running, last_error=self._last_error)
 
+    def on_outbound(self, message: OutboundMessage) -> None:
+        """接收出站回复并通过 QQ API 发送。
+
+        由 MessageBus 在 dispatch_outbound 时自动调用。
+        """
+        qq_user_id = int(message.metadata.get("qq_user_id", 0))
+        if qq_user_id <= 0:
+            logger.warning("qq outbound: no qq_user_id in metadata, skipping")
+            return
+        try:
+            self._send_private_msg(user_id=qq_user_id, message=message.text)
+        except Exception:
+            logger.exception("qq outbound send failed")
+
     def _make_handler(self) -> Callable[..., BaseHTTPRequestHandler]:
         parent = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802
+            def do_POST(self) -> None:
                 try:
                     if self.path != "/onebot/event":
                         self.send_response(404)
@@ -134,11 +137,9 @@ class QQChannel:
                         return
                     inbound = InboundMessage(parent.name, f"qq_{user_id}", text)
                     inbound.metadata["qq_user_id"] = user_id
-                    out = parent.handler(inbound)
-                    reply = out.text if out is not None else ""
-                    if reply:
-                        parent._send_private_msg(user_id=user_id, message=reply)
-                    _ok(self, {"ok": True, "reply_sent": bool(reply)})
+                    # 通过 MessageBus 发布入站消息
+                    parent.message_bus.publish_inbound(inbound)
+                    _ok(self, {"ok": True, "queued": True})
                 except Exception as exc:
                     parent._last_error = str(exc)
                     logger.exception("qq channel request failed")
@@ -149,7 +150,7 @@ class QQChannel:
                     self.end_headers()
                     self.wfile.write(raw)
 
-            def log_message(self, format: str, *args) -> None:  # noqa: A002
+            def log_message(self, format: str, *args) -> None:
                 return
 
         return Handler

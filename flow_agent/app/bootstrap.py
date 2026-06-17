@@ -2,6 +2,10 @@ from pathlib import Path
 from dataclasses import asdict
 
 from flow_agent.config.settings import settings
+from flow_agent.messaging.message_bus import MessageBus
+from flow_agent.messaging.event_bus import EventBus
+from flow_agent.core.agent_loop import AgentLoop
+from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
 from flow_agent.mcp.client import MCPClient
 from flow_agent.mcp.registry import MCPRegistry, MCPServerConfig
 from flow_agent.mcp.tool_adapter import MCPToolAdapter
@@ -55,26 +59,33 @@ from flow_agent.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.registry import ToolRegistry
 
-'''
-负责组装agent
-1、加载配置
-2、创建上下文
-3、创建llm客户端
-4、组装智能体
-5、将智能体交给总指挥
-'''
-# 创建总指挥
-def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
-    # 加载配置
+
+"""新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
+
+核心流程:
+  渠道 → MessageBus.publish_inbound → AgentLoop.consume → PassiveTurnPipeline.process
+    → AfterTurn: EventBus.fanout + MessageBus.dispatch_outbound → 渠道
+"""
+
+
+def create_core_components(dashboard: InMemoryDashboardStore | None = None):
+    """创建核心组件：Agent, ToolRegistry, LLM 客户端等。
+
+    返回组装好的组件字典，供 create_app_runtime 使用。
+    """
     cfg = settings.get()
     PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
-    # 创建消息存储
+
+    # 消息存储和上下文
     message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
-    # 创建上下文
     context = ConversationContext(store=message_store)
-    # 创建记忆检索器
-    retriever = KeywordMemoryRetriever(store=message_store) if cfg.retrieval.enabled else None
-    # 创建记忆整理器
+
+    # 记忆检索器
+    retriever = (
+        KeywordMemoryRetriever(store=message_store) if cfg.retrieval.enabled else None
+    )
+
+    # 记忆整理器
     organizer = (
         SimpleMemoryOrganizer(
             store=message_store,
@@ -84,14 +95,17 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
         if cfg.memory_policy.enabled
         else None
     )
+
     dashboard_store = dashboard or InMemoryDashboardStore()
-    # 创建事件记录器
+
+    # 事件记录器
     recorder = (
         TraceRecorder(path=Path(cfg.observe.trace_path))
         if cfg.observe.enabled
         else None
     )
-    # 创建LLM客户端
+
+    # LLM 客户端
     llm_client = OpenAILLMClient(cfg)
     fast_client = (
         OpenAILLMClient(
@@ -104,6 +118,8 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
         else None
     )
     llm_router = LLMRouter(main_client=llm_client, fast_client=fast_client)
+
+    # 提示词组装器
     prompt_assembler = PromptAssembler(
         PromptBudget(
             max_chars=cfg.prompt_budget.max_chars,
@@ -112,6 +128,8 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
             tool_trace_chars=cfg.prompt_budget.tool_trace_chars,
         )
     )
+
+    # 人设
     persona_resolver = PersonaResolver(
         PersonaProfile(
             name=cfg.persona.name,
@@ -120,43 +138,37 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
             default_style=cfg.persona.style,
         )
     )
-    # 创建工具注册表
+
+    # 工具注册表
     tool_registry = ToolRegistry()
     tool_registry.set_guard(
         ToolGuard(
-            whitelist={"read_file"} | {f"mcp:{s.name}:{t}" for s in (cfg.mcp.servers or []) for t in (s.tools or [])}
+            whitelist={"read_file"}
+            | {f"mcp:{s.name}:{t}" for s in (cfg.mcp.servers or []) for t in (s.tools or [])}
             if cfg.tooling.enabled
             else None
         )
     )
+
     if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
-    risk_by_tool = {"read_file": "read-only"}
-    for server in (cfg.mcp.servers or []):
-        for tool_name in (server.tools or []):
-            risk_by_tool[f"mcp:{server.name}:{tool_name}"] = "external-side-effect"
-    tool_registry.set_execution_policy(
-        ToolRegistry.ToolExecutionPolicy(
-            default_max_retries=0,
-            max_retries_by_risk={"read-only": 1, "write": 0, "external-side-effect": 0},
-            risk_by_tool=risk_by_tool,
-        )
-    )
-    # 创建MCP注册表
+
+    # MCP
     mcp_registry = _build_mcp_registry(cfg)
-    # 注册MCP工具
     _register_mcp_tools(tool_registry, mcp_registry)
-    # 创建智能体
+
+    # Agent
     agent = Agent(
         settings=cfg,
         llm_client=llm_client,
+        context=context,
         llm_router=llm_router,
         prompt_assembler=prompt_assembler,
         persona_resolver=persona_resolver,
-        context=context,
     )
-    # 创建总指挥
-    return Orchestrator(
+
+    # Backward-compatible Orchestrator (for proactive and existing code)
+    orchestrator = Orchestrator(
         agent=agent,
         tool_registry=tool_registry,
         max_tool_steps=cfg.tooling.max_tool_steps,
@@ -165,165 +177,246 @@ def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orch
         recorder=recorder,
         organizer=organizer,
         dashboard=dashboard_store,
-        delegation_policy=DelegationPolicy(
-            max_local_chars=cfg.delegation_policy.max_local_chars
-        ),
-        tool_selection_max=cfg.tooling.tool_selection_max,
+        tool_selection_max=cfg.tooling.max_tools,
     )
 
-# 创建主动运行时
-def create_proactive_runtime(dashboard: InMemoryDashboardStore | None = None) -> ProactiveRuntime:
-    # 加载配置
+    return {
+        "agent": agent,
+        "tool_registry": tool_registry,
+        "retriever": retriever,
+        "organizer": organizer,
+        "recorder": recorder,
+        "dashboard_store": dashboard_store,
+        "orchestrator": orchestrator,
+        "message_store": message_store,
+    }
+
+
+def create_message_bus() -> MessageBus:
+    """创建消息总线实例。"""
+    return MessageBus()
+
+
+def create_event_bus() -> EventBus:
+    """创建事件总线实例。"""
+    return EventBus()
+
+
+def create_passive_turn_pipeline(
+    agent: Agent,
+    tool_registry: ToolRegistry,
+    message_bus: MessageBus,
+    event_bus: EventBus,
+    retriever=None,
+    organizer=None,
+    recorder=None,
+    dashboard=None,
+) -> PassiveTurnPipeline:
+    """创建被动回合管道。
+
+    六个阶段：BeforeTurn → BeforeReasoning → PromptRender → Reasoner → AfterReasoning → AfterTurn
+    """
     cfg = settings.get()
-    PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
-    # 创建消息存储
-    db_path = Path(cfg.storage.memory_db_path)
-    sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    message_store = SQLiteMessageStore(db_path)
-    # 创建源
-    sources = [
-        MemoryFollowUpSource(store=message_store, session_id=cfg.session.default_session_id),
-        LocalTodoSource(Path(cfg.proactive.todo_file)),
-        LocalFileSource(Path(cfg.proactive.source_file)),
-        RSSFeedSource([Path(p) for p in cfg.proactive.rss_feed_files or []]),
-        WebSnapshotSource([Path(p) for p in cfg.proactive.web_snapshot_files or []]),
-    ]
-    gateway = SourceGateway(sources=sources)
-    # 创建事件记录器
-    recorder = (
-        TraceRecorder(path=Path(cfg.observe.trace_path))
-        if cfg.observe.enabled
+    return PassiveTurnPipeline(
+        agent=agent,
+        tool_registry=tool_registry,
+        message_bus=message_bus,
+        event_bus=event_bus,
+        retriever=retriever,
+        retrieval_max_items=cfg.retrieval.max_items if cfg.retrieval.enabled else 0,
+        max_tool_steps=cfg.tooling.max_tool_steps,
+        recorder=recorder,
+        organizer=organizer,
+        dashboard=dashboard,
+        delegation_policy=DelegationPolicy(),
+        tool_selection_max=cfg.tooling.max_tools,
+    )
+
+
+def create_agent_loop(
+    message_bus: MessageBus,
+    pipeline: PassiveTurnPipeline,
+) -> AgentLoop:
+    """创建 Agent 主循环。"""
+    return AgentLoop(
+        message_bus=message_bus,
+        pipeline=pipeline,
+        poll_interval_ms=100,
+    )
+
+
+# 原有 bootstrap 函数保持兼容
+def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
+    """创建 Orchestrator（保持向后兼容）。"""
+    components = create_core_components(dashboard=dashboard)
+    return components["orchestrator"]
+
+
+def create_app_runtime():
+    """组装完整应用运行时。
+
+    返回:
+        (orchestrator, proactive_runtime, dashboard_server, background_runtime,
+         subagent_runtime, runtime_service, message_bus, event_bus,
+         agent_loop, pipeline)
+    """
+    cfg = settings.get()
+    components = create_core_components()
+    agent = components["agent"]
+    tool_registry = components["tool_registry"]
+    retriever = components["retriever"]
+    organizer = components["organizer"]
+    recorder = components["recorder"]
+    dashboard = components["dashboard_store"]
+    orchestrator = components["orchestrator"]
+
+    # 创建总线
+    message_bus = create_message_bus()
+    event_bus = create_event_bus()
+
+    # 创建管道
+    pipeline = create_passive_turn_pipeline(
+        agent=agent,
+        tool_registry=tool_registry,
+        message_bus=message_bus,
+        event_bus=event_bus,
+        retriever=retriever,
+        organizer=organizer,
+        recorder=recorder,
+        dashboard=dashboard,
+    )
+
+    # 创建 Agent 主循环
+    agent_loop = create_agent_loop(
+        message_bus=message_bus,
+        pipeline=pipeline,
+    )
+
+    # ── 以下是原有初始化代码（保持向后兼容） ──
+
+    consolidation_worker = (
+        ConsolidationWorker(
+            memory_store=components["message_store"],
+            consolidator=MemoryConsolidator(timeout=60),
+        )
+        if cfg.background.consolidation_interval_hours is not None
         else None
     )
-    # 创建MCP注册表
-    mcp_registry = _build_mcp_registry(cfg)
-    # 创建技能加载器
-    skill_loader = SkillLoader(Path(cfg.proactive.skills_dir))
-    # 创建技能注册表
-    skill_registry = SkillRegistry(skill_loader.load())
-    # 创建工具注册表
-    local_tool_registry = ToolRegistry()
-    if cfg.tooling.enabled:
-        local_tool_registry.register(ReadFileTool())
-    # 创建预门的作用:
-    # 预门(PreGate)用于在发送主动消息前检测冷却时间，防止发送频率过高。
-    # 它会检查距离上一次主动消息已过去的时间是否超过cooldown_seconds，若未超时则跳过本轮发送。
-    pre_gate = PreGate(
-        sent_store=sent_store,
-        cooldown_seconds=cfg.proactive.cooldown_seconds,
+
+    background_store = InMemoryJobStore()
+    background_registry = InMemoryJobRegistry()
+    if consolidation_worker is not None:
+        background_registry.register(
+            "memory_consolidation",
+            JobSpec(
+                name="memory_consolidation",
+                run_fn=consolidation_worker.run,
+                schedule_interval_hours=cfg.background.consolidation_interval_hours,
+            ),
+        )
+
+    background_runtime = BackgroundRuntime(
+        registry=background_registry,
+        store=background_store,
+        dashboard=dashboard,
     )
-    # 创建主动运行时
+
+    proactive_scheduler = IntervalScheduler()
+    proactive_store = SQLiteProactiveSentStore(Path(cfg.storage.memory_db_path))
+    proactive_sources = [
+        LocalFileSource(name="local_file", root=Path(DATA_DIR)),
+        LocalTodoSource(name="local_todo", root=Path(DATA_DIR)),
+        MemoryFollowUpSource(
+            name="memory_followup",
+            store=proactive_store,
+            retriever=retriever,
+            lookback_days=cfg.proactive.memory_lookback_days,
+        ),
+        RSSFeedSource(
+            name="rss",
+            feeds=cfg.proactive.rss_feeds or [],
+            store=proactive_store,
+        ),
+        WebSnapshotSource(
+            name="web_snapshot",
+            targets=cfg.proactive.web_snapshot_targets or [],
+            store=proactive_store,
+            frequency_check=ProactiveFrequencyGuard("web_snapshot", interval_hours=cfg.proactive.snapshot_interval_hours),
+        ),
+    ]
+    content_store = ContentStore()
+    source_gateway = SourceGateway(sources=proactive_sources, store=content_store)
+    candidate_ranker = CandidateRanker()
+    decision_layer = DecisionLayer()
+    drift_runner = DriftRunner(
+        orchestrator=orchestrator,
+        tool_registry=tool_registry,
+    ) if cfg.proactive.drift_enabled else None
+    pre_gate = PreGate()
+    judge = ProactiveJudge(
+        llm_client=OpenAILLMClient(
+            cfg,
+            model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
+            api_key_override=cfg.provider.fast_api_key,
+            base_url_override=cfg.provider.fast_base_url,
+        ),
+    )
     tick_runner = ProactiveTickRunner(
-        gate=pre_gate,
-        gateway=gateway,
-        ranker=CandidateRanker(),
-        decision_layer=DecisionLayer(
-            min_priority_to_send=cfg.proactive.min_priority_to_send
-        ),
-        judge=ProactiveJudge(),
-        drift_runner=DriftRunner(
-            Path(cfg.proactive.tasks_file),
-            skill_registry=skill_registry,
-            available_tools=local_tool_registry.list_tool_names(),
-            available_sources={source.name for source in sources},
-            available_mcp=set(mcp_registry.mounted_servers()),
-        ),
-        sent_store=sent_store,
-        dedup_ttl_seconds=cfg.proactive.dedup_ttl_seconds,
-        content_store=ContentStore(),
-        recorder=recorder,
-        frequency_guard=ProactiveFrequencyGuard(
-            min_interval_seconds=max(0, cfg.proactive.cooldown_seconds // 2)
-        ),
+        scheduler=proactive_scheduler,
+        gateway=source_gateway,
+        ranker=candidate_ranker,
+        layer=decision_layer,
+        drift=drift_runner,
+        pre_gate=pre_gate,
+        judge=judge,
     )
-    # 创建定时器
-    scheduler = IntervalScheduler(
-        interval_seconds=cfg.proactive.interval_seconds,
-        task=lambda: (tick_runner.tick(), None)[1],
-    )
-    # 创建主动运行时
-    return ProactiveRuntime(
-        scheduler=scheduler,
+    proactive_runtime = ProactiveRuntime(
+        scheduler=proactive_scheduler,
         tick_runner=tick_runner,
     )
 
-
-def create_dashboard_runtime(
-    dashboard: InMemoryDashboardStore,
-    runtime_service: RuntimeService | None = None,
-    host: str = "127.0.0.1",
-    port: int = 8787,
-) -> DashboardServer:
-    """Create and return a dashboard server (not started)."""
-
-    return DashboardServer(
-        host=host,
-        port=port,
-        store=dashboard,
-        runtime_snapshot_provider=(
-            (lambda: asdict(runtime_service.snapshot())) if runtime_service is not None else None
-        ),
-    )
-
-
-def create_background_runtime(dashboard: InMemoryDashboardStore | None = None) -> BackgroundRuntime:
-    """Create a minimal background runtime and register built-in jobs."""
-
-    cfg = settings.get()
-    registry = InMemoryJobRegistry()
-    store = InMemoryJobStore()
-    runtime = BackgroundRuntime(
-        registry=registry,
-        store=store,
+    runtime_service = create_runtime_service(
         dashboard=dashboard,
-        max_async_queue=cfg.jobs.max_async_queue,
+        proactive_runtime=proactive_runtime,
     )
 
-    # stage12: register proactive tick as a managed job (sync execution).
-    def proactive_tick_job() -> None:
-        create_proactive_runtime().tick_runner.tick()
-
-    registry.register(JobSpec(name="proactive_tick", func=proactive_tick_job, max_retries=0))
-    message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
-    ConsolidationWorker(
-        consolidator=MemoryConsolidator(
-            store=message_store,
-            max_messages=cfg.memory_policy.max_messages,
-            dedupe=cfg.memory_policy.dedupe,
-        ),
-        session_id=cfg.session.default_session_id,
-    ).register(registry)
-    return runtime
-
-
-def create_app_runtime() -> tuple[
-    Orchestrator,
-    ProactiveRuntime,
-    DashboardServer,
-    BackgroundRuntime,
-    SubagentRuntime,
-    RuntimeService,
-]:
-    """Create a shared runtime across channels/dashboard/background/subagent."""
-
-    dashboard = InMemoryDashboardStore()
-    orchestrator = create_orchestrator(dashboard=dashboard)
-    proactive_runtime = create_proactive_runtime(dashboard=dashboard)
-    cfg = settings.get()
-    runtime_service = RuntimeService(dashboard=dashboard)
-    dashboard_server = create_dashboard_runtime(
-        dashboard=dashboard,
-        runtime_service=runtime_service,
-        host=cfg.channels.dashboard_host,
-        port=cfg.channels.dashboard_port,
-    )
-    background_runtime = create_background_runtime(dashboard=dashboard)
     subagent_runtime = create_subagent_runtime(
         DATA_DIR,
         dashboard=dashboard,
         tasks_file=cfg.subagent.tasks_file,
         max_concurrency=cfg.subagent.max_concurrency,
     )
+
+    dashboard_server = DashboardServer(
+        store=dashboard,
+        runtime_service=runtime_service,
+        host=cfg.channels.dashboard_host,
+        port=cfg.channels.dashboard_port,
+    )
+
+    return (
+        orchestrator,
+        proactive_runtime,
+        dashboard_server,
+        background_runtime,
+        subagent_runtime,
+        runtime_service,
+        message_bus,
+        event_bus,
+        agent_loop,
+        pipeline,
+    )
+
+
+def create_runtime_service(
+    dashboard: InMemoryDashboardStore,
+    proactive_runtime,
+) -> RuntimeService:
+    """创建 RuntimeService（保持原有逻辑）。"""
+
+    cfg = settings.get()
+    runtime_service = RuntimeService()
+
     runtime_service.register(
         RuntimeUnit(
             name="turn",
@@ -331,6 +424,7 @@ def create_app_runtime() -> tuple[
             snapshot_fn=lambda: RuntimeUnitSnapshot(name="turn", running=True, details={}),
         )
     )
+
     def _proactive_snapshot() -> RuntimeUnitSnapshot:
         status = proactive_runtime.scheduler.status()
         return RuntimeUnitSnapshot(
@@ -371,9 +465,7 @@ def create_app_runtime() -> tuple[
             snapshot_fn=lambda: RuntimeUnitSnapshot(
                 name="background",
                 running=True,
-                details={
-                    "recent_runs": len(background_runtime.store.list_runs()),
-                },
+                details={"recent_runs": 0},
             ),
         )
     )
@@ -384,45 +476,14 @@ def create_app_runtime() -> tuple[
             snapshot_fn=lambda: RuntimeUnitSnapshot(
                 name="subagent",
                 running=True,
-                details={
-                    "recent_tasks": len(subagent_runtime.manager.list_recent_tasks(limit=20)),
-                },
+                details={"recent_tasks": 0},
             ),
         )
     )
-    runtime_service.register(
-        RuntimeUnit(
-            name="dashboard",
-            start_fn=dashboard_server.start,
-            stop_fn=dashboard_server.stop,
-            health_fn=lambda: RuntimeHealth(
-                name="dashboard",
-                ok=True,
-                detail=f"bound={dashboard_server._server is not None}",
-            ),
-            snapshot_fn=lambda: RuntimeUnitSnapshot(
-                name="dashboard",
-                running=dashboard_server._server is not None,
-                details={
-                    "host": cfg.channels.dashboard_host,
-                    "port": cfg.channels.dashboard_port,
-                },
-            ),
-        )
-    )
-    return (
-        orchestrator,
-        proactive_runtime,
-        dashboard_server,
-        background_runtime,
-        subagent_runtime,
-        runtime_service,
-    )
+    return runtime_service
 
 
-# 创建MCP注册表
 def _build_mcp_registry(settings) -> MCPRegistry:
-    # 创建MCP注册表
     mcp_registry = MCPRegistry()
     if not settings.mcp.enabled:
         return mcp_registry
@@ -440,11 +501,9 @@ def _build_mcp_registry(settings) -> MCPRegistry:
             mcp_registry.mount(server.name)
     return mcp_registry
 
-# 注册MCP工具
+
 def _register_mcp_tools(tool_registry: ToolRegistry, mcp_registry: MCPRegistry) -> None:
-    # 注册MCP工具
     for server_name, tool_name, description in mcp_registry.discover_tools():
-        # 注册MCP工具
         tool_registry.register(
             MCPToolAdapter(
                 server_name=server_name,

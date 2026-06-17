@@ -6,8 +6,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from time import perf_counter
 from typing import Callable
 
-from flow_agent.channels.base import ChannelStatus, InboundHandler
-from flow_agent.channels.models import InboundMessage
+from flow_agent.channels.base import ChannelStatus, MessageBusChannel
+from flow_agent.channels.models import InboundMessage, OutboundMessage
+from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.ops.metrics import MetricsStore
 from flow_agent.security.auth import APIKeyAuth
 from flow_agent.security.policy import SecurityPolicy
@@ -22,18 +23,18 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
     return json.loads(raw.decode("utf-8"))
 
 
-@dataclass(slots=True)
-class HTTPChannel:
-    """HTTP webhook channel.
+@dataclass
+class HTTPChannel(MessageBusChannel):
+    """HTTP webhook 渠道：基于 MessageBus。
 
     Endpoints:
     - POST /inbound  body: {"session_id": "...", "text": "..."}
-      response: {"ok": true, "reply": "..."}.
+      response: {"ok": true, "queued": true}
     """
 
     host: str
     port: int
-    handler: InboundHandler
+    message_bus: MessageBus
     auth: APIKeyAuth | None = None
     security_policy: SecurityPolicy | None = None
     metrics: MetricsStore | None = None
@@ -50,15 +51,17 @@ class HTTPChannel:
         if self._running:
             return
         self._last_error = None
+        self.message_bus.subscribe_outbound(self)
         self._server = HTTPServer((self.host, self.port), self._make_handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self._running = True
-        logger.info("http channel started on %s:%s", self.host, self.port)
+        logger.info("http channel started on %s:%s (message bus connected)", self.host, self.port)
 
     def stop(self) -> None:
         if not self._running:
             return
+        self.message_bus.outbound.unsubscribe(self)
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -70,11 +73,19 @@ class HTTPChannel:
     def status(self) -> ChannelStatus:
         return ChannelStatus(running=self._running, last_error=self._last_error)
 
+    def on_outbound(self, message: OutboundMessage) -> None:
+        """HTTP 渠道的出站目前通过 HTTP 响应直接返回。
+
+        对于同步 HTTP 请求，回复在请求处理中直接返回；
+        on_outbound 保留用于将来的异步推送场景。
+        """
+        logger.debug("http outbound: %s", message.text[:100])
+
     def _make_handler(self) -> Callable[..., BaseHTTPRequestHandler]:
         parent = self
 
         class Handler(BaseHTTPRequestHandler):
-            def do_POST(self) -> None:  # noqa: N802
+            def do_POST(self) -> None:
                 started = perf_counter()
                 try:
                     if self.path != "/inbound":
@@ -108,9 +119,8 @@ class HTTPChannel:
                     session_id = str(data.get("session_id") or "default")
                     text = str(data.get("text") or "")
                     inbound = InboundMessage(channel=parent.name, session_id=session_id, text=text)
-                    out = parent.handler(inbound)
-                    reply = out.text if out is not None else ""
-                    payload = {"ok": True, "reply": reply}
+                    parent.message_bus.publish_inbound(inbound)
+                    payload = {"ok": True, "queued": True}
                     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                     self.send_response(200)
                     self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -136,8 +146,7 @@ class HTTPChannel:
                         elapsed_ms = round((perf_counter() - started) * 1000)
                         parent.metrics.inc(f"channel.http.latency_bucket_ms_{min(1000, elapsed_ms // 100 * 100)}")
 
-            def log_message(self, format: str, *args) -> None:  # noqa: A002
+            def log_message(self, format: str, *args) -> None:
                 return
 
         return Handler
-

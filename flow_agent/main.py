@@ -6,7 +6,6 @@ from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
 from flow_agent.channels.qq import QQChannel
-from flow_agent.channels.models import OutboundMessage, InboundMessage
 from flow_agent.proactive.dispatcher import QQProactiveDispatcher
 
 
@@ -33,13 +32,17 @@ def main() -> None:
             background_runtime,
             subagent_runtime,
             runtime_service,
+            message_bus,
+            event_bus,
+            agent_loop,
+            pipeline,
         ) = create_app_runtime()
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
         print("初始化失败：请检查 .env 中的 API Key 配置。")
         return
 
-    print("Flow Agent CLI")
+    print("Flow Agent CLI (MessageBus 架构)")
     print("Enter 'exit' to quit")
     print("Use '/session <id>' to switch session")
     print("Use '/proactive tick|start|stop|status' to control proactive runtime")
@@ -47,30 +50,38 @@ def main() -> None:
     print("Use '/http start|stop' to control http channel")
     print("Use '/qq start|stop|status' to control qq channel")
     print("Use '/runtime snapshot|health' to inspect unified runtime")
+    print("Use '/bus status' to inspect MessageBus/EventBus")
     current_session = cfg.session.default_session_id
 
-    def handle_inbound(msg: InboundMessage) -> OutboundMessage:
-        response = orchestrator.run_turn(msg.text, session_id=msg.session_id)
-        return OutboundMessage(channel=msg.channel, session_id=msg.session_id, text=response.content)
-
-    cli = CLIChannel(handler=handle_inbound, default_session_id=current_session)
+    # 创建渠道并连接到 MessageBus
+    cli = CLIChannel(
+        message_bus=message_bus,
+        default_session_id=current_session,
+    )
     http = HTTPChannel(
         host=cfg.channels.http_host,
         port=cfg.channels.http_port,
-        handler=handle_inbound,
+        message_bus=message_bus,
     )
     qq = QQChannel(
         host=cfg.channels.qq_host,
         port=cfg.channels.qq_port,
-        handler=handle_inbound,
+        message_bus=message_bus,
         api_base=cfg.channels.qq_api_base,
         access_token=cfg.channels.qq_access_token,
     )
+
+    # QQ 主动推送
     if cfg.proactive.qq_target_user_id.strip().isdigit():
         proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
             qq_user_id=int(cfg.proactive.qq_target_user_id.strip()),
             send_private_msg=qq._send_private_msg,
         )
+
+    # 启动 Agent 主循环（后台线程）
+    agent_loop.start_background()
+
+    # 启动渠道
     cli.start()
     if cfg.channels.dashboard_enabled:
         dashboard_server.start()
@@ -157,6 +168,18 @@ def main() -> None:
                 )
             else:
                 print("Agent: runtime command should be snapshot|health")
+            continue
+        if user_input.startswith("/bus "):
+            cmd = user_input.removeprefix("/bus ").strip().lower()
+            if cmd == "status":
+                print(
+                    f"MessageBus: inbound_queue_size={message_bus.inbound.size}, "
+                    f"outbound_subscribers={message_bus.outbound.subscriber_count}, "
+                    f"EventBus: subscribers={event_bus.subscriber_count}, "
+                    f"AgentLoop: running={agent_loop.running}"
+                )
+            else:
+                print("Agent: bus command should be status")
             continue
         if user_input.startswith("/session "):
             new_session = user_input.removeprefix("/session ").strip()

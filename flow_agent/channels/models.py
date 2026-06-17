@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Protocol
 
 
 def _utc_now() -> datetime:
@@ -27,3 +28,9 @@ class OutboundMessage:
     sent_at: datetime = field(default_factory=_utc_now)
     metadata: dict[str, object] = field(default_factory=dict)
 
+
+class OutboundSubscriber(Protocol):
+    """出站消息订阅者协议：渠道适配器实现此接口来接收待发送的回复。"""
+
+    def on_outbound(self, message: OutboundMessage) -> None:
+        ...

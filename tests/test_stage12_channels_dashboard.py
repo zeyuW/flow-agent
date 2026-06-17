@@ -10,25 +10,37 @@ from flow_agent.channels.http import HTTPChannel
 from flow_agent.channels.qq import QQChannel
 from flow_agent.dashboard.api import DashboardServer
 from flow_agent.dashboard.store import InMemoryDashboardStore
+from flow_agent.messaging.message_bus import MessageBus
+
+
+class _FakeOutboundSub:
+    def __init__(self):
+        self.received: list[OutboundMessage] = []
+
+    def on_outbound(self, message: OutboundMessage) -> None:
+        self.received.append(message)
 
 
 def test_cli_channel_handles_line():
-    def handler(msg: InboundMessage) -> OutboundMessage:
-        return OutboundMessage(channel=msg.channel, session_id=msg.session_id, text=f"ok:{msg.text}")
-
-    cli = CLIChannel(handler=handler, default_session_id="s1")
+    """CLI 渠道通过 MessageBus 发布入站消息。"""
+    bus = MessageBus()
+    cli = CLIChannel(message_bus=bus, default_session_id="s1")
     cli.start()
-    assert cli.handle_line("hi") == "ok:hi"
+
+    # 发布消息
+    cli.handle_line("hi")
+    inbound = bus.consume_inbound()
+    assert inbound is not None
+    assert inbound.text == "hi"
+    assert inbound.session_id == "s1"
     cli.stop()
 
 
 def test_http_channel_inbound_roundtrip():
-    def handler(msg: InboundMessage) -> OutboundMessage:
-        return OutboundMessage(channel=msg.channel, session_id=msg.session_id, text="pong")
-
-    http = HTTPChannel(host="127.0.0.1", port=0, handler=handler)
+    """HTTP 渠道接收 POST，通过 MessageBus 发布入站消息。"""
+    bus = MessageBus()
+    http = HTTPChannel(host="127.0.0.1", port=0, message_bus=bus)
     http.start()
-    # resolve actual port
     port = http._server.server_address[1]  # type: ignore[union-attr]
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/inbound",
@@ -39,7 +51,12 @@ def test_http_channel_inbound_roundtrip():
     with urllib.request.urlopen(req, timeout=2) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     assert payload["ok"] is True
-    assert payload["reply"] == "pong"
+    assert payload["queued"] is True
+
+    # 验证消息已入队
+    inbound = bus.consume_inbound()
+    assert inbound is not None
+    assert inbound.text == "ping"
     http.stop()
 
 
@@ -71,6 +88,7 @@ def test_dashboard_server_ui_page():
 
 
 def test_qq_channel_private_message_roundtrip():
+    """QQ 渠道通过 MessageBus 发布入站消息，并通过订阅接收出站。"""
     pushed: list[dict[str, object]] = []
 
     class QQApiHandler(BaseHTTPRequestHandler):
@@ -89,19 +107,17 @@ def test_qq_channel_private_message_roundtrip():
     api_thread.start()
     api_port = api_server.server_address[1]
 
-    def handler(msg: InboundMessage) -> OutboundMessage:
-        assert msg.session_id == "qq_12345"
-        assert msg.text == "hi from qq"
-        return OutboundMessage(channel=msg.channel, session_id=msg.session_id, text="pong to qq")
-
+    bus = MessageBus()
     qq = QQChannel(
         host="127.0.0.1",
         port=0,
-        handler=handler,
+        message_bus=bus,
         api_base=f"http://127.0.0.1:{api_port}",
     )
     qq.start()
     port = qq._server.server_address[1]  # type: ignore[union-attr]
+
+    # 发送 OneBot 事件到 QQ 渠道
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/onebot/event",
         data=json.dumps(
@@ -118,11 +134,23 @@ def test_qq_channel_private_message_roundtrip():
     with urllib.request.urlopen(req, timeout=2) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     assert payload["ok"] is True
-    assert payload["reply_sent"] is True
+    assert payload["queued"] is True
+
+    # 验证入站消息已发布到 MessageBus
+    inbound = bus.consume_inbound()
+    assert inbound is not None
+    assert inbound.session_id == "qq_12345"
+    assert inbound.text == "hi from qq"
+
+    # 模拟出站回复：QQ 渠道的 on_outbound 会调用 _send_private_msg
+    outbound = OutboundMessage(channel="qq", session_id="qq_12345", text="pong to qq")
+    outbound.metadata["qq_user_id"] = 12345
+    bus.dispatch_outbound(outbound)
+
+    # 验证 QQ 渠道收到了出站消息并发送到 API
     qq.stop()
     api_server.shutdown()
     api_server.server_close()
     assert pushed
     assert pushed[-1]["user_id"] == 12345
     assert pushed[-1]["message"] == "pong to qq"
-
