@@ -3,6 +3,9 @@
 每个阶段模块实现对应阶段的钩子方法，
 管道在每个阶段执行前后调用相应的钩子，
 允许插件修改 TurnFlow 数据或执行副作用操作。
+
+TurnStarted 事件在 AgentLoop 消费消息后发布，
+TurnCommitted 事件在 AfterTurn 阶段广播。
 """
 
 from dataclasses import dataclass, field
@@ -34,6 +37,10 @@ class TurnFlow:
     memory_block: str = ""
     retrieval_trace: list[dict[str, str]] = field(default_factory=list)
 
+    # 中断续跑支持：上一轮的部分回复和工具调用
+    previous_partial_output: str = ""
+    previous_tool_trace: list[dict[str, str]] = field(default_factory=list)
+
     # 扩展数据：阶段模块可以在此挂载任意数据
     extensions: dict[str, Any] = field(default_factory=dict)
 
@@ -45,6 +52,10 @@ class PhaseModule(Protocol):
     @property
     def name(self) -> str:
         """模块名称，用于日志和调试。"""
+        ...
+
+    def on_turn_started(self, flow: TurnFlow) -> None:
+        """TurnStarted 阶段：AgentLoop 消费消息后调用。"""
         ...
 
     def on_before_turn(self, flow: TurnFlow) -> None:

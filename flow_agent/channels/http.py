@@ -30,6 +30,8 @@ class HTTPChannel(MessageBusChannel):
     Endpoints:
     - POST /inbound  body: {"session_id": "...", "text": "..."}
       response: {"ok": true, "queued": true}
+
+    出站通过 subscribe_outbound 订阅异步处理。
     """
 
     host: str
@@ -51,17 +53,19 @@ class HTTPChannel(MessageBusChannel):
         if self._running:
             return
         self._last_error = None
-        self.message_bus.subscribe_outbound(self)
+        # 通过 subscribe_outbound 注册 _on_response 回调
+        self.message_bus.subscribe_outbound(self.name, self._on_response)
         self._server = HTTPServer((self.host, self.port), self._make_handler())
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._thread.start()
         self._running = True
-        logger.info("http channel started on %s:%s (message bus connected)", self.host, self.port)
+        logger.info("http channel started on %s:%s (outbound subscriber registered)", self.host, self.port)
 
     def stop(self) -> None:
         if not self._running:
             return
-        self.message_bus.outbound.unsubscribe(self)
+        # 取消出站订阅
+        self.message_bus.unsubscribe_outbound(self.name, self._on_response)
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
@@ -73,13 +77,18 @@ class HTTPChannel(MessageBusChannel):
     def status(self) -> ChannelStatus:
         return ChannelStatus(running=self._running, last_error=self._last_error)
 
-    def on_outbound(self, message: OutboundMessage) -> None:
-        """HTTP 渠道的出站目前通过 HTTP 响应直接返回。
+    def _on_response(self, message: OutboundMessage) -> None:
+        """收到出站回复时的回调函数。
 
-        对于同步 HTTP 请求，回复在请求处理中直接返回；
-        on_outbound 保留用于将来的异步推送场景。
+        由 MessageBus 后台 dispatch_outbound 任务调用。
+        HTTP 渠道的出站目前通过日志记录，未来可用于异步推送（如 WebSocket）。
         """
-        logger.debug("http outbound: %s", message.text[:100])
+        logger.debug("http outbound: channel=%s session=%s text=%s",
+                     message.channel, message.session_id, message.text[:100])
+
+    def on_outbound(self, message: OutboundMessage) -> None:
+        """收到出站回复（兼容旧接口，转发到 _on_response）。"""
+        self._on_response(message)
 
     def _make_handler(self) -> Callable[..., BaseHTTPRequestHandler]:
         parent = self

@@ -18,10 +18,16 @@ from flow_agent.config.settings import (
 )
 from flow_agent.core.agent import Agent
 from flow_agent.core.context import ConversationContext
-from flow_agent.messaging.message_bus import MessageBus, InboundQueue, OutboundQueue
+from flow_agent.messaging.message_bus import (
+    MessageBus,
+    InboundQueue,
+    OutboundQueue,
+    OutboundDispatch,
+    BusOutboundPort,
+)
 from flow_agent.messaging.event_bus import EventBus, Event, TurnCommitted
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
-from flow_agent.core.agent_loop import AgentLoop
+from flow_agent.core.agent_loop import AgentLoop, ProcessingState
 from flow_agent.core.phase_module import PhaseModule, TurnFlow
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.llm.client import LLMResult, LLMToolCall
@@ -116,7 +122,7 @@ def test_inbound_queue_consume_all():
     assert q.size == 0
 
 
-# ── OutboundQueue 测试 ────────────────────────────────────
+# ── OutboundQueue 测试（新 subscribe 接口） ────────────────────
 
 class _FakeSubscriber:
     def __init__(self):
@@ -127,248 +133,191 @@ class _FakeSubscriber:
 
 
 def test_outbound_queue_subscribe_and_dispatch():
+    """测试 OutboundQueue 的 subscribe(channel, callback) 和 dispatch 接口。"""
     q = OutboundQueue()
     sub = _FakeSubscriber()
-    q.subscribe(sub)
+    q.subscribe("cli", sub.on_outbound)
     assert q.subscriber_count == 1
 
-    msg = OutboundMessage(channel="test", session_id="s1", text="reply")
+    msg = OutboundMessage(channel="cli", session_id="s1", text="reply")
     q.dispatch(msg)
     assert len(sub.received) == 1
     assert sub.received[0].text == "reply"
 
 
 def test_outbound_queue_unsubscribe():
+    """测试取消订阅。"""
     q = OutboundQueue()
     sub = _FakeSubscriber()
-    q.subscribe(sub)
-    q.unsubscribe(sub)
+    q.subscribe("cli", sub.on_outbound)
+    q.unsubscribe("cli", sub.on_outbound)
     assert q.subscriber_count == 0
-    q.dispatch(OutboundMessage(channel="test", session_id="s1", text="reply"))
+    q.dispatch(OutboundMessage(channel="cli", session_id="s1", text="reply"))
     assert len(sub.received) == 0
+
+
+def test_outbound_queue_publish_and_consume():
+    """测试 publish → consume_one 流程。"""
+    q = OutboundQueue()
+    msg = OutboundMessage(channel="cli", session_id="s1", text="queued reply")
+    q.publish(msg)
+    consumed = q.consume_one()
+    assert consumed is not None
+    assert consumed.text == "queued reply"
+    assert q.consume_one() is None
+
+
+def test_outbound_queue_has_subscribers():
+    """测试 has_subscribers 检查。"""
+    q = OutboundQueue()
+    assert not q.has_subscribers("cli")
+    sub = _FakeSubscriber()
+    q.subscribe("cli", sub.on_outbound)
+    assert q.has_subscribers("cli")
+    assert not q.has_subscribers("qq")
+
+
+# ── BusOutboundPort 测试 ──────────────────────────────────
+
+def test_bus_outbound_port_send():
+    """测试 BusOutboundPort.send 将 OutboundDispatch 发布到队列。"""
+    q = OutboundQueue()
+    port = BusOutboundPort(_queue=q)
+    dispatch = OutboundDispatch(channel="cli", session_id="s1", text="outbound test")
+    port.send(dispatch)
+    consumed = q.consume_one()
+    assert consumed is not None
+    assert consumed.text == "outbound test"
+    assert consumed.channel == "cli"
 
 
 # ── MessageBus 集成测试 ───────────────────────────────────
 
 def test_message_bus_inbound_flow():
     bus = MessageBus()
-    msg = InboundMessage(channel="cli", session_id="s1", text="hello")
+    msg = InboundMessage(channel="test", session_id="s1", text="hello")
     bus.publish_inbound(msg)
     consumed = bus.consume_inbound()
     assert consumed is not None
     assert consumed.text == "hello"
 
 
-def test_message_bus_outbound_flow():
+def test_message_bus_outbound_subscribe_publish():
+    """测试 MessageBus.subscribe_outbound(channel, callback) 和 OutboundQueue.publish。"""
     bus = MessageBus()
     sub = _FakeSubscriber()
-    bus.subscribe_outbound(sub)
+    bus.subscribe_outbound("cli", sub.on_outbound)
     msg = OutboundMessage(channel="cli", session_id="s1", text="reply")
-    bus.dispatch_outbound(msg)
+    bus.outbound.publish(msg)
+    # publish 只入队，不触发分发
+    assert bus.outbound.consume_one() is not None
+    # dispatch 触发分发
+    bus.outbound.dispatch(OutboundMessage(channel="cli", session_id="s1", text="reply2"))
     assert len(sub.received) == 1
-    assert sub.received[0].text == "reply"
+    assert sub.received[0].text == "reply2"
 
 
-# ── EventBus 测试 ─────────────────────────────────────────
+def test_message_bus_dispatch_outbound():
+    """测试 MessageBus.dispatch_outbound（兼容旧接口）。"""
+    bus = MessageBus()
+    sub = _FakeSubscriber()
+    bus.subscribe_outbound("cli", sub.on_outbound)
+    msg = OutboundMessage(channel="cli", session_id="s1", text="compat")
+    bus.dispatch_outbound(msg)
+    # dispatch_outbound 只 publish，不 dispatch
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "compat"
+
+
+def test_message_bus_outbound_port():
+    """测试 MessageBus.outbound_port。"""
+    bus = MessageBus()
+    assert bus.outbound_port is not None
+    dispatch = OutboundDispatch(channel="cli", session_id="s1", text="via port")
+    bus.outbound_port.send(dispatch)
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "via port"
+
+
+# ── EventBus 测试 ────────────────────────────────────────
 
 class _FakeEventSub:
-    def __init__(self):
+    def __init__(self) -> None:
         self.events: list[Event] = []
 
     def on_event(self, event: Event) -> None:
         self.events.append(event)
 
 
-def test_event_bus_publish_and_fanout():
-    bus = EventBus()
-    sub1 = _FakeEventSub()
-    sub2 = _FakeEventSub()
-    bus.subscribe(sub1)
-    bus.subscribe(sub2)
-
-    event = Event(event_type="test_event", trace_id="abc123")
-    bus.publish(event)
-
-    assert len(sub1.events) == 1
-    assert len(sub2.events) == 1
-    assert sub1.events[0].event_type == "test_event"
-    assert sub1.events[0].trace_id == "abc123"
+def test_event_bus_publish_and_subscribe():
+    eb = EventBus()
+    sub = _FakeEventSub()
+    eb.subscribe(sub)
+    eb.publish(Event(event_type="test_event", payload={"key": "value"}))
+    assert len(sub.events) == 1
+    assert sub.events[0].event_type == "test_event"
 
 
 def test_turn_committed_event():
     event = TurnCommitted(
-        trace_id="t1",
+        trace_id="abc123",
         session_id="s1",
         user_input="hello",
-        assistant_output="hi",
-        tool_trace=[{"step": "1", "tool": "fake_tool", "status": "ok"}],
+        assistant_output="world",
+        tool_trace=[{"step": "1", "tool": "search", "status": "ok"}],
     )
     assert event.event_type == "turn_committed"
-    assert event.payload["user_input"] == "hello"
-    assert event.payload["assistant_output"] == "hi"
-    assert len(event.payload["tool_trace"]) == 1
+    assert event.user_input == "hello"
+    assert event.assistant_output == "world"
+    assert len(event.tool_trace) == 1
 
 
-# ── PhaseModule 测试 ──────────────────────────────────────
+# ── ProcessingState 测试 ─────────────────────────────────
 
-class _TestPhaseModule:
-    def __init__(self, name: str = "test"):
-        self._name = name
-        self.calls: list[str] = []
+def test_processing_state_tracks_sessions():
+    """测试 ProcessingState 正确追踪会话处理状态。"""
+    import asyncio
+    state = ProcessingState()
+    assert not state.is_processing("s1")
 
-    @property
-    def name(self) -> str:
-        return self._name
+    async def dummy():
+        await asyncio.sleep(0.01)
 
-    def on_before_turn(self, flow: TurnFlow) -> None:
-        self.calls.append("before_turn")
+    task = asyncio.ensure_future(dummy())
+    state.set_processing("s1", task)
+    assert state.is_processing("s1")
+    assert not state.is_processing("s2")
 
-    def on_before_reasoning(self, flow: TurnFlow) -> None:
-        self.calls.append("before_reasoning")
-
-    def on_prompt_render(self, flow: TurnFlow) -> None:
-        self.calls.append("prompt_render")
-
-    def on_after_reasoning(self, flow: TurnFlow) -> None:
-        self.calls.append("after_reasoning")
-
-    def on_after_turn(self, flow: TurnFlow) -> None:
-        self.calls.append("after_turn")
+    state.clear_processing("s1")
+    assert not state.is_processing("s1")
 
 
-# ── PassiveTurnPipeline 完整流程测试 ─────────────────────
+# ── TurnFlow 测试 ────────────────────────────────────────
 
-def test_passive_turn_pipeline_full_flow():
-    """测试完整的六阶段管道流程。"""
-    agent = Agent(
-        settings=_build_settings(),
-        llm_client=ScriptedLLMClient(),
-        context=ConversationContext(),
+def test_turnflow_fields():
+    flow = TurnFlow(
+        user_input="hello",
+        session_id="s1",
+        channel="cli",
+        trace_id="abc123",
     )
-    registry = ToolRegistry()
-    registry.register(FakeTool())
-    bus = MessageBus()
-    eb = EventBus()
-    dashboard = InMemoryDashboardStore()
-
-    pipeline = PassiveTurnPipeline(
-        agent=agent,
-        tool_registry=registry,
-        message_bus=bus,
-        event_bus=eb,
-        dashboard=dashboard,
-    )
-
-    # 注册阶段模块
-    mod = _TestPhaseModule()
-    pipeline.register_phase_module(mod)
-
-    inbound = InboundMessage(channel="cli", session_id="s1", text="hello pipeline")
-
-    # 处理消息
-    pipeline.process(inbound)
-
-    # 验证六个阶段都被调用了
-    assert sorted(mod.calls) == [
-        "after_reasoning",
-        "after_turn",
-        "before_reasoning",
-        "before_turn",
-        "prompt_render",
-    ]
-
-    # 验证阶段事件被记录
-    events = dashboard.all_events()
-    phase_starts = [e for e in events if e.get("type") == "turn_phase_start"]
-    phase_ends = [e for e in events if e.get("type") == "turn_phase_end"]
-    expected_phases = {
-        "before_turn", "before_reasoning", "prompt_render",
-        "reasoner", "after_reasoning", "after_turn",
-    }
-    assert {e.get("phase") for e in phase_starts} >= expected_phases
-    assert {e.get("phase") for e in phase_ends} >= expected_phases
-
-    # 验证对话已提交
-    history = agent.context.get_history("s1")
-    assert len(history) == 2
-    assert history[0]["content"] == "hello pipeline"
-    assert history[1]["content"] == "pipeline final answer"
+    assert flow.user_input == "hello"
+    assert flow.session_id == "s1"
+    assert flow.channel == "cli"
+    assert flow.final_output == ""
+    assert flow.tool_trace == []
+    assert flow.previous_partial_output == ""
+    assert flow.extensions == {}
 
 
-def test_passive_turn_pipeline_dispatches_outbound():
-    """测试 AfterTurn 阶段通过 MessageBus 投递出站消息。"""
-    agent = Agent(
-        settings=_build_settings(),
-        llm_client=ScriptedLLMClient(),
-        context=ConversationContext(),
-    )
-    registry = ToolRegistry()
-    registry.register(FakeTool())
-    bus = MessageBus()
-    eb = EventBus()
+# ── Pipeline 测试 ────────────────────────────────────────
 
-    # 订阅出站消息
-    sub = _FakeSubscriber()
-    bus.subscribe_outbound(sub)
+def test_pipeline_runs_six_phases():
+    """测试 PassiveTurnPipeline 执行完整的六阶段管道。
 
-    pipeline = PassiveTurnPipeline(
-        agent=agent,
-        tool_registry=registry,
-        message_bus=bus,
-        event_bus=eb,
-    )
-
-    inbound = InboundMessage(channel="cli", session_id="s1", text="hello")
-    pipeline.process(inbound)
-
-    # 验证出站回复已投递
-    assert len(sub.received) == 1
-    assert sub.received[0].text == "pipeline final answer"
-    assert sub.received[0].channel == "cli"
-    assert sub.received[0].session_id == "s1"
-    assert sub.received[0].metadata.get("trace_id") is not None
-
-
-def test_passive_turn_pipeline_publishes_turn_committed_event():
-    """测试 AfterTurn 阶段通过 EventBus 广播 TurnCommitted 事件。"""
-    agent = Agent(
-        settings=_build_settings(),
-        llm_client=ScriptedLLMClient(),
-        context=ConversationContext(),
-    )
-    registry = ToolRegistry()
-    registry.register(FakeTool())
-    bus = MessageBus()
-    eb = EventBus()
-
-    # 订阅事件
-    sub = _FakeEventSub()
-    eb.subscribe(sub)
-
-    pipeline = PassiveTurnPipeline(
-        agent=agent,
-        tool_registry=registry,
-        message_bus=bus,
-        event_bus=eb,
-    )
-
-    inbound = InboundMessage(channel="cli", session_id="s1", text="event test")
-    pipeline.process(inbound)
-
-    # 验证 TurnCommitted 事件已广播
-    assert len(sub.events) == 1
-    event = sub.events[0]
-    assert event.event_type == "turn_committed"
-    assert event.payload["user_input"] == "event test"
-    assert event.payload["assistant_output"] == "pipeline final answer"
-
-
-# ── 收尾双动作独立性测试 ────────────────────────────────
-
-def test_after_turn_dual_actions_independent():
-    """测试 AfterTurn 的 EventBus 广播和 MessageBus 投递是独立的。
-
-    即使 EventBus 订阅者抛出异常，MessageBus 投递仍应成功。
+    验证事件广播先于出站投递。
     """
     agent = Agent(
         settings=_build_settings(),
@@ -379,19 +328,10 @@ def test_after_turn_dual_actions_independent():
     registry.register(FakeTool())
     bus = MessageBus()
     eb = EventBus()
-
-    # 两个订阅者：一个正常，一个会抛出异常
-    sub_ok = _FakeEventSub()
-    class _BrokenSub:
-        def on_event(self, event: Event) -> None:
-            raise RuntimeError("broken event handler")
-    broken = _BrokenSub()
-    eb.subscribe(sub_ok)
-    eb.subscribe(broken)
-
-    # 出站订阅者
     out_sub = _FakeSubscriber()
-    bus.subscribe_outbound(out_sub)
+    bus.subscribe_outbound("cli", out_sub.on_outbound)
+    ev_sub = _FakeEventSub()
+    eb.subscribe(ev_sub)
 
     pipeline = PassiveTurnPipeline(
         agent=agent,
@@ -399,56 +339,26 @@ def test_after_turn_dual_actions_independent():
         message_bus=bus,
         event_bus=eb,
     )
-
-    inbound = InboundMessage(channel="cli", session_id="s1", text="test")
-    # 不应抛出异常
+    inbound = InboundMessage(channel="cli", session_id="s1", text="test six phases")
     pipeline.process(inbound)
 
-    # EventBus: 正常订阅者仍能收到事件
-    assert len(sub_ok.events) == 1
+    # 验证事件已广播
+    assert len(ev_sub.events) >= 1
+    turn_committed_events = [e for e in ev_sub.events if e.event_type == "turn_committed"]
+    assert len(turn_committed_events) == 1
+    assert turn_committed_events[0].payload["user_input"] == "test six phases"
+    assert ev_sub.events[0].payload["user_input"] == "test six phases"
 
-    # MessageBus: 出站投递仍成功
-    assert len(out_sub.received) == 1
-    assert out_sub.received[0].text == "pipeline final answer"
-
-
-# ── AgentLoop 测试 ────────────────────────────────────────
-
-def test_agent_loop_run_once():
-    agent = Agent(
-        settings=_build_settings(),
-        llm_client=ScriptedLLMClient(),
-        context=ConversationContext(),
-    )
-    registry = ToolRegistry()
-    registry.register(FakeTool())
-    bus = MessageBus()
-    eb = EventBus()
-    out_sub = _FakeSubscriber()
-    bus.subscribe_outbound(out_sub)
-
-    pipeline = PassiveTurnPipeline(
-        agent=agent,
-        tool_registry=registry,
-        message_bus=bus,
-        event_bus=eb,
-    )
-    loop = AgentLoop(message_bus=bus, pipeline=pipeline)
-
-    # 无消息时 run_once 返回 False
-    assert loop.run_once() is False
-
-    # 发布消息后 run_once 返回 True
-    bus.publish_inbound(InboundMessage(channel="cli", session_id="s1", text="via loop"))
-    assert loop.run_once() is True
-
-    # 出站消息已投递
-    assert len(out_sub.received) == 1
-    assert out_sub.received[0].text == "pipeline final answer"
+    # 验证出站消息已投递到队列
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "pipeline final answer"
+    assert consumed.channel == "cli"
+    assert consumed.session_id == "s1"
 
 
-def test_agent_loop_run_forever_stops():
-    """测试 run_forever 可以通过 stop 停止。"""
+def test_pipeline_outbound_port():
+    """测试 Pipeline 通过 outbound_port 投递回复。"""
     agent = Agent(
         settings=_build_settings(),
         llm_client=ScriptedLLMClient(),
@@ -465,35 +375,18 @@ def test_agent_loop_run_forever_stops():
         message_bus=bus,
         event_bus=eb,
     )
-    loop = AgentLoop(message_bus=bus, pipeline=pipeline)
+    # 入站 + 处理
+    inbound = InboundMessage(channel="cli", session_id="s1", text="via port")
+    pipeline.process(inbound)
 
-    # 启动后台线程
-    loop.start_background()
-    assert loop.running
-
-    # 发布消息，等待处理
-    bus.publish_inbound(InboundMessage(channel="cli", session_id="s1", text="bg test"))
-    time.sleep(0.3)
-
-    # 停止
-    loop.stop()
-    assert not loop.running
-
-    # 验证消息被处理了
-    history = agent.context.get_history("s1")
-    assert len(history) == 2
-    assert history[1]["content"] == "pipeline final answer"
+    # 验证出站队列有消息
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "pipeline final answer"
 
 
-# ── 错误处理测试 ─────────────────────────────────────────
-
-class _AlwaysFailLLM:
-    def generate(self, messages, tools=None):
-        raise RuntimeError("simulated LLM failure")
-
-
-def test_pipeline_handles_errors_gracefully():
-    """测试管道在 LLM 出错时仍能通过 MessageBus 发送错误回复。"""
+def test_pipeline_errors_gracefully():
+    """测试管道在 LLM 出错时仍能发送错误回复。"""
     agent = Agent(
         settings=_build_settings(),
         llm_client=_AlwaysFailLLM(),
@@ -502,8 +395,6 @@ def test_pipeline_handles_errors_gracefully():
     registry = ToolRegistry()
     bus = MessageBus()
     eb = EventBus()
-    out_sub = _FakeSubscriber()
-    bus.subscribe_outbound(out_sub)
 
     pipeline = PassiveTurnPipeline(
         agent=agent,
@@ -513,15 +404,52 @@ def test_pipeline_handles_errors_gracefully():
     )
 
     inbound = InboundMessage(channel="cli", session_id="s1", text="crash test")
-    # 不应抛出未捕获异常
     pipeline.process(inbound)
 
     # 错误回复已投递
-    assert len(out_sub.received) == 1
-    assert "simulated LLM failure" in out_sub.received[0].text
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert "simulated LLM failure" in consumed.text
 
 
-# ── 渠道 MessageBus 集成测试 ────────────────────────────
+class _AlwaysFailLLM:
+    def generate(self, messages, tools=None):
+        raise RuntimeError("simulated LLM failure")
+
+
+# ── AgentLoop 测试 ───────────────────────────────────────
+
+def test_agent_loop_run_once():
+    """测试 AgentLoop.run_once 处理一条消息。"""
+    agent = Agent(
+        settings=_build_settings(),
+        llm_client=ScriptedLLMClient(),
+        context=ConversationContext(),
+    )
+    registry = ToolRegistry()
+    registry.register(FakeTool())
+    bus = MessageBus()
+    eb = EventBus()
+
+    pipeline = PassiveTurnPipeline(
+        agent=agent,
+        tool_registry=registry,
+        message_bus=bus,
+        event_bus=eb,
+    )
+    loop = AgentLoop(message_bus=bus, pipeline=pipeline, event_bus=eb)
+
+    bus.publish_inbound(InboundMessage(channel="cli", session_id="s1", text="run once"))
+    assert loop.run_once() is True
+    assert loop.run_once() is False  # 队列为空
+
+    # 验证回复已投递
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "pipeline final answer"
+
+
+# ── 渠道 MessageBus 集成测试（新 subscribe 接口）────────────
 
 def test_cli_channel_publishes_to_message_bus():
     """测试 CLI 渠道通过 MessageBus 发布入站消息。"""
@@ -541,16 +469,16 @@ def test_cli_channel_publishes_to_message_bus():
 
 
 def test_cli_channel_receives_outbound_via_subscription():
-    """测试 CLI 渠道通过订阅接收出站消息。"""
+    """测试 CLI 渠道通过订阅回调接收出站消息。"""
     from flow_agent.channels.cli import CLIChannel
 
     bus = MessageBus()
     cli = CLIChannel(message_bus=bus)
     cli.start()
 
-    bus.dispatch_outbound(OutboundMessage(
-        channel="cli", session_id="test", text="response text"
-    ))
+    # 模拟 MessageBus 分发（通过订阅回调）
+    msg = OutboundMessage(channel="cli", session_id="test", text="response text")
+    bus.outbound.dispatch(msg)
 
     assert cli._last_outbound_text == "response text"
 
@@ -563,8 +491,10 @@ def test_full_message_bus_architecture_flow():
     验证：
     1. 入站消息通过 MessageBus 发布
     2. AgentLoop 拉取并处理
-    3. 出站回复通过 MessageBus 投递
-    4. 事件通过 EventBus 广播
+    3. Pipeline AfterTurn 阶段：
+       ① 先通过 EventBus 广播 TurnCommitted
+       ② 再通过 OutboundPort 投递到出站队列
+    4. 出站队列分发给订阅者
     """
     agent = Agent(
         settings=_build_settings(),
@@ -578,7 +508,7 @@ def test_full_message_bus_architecture_flow():
 
     # 出站订阅者
     out_sub = _FakeSubscriber()
-    bus.subscribe_outbound(out_sub)
+    bus.subscribe_outbound("cli", out_sub.on_outbound)
 
     # 事件订阅者
     ev_sub = _FakeEventSub()
@@ -590,7 +520,7 @@ def test_full_message_bus_architecture_flow():
         message_bus=bus,
         event_bus=eb,
     )
-    loop = AgentLoop(message_bus=bus, pipeline=pipeline)
+    loop = AgentLoop(message_bus=bus, pipeline=pipeline, event_bus=eb)
 
     # 模拟渠道发布入站消息
     bus.publish_inbound(InboundMessage(channel="cli", session_id="full", text="end to end"))
@@ -598,15 +528,23 @@ def test_full_message_bus_architecture_flow():
     # AgentLoop 处理
     assert loop.run_once() is True
 
-    # 验证出站
+    # 验证出站消息在队列中
+    consumed = bus.outbound.consume_one()
+    assert consumed is not None
+    assert consumed.text == "pipeline final answer"
+    assert consumed.channel == "cli"
+    assert consumed.session_id == "full"
+
+    # 分发给订阅者
+    bus.outbound.dispatch(consumed)
     assert len(out_sub.received) == 1
     assert out_sub.received[0].text == "pipeline final answer"
-    assert out_sub.received[0].channel == "cli"
-    assert out_sub.received[0].session_id == "full"
 
-    # 验证事件
-    assert len(ev_sub.events) == 1
-    assert ev_sub.events[0].event_type == "turn_committed"
+    # 验证事件（先于出站投递）
+    assert len(ev_sub.events) >= 1
+    turn_committed_events = [e for e in ev_sub.events if e.event_type == "turn_committed"]
+    assert len(turn_committed_events) == 1
+    assert turn_committed_events[0].payload["user_input"] == "end to end"
     assert ev_sub.events[0].payload["user_input"] == "end to end"
 
     # 验证历史

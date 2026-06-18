@@ -14,7 +14,8 @@ class CLIChannel(MessageBusChannel):
     """CLI 渠道：基于 MessageBus 的 stdin/stdout 渠道。
 
     入站：读取用户输入 → 封装 InboundMessage → publish_inbound 到 MessageBus
-    出站：通过 subscribe_outbound 订阅 → on_outbound 回调接收 → print 到 stdout
+    出站：通过 subscribe_outbound 注册 _on_response 回调
+          → MessageBus 后台 dispatch 任务调用回调 → print 到 stdout
     """
 
     message_bus: MessageBus
@@ -30,13 +31,14 @@ class CLIChannel(MessageBusChannel):
     def start(self) -> None:
         self._running = True
         self._last_error = None
-        # 订阅出站消息
-        self.message_bus.subscribe_outbound(self)
-        logger.info("cli channel started (message bus connected)")
+        # 通过 subscribe_outbound 注册 _on_response 回调
+        self.message_bus.subscribe_outbound(self.name, self._on_response)
+        logger.info("cli channel started (outbound subscriber registered)")
 
     def stop(self) -> None:
         self._running = False
-        self.message_bus.outbound.unsubscribe(self)
+        # 取消订阅
+        self.message_bus.unsubscribe_outbound(self.name, self._on_response)
         logger.info("cli channel stopped")
 
     def status(self) -> ChannelStatus:
@@ -65,13 +67,20 @@ class CLIChannel(MessageBusChannel):
             self._last_error = str(exc)
             logger.exception("cli channel publish failed")
             return None
-        return None  # 回复通过 on_outbound 异步处理
+        return None  # 回复通过 _on_response 异步处理
 
-    def on_outbound(self, message: OutboundMessage) -> None:
-        """接收出站回复并输出到 stdout。
+    def _on_response(self, message: OutboundMessage) -> None:
+        """收到出站回复时的回调函数。
 
-        由 MessageBus 在 dispatch_outbound 时自动调用。
+        由 MessageBus 后台 dispatch_outbound 任务调用。
+        负责调用平台 API 将消息发送给用户。
         """
         self._last_outbound_text = message.text
-        # 出站文本通过 print 输出，供 main.py 的 CLI 循环显示
         logger.debug("cli outbound: %s", message.text[:100])
+        # 出站文本通过 print 输出，供 main.py 的 CLI 循环显示
+        if message.metadata.get("fallback"):
+            logger.warning("cli received fallback message: %s", message.text[:100])
+
+    def on_outbound(self, message: OutboundMessage) -> None:
+        """收到出站回复（兼容旧接口，转发到 _on_response）。"""
+        self._on_response(message)

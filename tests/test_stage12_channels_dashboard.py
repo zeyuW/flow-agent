@@ -145,7 +145,7 @@ def test_qq_channel_private_message_roundtrip():
     # 模拟出站回复：QQ 渠道的 on_outbound 会调用 _send_private_msg
     outbound = OutboundMessage(channel="qq", session_id="qq_12345", text="pong to qq")
     outbound.metadata["qq_user_id"] = 12345
-    bus.dispatch_outbound(outbound)
+    bus.outbound.dispatch(outbound)
 
     # 验证 QQ 渠道收到了出站消息并发送到 API
     qq.stop()
