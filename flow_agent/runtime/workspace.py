@@ -6,11 +6,13 @@ from pathlib import Path
 
 
 WORKSPACE_MARKER = ".workspace"
+FLOW_DIR = ".flow"
 
 
 @dataclass(slots=True)
 class WorkspaceLayout:
     root: Path
+    flow_dir: Path
     config_dir: Path
     data_dir: Path
     skills_dir: Path
@@ -30,23 +32,25 @@ class WorkspaceLayout:
 
 def build_layout(root: Path) -> WorkspaceLayout:
     root = root.resolve()
+    flow = root / FLOW_DIR
     return WorkspaceLayout(
         root=root,
-        config_dir=root / "config",
-        data_dir=root / "data",
-        skills_dir=root / "skills",
-        plugins_dir=root / "plugins",
-        sources_dir=root / "sources",
-        sessions_dir=root / "sessions",
-        logs_dir=root / "logs",
-        config_file=root / "config" / "flow-agent.toml",
-        memory_db=root / "data" / "memory.db",
-        trace_file=root / "logs" / "trace.jsonl",
-        proactive_source_file=root / "sources" / "proactive_items.txt",
-        proactive_todo_file=root / "sources" / "todo_items.txt",
-        proactive_tasks_file=root / "sources" / "tasks.txt",
-        subagent_tasks_file=root / "sessions" / "subagent_tasks.jsonl",
-        marker_file=root / WORKSPACE_MARKER,
+        flow_dir=flow,
+        config_dir=flow / "config",
+        data_dir=flow / "data",
+        skills_dir=flow / "skills",
+        plugins_dir=flow / "plugins",
+        sources_dir=flow / "sources",
+        sessions_dir=flow / "sessions",
+        logs_dir=flow / "logs",
+        config_file=flow / "config" / "flow-agent.toml",
+        memory_db=flow / "data" / "memory.db",
+        trace_file=flow / "logs" / "trace.jsonl",
+        proactive_source_file=flow / "sources" / "proactive_items.txt",
+        proactive_todo_file=flow / "sources" / "todo_items.txt",
+        proactive_tasks_file=flow / "sources" / "tasks.txt",
+        subagent_tasks_file=flow / "sessions" / "subagent_tasks.jsonl",
+        marker_file=flow / WORKSPACE_MARKER,
     )
 
 
@@ -79,8 +83,13 @@ def init_workspace(root: Path) -> WorkspaceLayout:
 def detect_workspace(start: Path | None = None) -> WorkspaceLayout | None:
     current = (start or Path.cwd()).resolve()
     for path in (current, *current.parents):
-        marker = path / WORKSPACE_MARKER
-        if marker.exists():
+        # Check for new-style marker: path/.flow/.workspace
+        new_marker = path / FLOW_DIR / WORKSPACE_MARKER
+        if new_marker.exists():
+            return build_layout(path)
+        # Check for legacy marker: path/.workspace
+        legacy_marker = path / WORKSPACE_MARKER
+        if legacy_marker.exists():
             return build_layout(path)
     return None
 
@@ -88,7 +97,7 @@ def detect_workspace(start: Path | None = None) -> WorkspaceLayout | None:
 def require_workspace(start: Path | None = None) -> WorkspaceLayout:
     layout = detect_workspace(start)
     if layout is None:
-        raise RuntimeError("workspace not initialized. run `flow-agent init` first.")
+        raise RuntimeError("workspace not initialized. run \x60flow-agent init\x60 first.")
     return layout
 
 

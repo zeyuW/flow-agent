@@ -37,7 +37,7 @@ class RetrievalSettings(BaseModel):
 
 class ObserveSettings(BaseModel):
     enabled: bool = True
-    trace_path: str = ".flow_agent/trace.jsonl"
+    trace_path: str = ".flow/trace.jsonl"
 
 
 class MemoryPolicySettings(BaseModel):
@@ -51,12 +51,12 @@ class ProactiveSettings(BaseModel):
     interval_seconds: int = 60
     cooldown_seconds: int = 300
     dedup_ttl_seconds: int = 86400
-    source_file: str = ".flow_agent/proactive_items.txt"
-    todo_file: str = ".flow_agent/todo_items.txt"
-    tasks_file: str = ".flow_agent/tasks.txt"
+    source_file: str = ".flow/proactive_items.txt"
+    todo_file: str = ".flow/todo_items.txt"
+    tasks_file: str = ".flow/tasks.txt"
     rss_feed_files: list[str] = Field(default_factory=list)
     web_snapshot_files: list[str] = Field(default_factory=list)
-    skills_dir: str = "skills"
+    skills_dir: str = ".flow/skills"
     min_priority_to_send: float = 0.5
     min_effective_priority: float = 0.55
     active_hours_start: int = 8
@@ -100,7 +100,7 @@ class JobsSettings(BaseModel):
 
 class SubagentSettings(BaseModel):
     max_concurrency: int = 2
-    tasks_file: str = ".flow_agent/subagent_tasks.jsonl"
+    tasks_file: str = ".flow/subagent_tasks.jsonl"
 
 
 class ConfigGovernanceSettings(BaseModel):

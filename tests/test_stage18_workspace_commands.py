@@ -71,7 +71,7 @@ def test_plugin_manager_install_enable_disable_uninstall(tmp_path: Path):
 def test_cli_init_command(tmp_path: Path):
     exit_code = cli_main(["init", "--workspace", str(tmp_path)])
     assert exit_code == 0
-    assert (tmp_path / ".workspace").exists()
+    assert (tmp_path / ".flow" / ".workspace").exists()
 
 
 def test_persist_workspace_profile_updates_config(tmp_path: Path):

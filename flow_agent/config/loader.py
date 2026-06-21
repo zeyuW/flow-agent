@@ -95,7 +95,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             memory_db_path=values.get_str(
                 "FLOW_AGENT_MEMORY_DB_PATH",
                 ("storage", "memory_db_path"),
-                str(project_root / ".flow_agent" / "memory.db"),
+                str(project_root / ".flow" / "memory.db"),
             )
         ),
         logging=LoggingSettings(
@@ -135,7 +135,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             trace_path=values.get_str(
                 "FLOW_AGENT_TRACE_PATH",
                 ("observe", "trace_path"),
-                str(project_root / ".flow_agent" / "trace.jsonl"),
+                str(project_root / ".flow" / "trace.jsonl"),
             ),
         ),
         memory_policy=MemoryPolicySettings(
@@ -179,17 +179,17 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             source_file=values.get_str(
                 "FLOW_AGENT_PROACTIVE_SOURCE_FILE",
                 ("proactive", "source_file"),
-                str(project_root / ".flow_agent" / "proactive_items.txt"),
+                str(project_root / ".flow" / "proactive_items.txt"),
             ),
             todo_file=values.get_str(
                 "FLOW_AGENT_PROACTIVE_TODO_FILE",
                 ("proactive", "todo_file"),
-                str(project_root / ".flow_agent" / "todo_items.txt"),
+                str(project_root / ".flow" / "todo_items.txt"),
             ),
             tasks_file=values.get_str(
                 "FLOW_AGENT_PROACTIVE_TASKS_FILE",
                 ("proactive", "tasks_file"),
-                str(project_root / ".flow_agent" / "tasks.txt"),
+                str(project_root / ".flow" / "tasks.txt"),
             ),
             rss_feed_files=values.get_csv(
                 "FLOW_AGENT_PROACTIVE_RSS_FEED_FILES",
@@ -204,7 +204,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             skills_dir=values.get_str(
                 "FLOW_AGENT_SKILLS_DIR",
                 ("proactive", "skills_dir"),
-                str(project_root / "skills"),
+                str(project_root / ".flow" / "skills"),
             ),
             min_priority_to_send=values.get_float(
                 "FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND",
@@ -287,7 +287,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             tasks_file=values.get_str(
                 "FLOW_AGENT_SUBAGENT_TASKS_FILE",
                 ("subagent", "tasks_file"),
-                str(project_root / ".flow_agent" / "subagent_tasks.jsonl"),
+                str(project_root / ".flow" / "subagent_tasks.jsonl"),
             ),
         ),
         governance=ConfigGovernanceSettings(
