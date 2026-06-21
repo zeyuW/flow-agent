@@ -21,6 +21,10 @@ class LoggingSettings(BaseModel):
 
 class SessionSettings(BaseModel):
     default_session_id: str = "default"
+    max_history_messages: int = 500
+    cache_size: int = 64
+    undo_enabled: bool = True
+    tool_result_max_chars: int = 10000
 
 
 class ToolingSettings(BaseModel):

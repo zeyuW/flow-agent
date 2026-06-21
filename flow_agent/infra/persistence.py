@@ -23,13 +23,58 @@ class PersistenceManager:
             )
             row = conn.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
             current_version = int(row[0]) if row else 0
-            target_version = 1
+            target_version = 2
             if current_version < 1:
                 self._migrate_to_v1(conn)
+                current_version = 1
+            if current_version < 2:
+                self._migrate_to_v2(conn)
+                current_version = 2
                 conn.execute(
                     "INSERT INTO schema_version(id, version) VALUES(1, ?) ON CONFLICT(id) DO UPDATE SET version=excluded.version",
                     (target_version,),
                 )
+
+
+    def _migrate_to_v2(self, conn) -> None:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                key TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                last_consolidated INTEGER NOT NULL DEFAULT 0,
+                next_seq INTEGER NOT NULL DEFAULT 1,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS messages_v2 (
+                id TEXT PRIMARY KEY,
+                session_key TEXT NOT NULL,
+                seq INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                tool_chain TEXT NOT NULL DEFAULT '[]',
+                extra TEXT NOT NULL DEFAULT '{}',
+                ts TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_v2_session_key_seq
+            ON messages_v2(session_key, seq)
+        """)
+        # Migrate old messages to new format
+        try:
+            old_msgs = conn.execute("SELECT id, session_id, role, content, created_at FROM messages").fetchall()
+            for row in old_msgs:
+                conn.execute(
+                    """INSERT OR IGNORE INTO messages_v2
+                    (id, session_key, seq, role, content, tool_chain, extra, ts)
+                    VALUES (?, ?, ?, ?, ?, '[]', '{}', ?)""",
+                    (f"{row[1]}:{row[0]}", row[1], row[0], row[2], row[3], row[4]),
+                )
+        except Exception:
+            pass
 
     def cleanup_retention(self, *, keep_days: int = 30) -> None:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, keep_days))).isoformat()

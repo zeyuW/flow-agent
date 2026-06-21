@@ -21,6 +21,9 @@ from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.consolidation import MemoryConsolidator
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
+from flow_agent.session.session_store import SessionStore
+from flow_agent.session.session_manager import SessionManager
+from flow_agent.tools.undo import UndoTool
 from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_events
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
@@ -81,7 +84,9 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     # 消息存储和上下文
     message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
-    context = ConversationContext(store=message_store)
+    session_store = SessionStore(Path(cfg.storage.memory_db_path))
+    session_manager = SessionManager(session_store)
+    context = ConversationContext(db_path=Path(cfg.storage.memory_db_path))
 
     # 记忆检索器
     retriever = (
@@ -155,6 +160,10 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
+        undo_tool = UndoTool()
+        undo_tool.session_manager = session_manager
+        undo_tool.memory_store = None  # set after memory runtime creation
+        tool_registry.register(undo_tool)
 
     # MCP
     mcp_registry = _build_mcp_registry(cfg, Path(DATA_DIR))
