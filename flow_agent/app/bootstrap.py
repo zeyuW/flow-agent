@@ -22,6 +22,10 @@ from flow_agent.memory.organizer import SimpleMemoryOrganizer
 from flow_agent.memory.consolidation import MemoryConsolidator
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import SQLiteMessageStore
+from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_events
+from flow_agent.memory.memory_engine import MemoryEngine
+from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
+from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.dashboard.store import InMemoryDashboardStore
 from flow_agent.dashboard.api import DashboardServer
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
@@ -274,6 +278,15 @@ def create_app_runtime():
     message_bus = create_message_bus()
     event_bus = create_event_bus()
 
+    # 创建记忆运行时（双层记忆架构）
+    memory_runtime = build_memory_runtime(
+        data_dir=Path(DATA_DIR),
+        api_key=cfg.api_key,
+        base_url=cfg.base_url,
+    )
+    # 绑定记忆事件（TurnCommitted 后自动触发记忆处理）
+    wire_memory_events(memory_runtime, event_bus)
+
     # 创建管道
     pipeline = create_passive_turn_pipeline(
         agent=agent,
@@ -380,6 +393,19 @@ def create_app_runtime():
         proactive_runtime=proactive_runtime,
     )
 
+    # 注册记忆工具到工具注册表
+    tool_registry.register(
+        RecallMemoryToolAdapter(RecallMemoryTool(engine=memory_runtime.engine))
+    )
+    tool_registry.register(
+        MemorizeToolAdapter(
+            MemorizeTool(
+                memorizer=memory_runtime.memorizer,
+                store=memory_runtime.vector_store,
+            )
+        )
+    )
+
     subagent_runtime = create_subagent_runtime(
         DATA_DIR,
         dashboard=dashboard,
@@ -405,6 +431,7 @@ def create_app_runtime():
         event_bus,
         agent_loop,
         pipeline,
+        memory_runtime,
     )
 
 

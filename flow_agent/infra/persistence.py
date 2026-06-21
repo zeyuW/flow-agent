@@ -86,6 +86,35 @@ class PersistenceManager:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                memory_type TEXT NOT NULL,
+                summary TEXT NOT NULL,
+                embedding_json TEXT,
+                content_hash TEXT NOT NULL,
+                reinforcement INTEGER NOT NULL DEFAULT 1,
+                emotional_weight REAL NOT NULL DEFAULT 1.0,
+                status TEXT NOT NULL DEFAULT 'active',
+                source_ref TEXT NOT NULL DEFAULT '',
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_content_hash_type
+            ON memory_items(content_hash, memory_type)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memory_status
+            ON memory_items(status)
+            """
+        )
 
     def _connect(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
