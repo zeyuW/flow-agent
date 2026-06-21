@@ -10,7 +10,7 @@ build/
 .idea/
 .vscode/
 .env
-.flow_agent/
+.flow/
 *.db
 *.db-journal
 .cursor/

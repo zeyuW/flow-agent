@@ -6,9 +6,8 @@ from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.event_bus import EventBus
 from flow_agent.core.agent_loop import AgentLoop
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
-from flow_agent.mcp.client import MCPClient
-from flow_agent.mcp.registry import MCPRegistry, MCPServerConfig
-from flow_agent.mcp.tool_adapter import MCPToolAdapter
+from flow_agent.mcp.server_registry import McpServerRegistry
+from flow_agent.tools.mcp_manage import McpAddTool, McpRemoveTool, McpListTool
 from flow_agent.core.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.context import ConversationContext
@@ -158,8 +157,8 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         tool_registry.register(ReadFileTool())
 
     # MCP
-    mcp_registry = _build_mcp_registry(cfg)
-    _register_mcp_tools(tool_registry, mcp_registry)
+    mcp_registry = _build_mcp_registry(cfg, Path(DATA_DIR))
+    _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg)
 
     # Agent
     agent = Agent(
@@ -510,32 +509,25 @@ def create_runtime_service(
     return runtime_service
 
 
-def _build_mcp_registry(settings) -> MCPRegistry:
-    mcp_registry = MCPRegistry()
+def _build_mcp_registry(settings, data_dir) -> McpServerRegistry:
+    mcp_registry = McpServerRegistry(
+        config_path=data_dir / "mcp_servers.json",
+        tool_registry=None,
+    )
     if not settings.mcp.enabled:
         return mcp_registry
-    for server in settings.mcp.servers or []:
-        handlers = {
-            tool_name: (lambda payload, name=tool_name: f"{name}:{payload}")
-            for tool_name in server.tools or []
-        }
-        client = MCPClient(server_name=server.name, tool_handlers=handlers)
-        mcp_registry.register_server(
-            MCPServerConfig(name=server.name, enabled=server.enabled, tools=server.tools or []),
-            client,
-        )
-        if server.enabled:
-            mcp_registry.mount(server.name)
     return mcp_registry
 
 
-def _register_mcp_tools(tool_registry: ToolRegistry, mcp_registry: MCPRegistry) -> None:
-    for server_name, tool_name, description in mcp_registry.discover_tools():
-        tool_registry.register(
-            MCPToolAdapter(
-                server_name=server_name,
-                tool_name=tool_name,
-                description_text=description,
-                registry=mcp_registry,
-            )
-        )
+def _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg):
+    if not cfg.mcp.enabled:
+        return
+    for server in (cfg.mcp.servers or []):
+        if not server.enabled:
+            continue
+        tool_registry.unregister(f"mcp:{server.name}")
+        mcp_registry._config_server_specs[server.name] = {
+            "command": getattr(server, "command", [f"echo", server.name]),
+            "env": {},
+            "cwd": None,
+        }

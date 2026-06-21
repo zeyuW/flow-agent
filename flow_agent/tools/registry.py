@@ -15,6 +15,16 @@ class ToolRegistry:
     def register(self, tool: Tool) -> None:
         self._tools[tool.name] = tool
 
+    def register_with_meta(self, tool, risk="read-only", source_type="", source_name=""):
+        self._tools[tool.name] = tool
+        if hasattr(self, '_execution_policy'):
+            self._execution_policy.risk_by_tool[tool.name] = risk
+
+    def unregister(self, tool_name):
+        self._tools.pop(tool_name, None)
+        if hasattr(self, '_execution_policy'):
+            self._execution_policy.risk_by_tool.pop(tool_name, None)
+
     def list_tool_descriptions(self) -> list[dict[str, str]]:
         return [
             {"name": tool.name, "description": tool.description}
