@@ -63,6 +63,8 @@ from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
+from flow_agent.tools.spawn import SpawnTool
+from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.tools.registry import ToolRegistry
 
 
@@ -160,6 +162,7 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
+        tool_registry.register(SpawnTool())
         undo_tool = UndoTool()
         undo_tool.session_manager = session_manager
         undo_tool.memory_store = None  # set after memory runtime creation
@@ -419,7 +422,12 @@ def create_app_runtime():
         dashboard=dashboard,
         tasks_file=cfg.subagent.tasks_file,
         max_concurrency=cfg.subagent.max_concurrency,
+        message_bus=message_bus,
+        llm_client=llm_client,
     )
+
+    # Wire SpawnTool to subagent manager
+    spawn_tool._manager = subagent_runtime.manager
 
     dashboard_server = DashboardServer(
         store=dashboard,

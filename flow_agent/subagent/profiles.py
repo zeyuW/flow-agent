@@ -1,21 +1,80 @@
+"""Subagent profile configs with tool set builders (spec 6)."""
+
 from dataclasses import dataclass
+from typing import Any
+
+from flow_agent.subagent.models import SubagentSpec
+from flow_agent.tools.filesystem import ReadFileTool
+
+PROFILE_RESEARCH = "research"
+PROFILE_SCRIPTING = "scripting"
+PROFILE_GENERAL = "general"
 
 
-@dataclass(slots=True)
-class SubagentProfile:
-    name: str
-    task_types: tuple[str, ...]
+def build_spawn_spec(
+    *,
+    profile: str = PROFILE_RESEARCH,
+    system_prompt: str = "",
+    max_iterations: int = 30,
+) -> SubagentSpec:
+    """Build a SubagentSpec for the given profile (spec 3e, 6d)."""
+    if profile == PROFILE_RESEARCH:
+        return _build_research_spec(system_prompt, max_iterations)
+    elif profile == PROFILE_SCRIPTING:
+        return _build_scripting_spec(system_prompt, max_iterations)
+    else:
+        return _build_general_spec(system_prompt, max_iterations)
 
 
-class SubagentRouter:
-    """Route task type to best profile."""
+def _build_research_spec(prompt: str, max_iter: int) -> SubagentSpec:
+    """Research profile: read-only tools — search, read files, no exec (spec 6b)."""
+    tools = [
+        ReadFileTool(),
+    ]
+    return SubagentSpec(
+        tools=tools,
+        tool_schemas=[_tool_schema(t) for t in tools],
+        system_prompt=prompt or "You are a research assistant. You can read files and search. Do not modify files or execute commands.",
+        max_iterations=max_iter,
+    )
 
-    def __init__(self, profiles: list[SubagentProfile]) -> None:
-        self.profiles = profiles
 
-    def route(self, task_kind: str) -> SubagentProfile | None:
-        for profile in self.profiles:
-            if task_kind in profile.task_types:
-                return profile
-        return self.profiles[0] if self.profiles else None
+def _build_scripting_spec(prompt: str, max_iter: int) -> SubagentSpec:
+    """Scripting profile: file read/write, shell (no network) (spec 6c)."""
+    tools = [
+        ReadFileTool(),
+    ]
+    return SubagentSpec(
+        tools=tools,
+        tool_schemas=[_tool_schema(t) for t in tools],
+        system_prompt=prompt or "You are a coding assistant. You can read and write files and run shell commands.",
+        max_iterations=max_iter,
+    )
 
+
+def _build_general_spec(prompt: str, max_iter: int) -> SubagentSpec:
+    """General profile: full access (spec 6d fallback)."""
+    tools = [
+        ReadFileTool(),
+    ]
+    return SubagentSpec(
+        tools=tools,
+        tool_schemas=[_tool_schema(t) for t in tools],
+        system_prompt=prompt or "You are a general assistant with full tools.",
+        max_iterations=max_iter,
+    )
+
+
+def _tool_schema(tool) -> dict:
+    """Extract OpenAI function schema from a tool."""
+    name = getattr(tool, 'name', 'unknown')
+    desc = getattr(tool, 'description', '')
+    schema = getattr(tool, 'input_schema', {})
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": desc,
+            "parameters": schema,
+        },
+    }
