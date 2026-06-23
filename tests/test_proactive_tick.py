@@ -1,105 +1,149 @@
+"""Tests for the new ProactiveTurnPipeline (Gate + Fetch + Judge + Resolve + Deliver)."""
+
 from pathlib import Path
 
-from flow_agent.proactive.pipeline import (
-    CandidateRanker,
-    DecisionLayer,
-    DriftRunner,
-    PreGate,
-    ProactiveTickRunner,
-    SourceGateway,
+from flow_agent.proactive.gate import ProactiveStateStore, AnyActionGate, check_gate
+from flow_agent.proactive.models import (
+    AgentTick, GateResult, GatewayResult, DataItem,
+    JudgeResult, ResolveResult, DeliverResult,
 )
-from flow_agent.proactive.sources import LocalFileSource
-from flow_agent.proactive.store import SQLiteProactiveSentStore
+from flow_agent.proactive.resolve import resolve_decision
+from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
+from flow_agent.proactive.data_gateway import DataGateway
+from flow_agent.proactive.judge_loop import JudgeLoop
+from flow_agent.proactive.mcp_pool import McpClientPool
+from flow_agent.proactive.deliver import deliver_message
 
 
-def test_proactive_tick_send_and_dedup(tmp_path: Path):
-    source_file = tmp_path / "proactive_items.txt"
-    source_file.write_text("follow up with user\n", encoding="utf-8")
-    db_path = tmp_path / "memory.db"
+# ── fake helpers ──
 
-    sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
-    source = LocalFileSource(source_file)
-    runner = ProactiveTickRunner(
-        gate=gate,
-        gateway=SourceGateway([source]),
-        ranker=CandidateRanker(),
-        decision_layer=DecisionLayer(min_priority_to_send=0.0),
-        drift_runner=DriftRunner(tmp_path / "tasks.txt"),
-        sent_store=sent_store,
-        dedup_ttl_seconds=3600,
+class _FakeLLM:
+    """Fake LLM that skips (no tool_calls)."""
+
+    def generate(self, messages, tools=None):
+        class _Resp:
+            content = ""
+            tool_calls = []
+        return _Resp()
+
+
+def _build_pipeline(store, any_action, cooldown=0.0):
+    pool = McpClientPool()
+    gateway = DataGateway(pool)
+    judge = JudgeLoop(llm_client=_FakeLLM())
+    return ProactiveTurnPipeline(
+        state_store=store,
+        gateway=gateway,
+        judge=judge,
+        any_action=any_action,
+        cooldown=cooldown,
     )
 
-    first = runner.tick()
-    second = runner.tick()
 
-    assert first.sent is True
-    assert first.reason == "sent"
-    assert second.sent is False
-    assert second.reason == "dedup_hit"
+# ── tests ──
+
+def test_gate_blocks_when_no_chat_id():
+    result = check_gate(chat_id="", is_busy=False)
+    assert result.passed is False
+    assert result.reason == "no_target"
 
 
-def test_proactive_tick_dispatcher_called(tmp_path: Path):
-    source_file = tmp_path / "proactive_items.txt"
-    source_file.write_text("ping qq now\n", encoding="utf-8")
-    db_path = tmp_path / "memory.db"
-    sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
-    source = LocalFileSource(source_file)
-    captured: list[str] = []
-
-    class _Dispatcher:
-        def dispatch(self, candidate) -> None:
-            captured.append(candidate.content)
-
-    runner = ProactiveTickRunner(
-        gate=gate,
-        gateway=SourceGateway([source]),
-        ranker=CandidateRanker(),
-        decision_layer=DecisionLayer(min_priority_to_send=0.0),
-        drift_runner=DriftRunner(tmp_path / "tasks.txt"),
-        sent_store=sent_store,
-        dedup_ttl_seconds=3600,
-        dispatcher=_Dispatcher(),
+def test_gate_passes_when_all_clear():
+    store = ProactiveStateStore()
+    any_action = AnyActionGate(max_per_day=100)
+    result = check_gate(
+        chat_id="test_chat",
+        state_store=store,
+        any_action=any_action,
+        base_score=0.5,
     )
-    result = runner.tick()
+    assert result.passed is True
+
+
+def test_pipeline_run_blocked_by_gate():
+    store = ProactiveStateStore()
+    any_action = AnyActionGate(max_per_day=100)
+    pipeline = _build_pipeline(store, any_action)
+
+    import asyncio
+    tick = asyncio.run(pipeline.run(chat_id="", base_score=0.5))
+    assert isinstance(tick, AgentTick)
+    assert tick.gate_result.passed is False
+
+
+def test_pipeline_run_passed_gate():
+    store = ProactiveStateStore()
+    any_action = AnyActionGate(max_per_day=100)
+    pipeline = _build_pipeline(store, any_action)
+
+    import asyncio
+    tick = asyncio.run(pipeline.run(chat_id="test_chat", base_score=0.9))
+    assert tick.gate_result.passed is True
+    # DataGateway returns empty results (no MCP servers configured)
+    assert tick.gateway_result is not None
+    assert tick.gateway_result.alerts == []
+
+
+def test_resolve_skip_when_judge_says_skip():
+    store = ProactiveStateStore()
+    judge = JudgeResult(decision="skip", message="nothing interesting")
+    result = resolve_decision(judge, state_store=store)
+    assert result.decision == "skip"
+
+
+def test_resolve_skip_on_dedup():
+    store = ProactiveStateStore()
+    # Use the same cited_item_ids that resolve_decision will compute the key from
+    cited = ["item_xyz"]
+    import hashlib
+    # _build_delivery_key sorts and hashes: hashlib.sha256(",".join(sorted(cited)).encode()).hexdigest()[:24]
+    actual_key = hashlib.sha256(",".join(sorted(cited)).encode()).hexdigest()[:24]
+    store.mark_sent(actual_key)
+    judge = JudgeResult(
+        decision="reply",
+        message="repeated message",
+        cited_item_ids=cited,
+    )
+    result = resolve_decision(judge, state_store=store)
+    assert result.decision == "skip"
+
+
+def test_resolve_send_when_no_dedup():
+    store = ProactiveStateStore()
+    judge = JudgeResult(
+        decision="reply",
+        message="fresh news",
+        cited_item_ids=["new_item_123"],
+    )
+    result = resolve_decision(judge, state_store=store)
+    assert result.decision == "send"
+    assert result.message == "fresh news"
+
+
+def test_deliver_sets_sent_flag():
+    resolve = ResolveResult(
+        decision="send",
+        message="hello",
+        cited_item_ids=["id1"],
+        delivery_key="key1",
+    )
+    import asyncio
+    result = asyncio.run(deliver_message(resolve, chat_id="test"))
+    assert isinstance(result, DeliverResult)
     assert result.sent is True
-    assert len(captured) == 1
-    assert "ping qq now" in captured[0]
 
 
-def test_proactive_tick_runs_drift_when_no_candidate(tmp_path: Path):
-    db_path = tmp_path / "memory.db"
-    tasks_file = tmp_path / "tasks.txt"
-    tasks_file.write_text("light-check\n", encoding="utf-8")
-
-    sent_store = SQLiteProactiveSentStore(db_path=db_path)
-    gate = PreGate(sent_store=sent_store, cooldown_seconds=0)
-    empty_source = LocalFileSource(tmp_path / "missing.txt")
-    runner = ProactiveTickRunner(
-        gate=gate,
-        gateway=SourceGateway([empty_source]),
-        ranker=CandidateRanker(),
-        decision_layer=DecisionLayer(min_priority_to_send=0.0),
-        drift_runner=DriftRunner(tasks_file),
-        sent_store=sent_store,
-        dedup_ttl_seconds=3600,
-    )
-
-    result = runner.tick()
+def test_deliver_skip_when_not_send():
+    resolve = ResolveResult(decision="skip", message="")
+    import asyncio
+    result = asyncio.run(deliver_message(resolve, chat_id="test"))
     assert result.sent is False
-    assert result.reason == "no_candidate:plan:readonly_task:light-check"
 
 
-def test_candidate_ranker_feedback_boosts_sent_source():
-    from flow_agent.proactive.pipeline import CandidateRanker
-    from flow_agent.proactive.types import ProactiveCandidate
-
-    ranker = CandidateRanker()
-    c1 = ProactiveCandidate(key="a", content="A", source="s1", priority=0.5)
-    c2 = ProactiveCandidate(key="b", content="B", source="s2", priority=0.5)
-    first = ranker.rank([c1, c2])[0]
-    assert first.key in {"a", "b"}
-    ranker.mark_feedback("s2", sent=True)
-    second = ranker.rank([c1, c2])[0]
-    assert second.source == "s2"
+def test_state_store_maintains_counts():
+    store = ProactiveStateStore()
+    assert store.daily_count == 0
+    store.mark_sent("k1")
+    assert store.daily_count == 1
+    store.mark_sent("k2")
+    assert store.daily_count == 2

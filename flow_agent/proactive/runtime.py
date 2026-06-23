@@ -1,84 +1,58 @@
-import logging
-import threading
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Callable
+"""Proactive runtime factory: build_proactive_runtime (spec 1a)."""
 
-from flow_agent.proactive.pipeline import ProactiveTickRunner
-from flow_agent.proactive.types import SchedulerStatus
-
-
-logger = logging.getLogger(__name__)
+from flow_agent.proactive.data_gateway import DataGateway
+from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore
+from flow_agent.proactive.judge_loop import JudgeLoop
+from flow_agent.proactive.mcp_pool import McpClientPool
+from flow_agent.proactive.proactive_loop import ProactiveLoop
+from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
 
 
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+def build_proactive_runtime(
+    *,
+    chat_id: str = "",
+    llm_client=None,
+    memory_engine=None,
+    session_manager=None,
+    outbound_port=None,
+    mcp_servers: list[dict] | None = None,
+    max_per_day: int = 5,
+    min_interval: float = 30.0,
+    max_interval: float = 300.0,
+        is_busy_fn = None
+    cooldown: float = 120.0,
+) -> ProactiveLoop:
+    """Build the full proactive runtime (spec 1a).
 
+    Returns a ProactiveLoop that can be started as a background task.
+    """
+    pool = McpClientPool()
+    if mcp_servers:
+        for s in mcp_servers:
+            pool.add_server(**s)
 
-class IntervalScheduler:
-    '''在固定间隔内运行主动运行时，没有重入执行'''
+    state = ProactiveStateStore()
+    gateway = DataGateway(pool)
+    judge = JudgeLoop(llm_client=llm_client, memory_engine=memory_engine)
+    any_action = AnyActionGate(max_per_day=max_per_day)
 
-    def __init__(self, interval_seconds: int, task: Callable[[], None]) -> None:
-        self.interval_seconds = interval_seconds
-        self.task = task
-        self._running = False
-        self._is_executing = False
-        self._lock = threading.Lock()
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
-        self._last_started_at: datetime | None = None
-        self._last_finished_at: datetime | None = None
+    pipeline = ProactiveTurnPipeline(
+        state_store=state,
+        gateway=gateway,
+        judge=judge,
+        any_action=any_action,
+        cooldown=cooldown,
+        session_manager=session_manager,
+        outbound_port=outbound_port,
+    )
 
-    def start(self) -> None:
-        if self._running:
-            return
-        self._running = True
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
+    loop = ProactiveLoop(
+        pipeline=pipeline,
+        mcp_pool=pool,
+        chat_id=chat_id,
+        min_interval=min_interval,
+        max_interval=max_interval,
+        is_busy_fn=is_busy_fn,
+    )
 
-    def stop(self) -> None:
-        if not self._running:
-            return
-        self._running = False
-        self._stop_event.set()
-        if self._thread is not None:
-            self._thread.join(timeout=self.interval_seconds + 1)
-            self._thread = None
-
-    def status(self) -> SchedulerStatus:
-        return SchedulerStatus(
-            running=self._running,
-            is_executing=self._is_executing,
-            last_started_at=self._last_started_at,
-            last_finished_at=self._last_finished_at,
-        )
-
-    '''运行一次'''
-    def run_once(self) -> None:
-        if not self._lock.acquire(blocking=False):
-            return
-        try:
-            self._is_executing = True
-            self._last_started_at = _utc_now()
-            self.task()
-        except Exception:
-            logger.exception("proactive scheduler task failed")
-        finally:
-            self._last_finished_at = _utc_now()
-            self._is_executing = False
-            self._lock.release()
-
-    def _run_loop(self) -> None:
-        while not self._stop_event.wait(self.interval_seconds):
-            self.run_once()
-
-
-@dataclass(slots=True)
-class ProactiveRuntime:
-    '''
-    调度器 
-    执行器
-    '''
-    scheduler: IntervalScheduler
-    tick_runner: ProactiveTickRunner
+    return loop

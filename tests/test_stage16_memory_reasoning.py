@@ -9,8 +9,8 @@ from flow_agent.memory.query_builder import RetrievalQueryBuilder
 from flow_agent.memory.query_rewriter import QueryRewriter
 from flow_agent.memory.retriever import KeywordMemoryRetriever
 from flow_agent.memory.store import InMemoryMessageStore
-from flow_agent.proactive.judge import ProactiveJudge
-from flow_agent.proactive.types import ProactiveCandidate
+from flow_agent.proactive.judge_loop import JudgeLoop
+from flow_agent.proactive.models import DataItem
 from flow_agent.subagent.manager import SubagentManager
 
 
@@ -50,11 +50,21 @@ def test_consolidation_worker_registers_job():
 
 
 def test_proactive_judge_decision():
-    judge = ProactiveJudge()
-    send = judge.decide(ProactiveCandidate(key="a", content="这是一个可发送的跟进提醒消息", priority=0.9))
-    skip = judge.decide(ProactiveCandidate(key="b", content="短", priority=0.9))
-    assert send.action in {"send", "defer"}
-    assert skip.action in {"skip", "defer"}
+    # New architecture: JudgeLoop async LLM tool-call loop for content classification
+    from flow_agent.proactive.models import GatewayResult
+    class _FakeLLM:
+        def generate(self, messages, tools=None):
+            class _R:
+                content = ""
+                tool_calls = []
+            return _R()
+    judge = JudgeLoop(llm_client=_FakeLLM(), max_steps=1)
+    gateway = GatewayResult(alerts=[
+        DataItem(source="alert", item_id="a", title="test", summary="test", priority_hint=0.9)
+    ])
+    import asyncio
+    result = asyncio.run(judge.evaluate(gateway))
+    assert result.decision in {"reply", "skip"}
 
 
 def test_subagent_parent_child_trace_and_poll(tmp_path: Path):

@@ -1,21 +1,22 @@
-from dataclasses import dataclass
+"""Facade for proactive runtime operations."""
 
-from flow_agent.proactive.runtime import ProactiveRuntime
-from flow_agent.proactive.types import ProactiveTickResult
+from dataclasses import dataclass
+import asyncio
+
+from flow_agent.proactive.proactive_loop import ProactiveLoop
 
 
 @dataclass(slots=True)
 class ProactiveFacade:
     """Facade for proactive runtime operations."""
 
-    runtime: ProactiveRuntime
+    loop: ProactiveLoop
 
-    def tick(self) -> ProactiveTickResult:
-        return self.runtime.tick_runner.tick()
+    async def start_background(self) -> asyncio.Task:
+        return await self.loop.start_background()
 
-    def start(self) -> None:
-        self.runtime.scheduler.start()
+    async def stop(self) -> None:
+        await self.loop.stop()
 
-    def stop(self) -> None:
-        self.runtime.scheduler.stop()
-
+    def is_running(self) -> bool:
+        return self.loop._running

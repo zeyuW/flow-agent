@@ -39,26 +39,7 @@ from flow_agent.infra.persistence import PersistenceManager
 from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
-from flow_agent.proactive.runtime import ProactiveRuntime
-from flow_agent.proactive.runtime import IntervalScheduler
-from flow_agent.proactive.sources import (
-    LocalFileSource,
-    LocalTodoSource,
-    MemoryFollowUpSource,
-    RSSFeedSource,
-    WebSnapshotSource,
-)
-from flow_agent.proactive.pipeline import (
-    CandidateRanker,
-    ContentStore,
-    DecisionLayer,
-    DriftRunner,
-    PreGate,
-    ProactiveTickRunner,
-    SourceGateway,
-)
-from flow_agent.proactive.judge import ProactiveJudge
-from flow_agent.proactive.store import SQLiteProactiveSentStore
+from flow_agent.proactive.runtime import build_proactive_runtime
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
@@ -271,7 +252,7 @@ def create_app_runtime():
     """组装完整应用运行时。
 
     返回:
-        (orchestrator, proactive_runtime, dashboard_server, background_runtime,
+        (orchestrator, proactive_loop, dashboard_server, background_runtime,
          subagent_runtime, runtime_service, message_bus, event_bus,
          agent_loop, pipeline)
     """
@@ -345,63 +326,26 @@ def create_app_runtime():
         dashboard=dashboard,
     )
 
-    proactive_scheduler = IntervalScheduler()
-    proactive_store = SQLiteProactiveSentStore(Path(cfg.storage.memory_db_path))
-    proactive_sources = [
-        LocalFileSource(name="local_file", root=Path(DATA_DIR)),
-        LocalTodoSource(name="local_todo", root=Path(DATA_DIR)),
-        MemoryFollowUpSource(
-            name="memory_followup",
-            store=proactive_store,
-            retriever=retriever,
-            lookback_days=cfg.proactive.memory_lookback_days,
-        ),
-        RSSFeedSource(
-            name="rss",
-            feeds=cfg.proactive.rss_feeds or [],
-            store=proactive_store,
-        ),
-        WebSnapshotSource(
-            name="web_snapshot",
-            targets=cfg.proactive.web_snapshot_targets or [],
-            store=proactive_store,
-            frequency_check=ProactiveFrequencyGuard("web_snapshot", interval_hours=cfg.proactive.snapshot_interval_hours),
-        ),
-    ]
-    content_store = ContentStore()
-    source_gateway = SourceGateway(sources=proactive_sources, store=content_store)
-    candidate_ranker = CandidateRanker()
-    decision_layer = DecisionLayer()
-    drift_runner = DriftRunner(
-        orchestrator=orchestrator,
-        tool_registry=tool_registry,
-    ) if cfg.proactive.drift_enabled else None
-    pre_gate = PreGate()
-    judge = ProactiveJudge(
+    proactive_loop = build_proactive_runtime(
+        chat_id="default",
         llm_client=OpenAILLMClient(
             cfg,
             model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
             api_key_override=cfg.provider.fast_api_key,
             base_url_override=cfg.provider.fast_base_url,
         ),
-    )
-    tick_runner = ProactiveTickRunner(
-        scheduler=proactive_scheduler,
-        gateway=source_gateway,
-        ranker=candidate_ranker,
-        layer=decision_layer,
-        drift=drift_runner,
-        pre_gate=pre_gate,
-        judge=judge,
-    )
-    proactive_runtime = ProactiveRuntime(
-        scheduler=proactive_scheduler,
-        tick_runner=tick_runner,
+        memory_engine=memory_runtime.engine,
+        session_manager=session_manager,
+        outbound_port=message_bus.outbound_port,
+        max_per_day=5,
+        min_interval=30.0,
+        max_interval=300.0,
+        cooldown=120.0,
     )
 
     runtime_service = create_runtime_service(
         dashboard=dashboard,
-        proactive_runtime=proactive_runtime,
+        proactive_loop=proactive_loop,
     )
 
     # 注册记忆工具到工具注册表
@@ -438,7 +382,7 @@ def create_app_runtime():
 
     return (
         orchestrator,
-        proactive_runtime,
+        proactive_loop,
         dashboard_server,
         background_runtime,
         subagent_runtime,
@@ -453,7 +397,7 @@ def create_app_runtime():
 
 def create_runtime_service(
     dashboard: InMemoryDashboardStore,
-    proactive_runtime,
+    proactive_loop,
 ) -> RuntimeService:
     """创建 RuntimeService（保持原有逻辑）。"""
 
@@ -469,20 +413,20 @@ def create_runtime_service(
     )
 
     def _proactive_snapshot() -> RuntimeUnitSnapshot:
-        status = proactive_runtime.scheduler.status()
+        status = proactive_loop
         return RuntimeUnitSnapshot(
             name="proactive",
-            running=status.running,
+            running=proactive_loop._running,
             details={
-                "is_executing": status.is_executing,
+                "is_executing": proactive_loop._running,
                 "last_started_at": (
-                    status.last_started_at.isoformat()
-                    if status.last_started_at is not None
+                    None.isoformat()
+                    if None is not None
                     else None
                 ),
                 "last_finished_at": (
-                    status.last_finished_at.isoformat()
-                    if status.last_finished_at is not None
+                    None.isoformat()
+                    if None is not None
                     else None
                 ),
             },
@@ -491,12 +435,12 @@ def create_runtime_service(
     runtime_service.register(
         RuntimeUnit(
             name="proactive",
-            start_fn=proactive_runtime.scheduler.start,
-            stop_fn=proactive_runtime.scheduler.stop,
+            start_fn=lambda: None,
+            stop_fn=proactive_loop.stop,
             health_fn=lambda: RuntimeHealth(
                 name="proactive",
                 ok=True,
-                detail=f"running={proactive_runtime.scheduler.status().running}",
+                detail=f"running={proactive_loop._running}",
             ),
             snapshot_fn=_proactive_snapshot,
         )

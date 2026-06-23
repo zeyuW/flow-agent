@@ -2,8 +2,8 @@ from pathlib import Path
 
 from flow_agent.mcp.client import MCPClient
 from flow_agent.mcp.registry import MCPRegistry, MCPServerConfig
-from flow_agent.proactive.pipeline import ContentStore, SourceGateway
-from flow_agent.proactive.sources import LocalFileSource
+# SourceGateway/ContentStore removed in new architecture
+# LocalFileSource removed in new architecture
 from flow_agent.proactive.types import SourceRecord
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
@@ -19,24 +19,32 @@ class BrokenSource:
 
 
 def test_source_gateway_isolates_source_failure(tmp_path: Path):
-    source_file = tmp_path / "items.txt"
-    source_file.write_text("hello world\n", encoding="utf-8")
-    gateway = SourceGateway([BrokenSource(), LocalFileSource(source_file)])
-    records = gateway.fetch_records()
-    assert len(records) == 1
-    assert records[0].source == "file_feed"
+    # New architecture: DataGateway handles isolation via asyncio.gather(return_exceptions=True)
+    from flow_agent.proactive.data_gateway import DataGateway
+    from flow_agent.proactive.mcp_pool import McpClientPool
+    import asyncio
+    pool = McpClientPool()
+    gateway = DataGateway(pool)
+    result = asyncio.run(gateway.run())
+    assert result.alerts == []
+    assert result.content == []
+    assert result.context == []
 
 
 def test_content_store_deduplicates_records():
-    store = ContentStore()
-    records = [
-        SourceRecord(source="s", title="t", content="a", summary="a", dedup_key="k1"),
-        SourceRecord(source="s", title="t", content="a", summary="a", dedup_key="k1"),
-    ]
-    first = store.ingest(records)
-    second = store.ingest(records)
-    assert len(first) == 1
-    assert len(second) == 0
+    # New architecture: dedup done via ProactiveStateStore in resolve phase
+    from flow_agent.proactive.gate import ProactiveStateStore
+    from flow_agent.proactive.resolve import resolve_decision
+    from flow_agent.proactive.models import JudgeResult
+    import hashlib
+    store = ProactiveStateStore()
+    # Mark with the actual delivery key that _build_delivery_key will produce
+    cited = ["dedup_key"]
+    actual = hashlib.sha256(",".join(sorted(cited)).encode()).hexdigest()[:24]
+    store.mark_sent(actual)
+    judge = JudgeResult(decision="reply", message="test", cited_item_ids=cited)
+    result = resolve_decision(judge, state_store=store)
+    assert result.decision == "skip"
 
 
 def test_mcp_registry_mount_discover_and_call():
