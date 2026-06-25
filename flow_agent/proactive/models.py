@@ -16,6 +16,7 @@ class AgentTick:
     judge_result: "JudgeResult | None" = None
     resolve_result: "ResolveResult | None" = None
     deliver_result: "DeliverResult | None" = None
+    drift_tick = None  # DriftTick | None
     trace: str = ""
 
 

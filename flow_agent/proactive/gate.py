@@ -9,11 +9,12 @@ from flow_agent.proactive.models import GateResult
 
 @dataclass(slots=True)
 class ProactiveStateStore:
-    """Tracks last sent time and delivery keys for gate + dedup."""
+    """Tracks last sent time, delivery keys, and drift timestamp for gate + dedup."""
     _last_sent: float = 0.0
     _delivery_keys: dict[str, float] = field(default_factory=dict)
     _daily_count: int = 0
     _day_start: float = 0.0
+    _drift_last_at: float = 0.0
 
     def get_last_sent_at(self) -> float:
         return self._last_sent
@@ -39,6 +40,14 @@ class ProactiveStateStore:
         if int(self._day_start // 86400) != day:
             return 0
         return self._daily_count
+
+    def mark_drift_run(self) -> None:
+        """记录 drift 运行时间戳 (spec 5d)。"""
+        self._drift_last_at = time.time()
+
+    def get_drift_last_at(self) -> float:
+        """获取上次 drift 运行时间戳 (spec 1c)。"""
+        return self._drift_last_at
 
 
 @dataclass(slots=True)
