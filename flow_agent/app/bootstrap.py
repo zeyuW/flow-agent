@@ -337,10 +337,14 @@ def create_app_runtime():
         memory_engine=memory_runtime.engine,
         session_manager=session_manager,
         outbound_port=message_bus.outbound_port,
-        max_per_day=5,
-        min_interval=30.0,
-        max_interval=300.0,
-        cooldown=120.0,
+        max_per_day=cfg.proactive.max_per_day,
+        min_interval=cfg.proactive.min_interval,
+        max_interval=cfg.proactive.max_interval,
+        cooldown=cfg.proactive.cooldown,
+        drift_enabled=cfg.drift.enabled,
+        drift_data_dir=cfg.drift.data_dir,
+        drift_min_interval_hours=cfg.drift.min_interval_hours,
+        drift_max_steps=cfg.drift.max_steps,
     )
 
     runtime_service = create_runtime_service(

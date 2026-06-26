@@ -1,3 +1,5 @@
+"""配置加载器：从 env / .env / 外部 TOML 加载 Settings。"""
+
 import os
 from pathlib import Path
 import re
@@ -12,6 +14,7 @@ from flow_agent.config.settings import (
     ChannelsSettings,
     ConfigGovernanceSettings,
     DelegationPolicySettings,
+    DriftSettings,
     JobsSettings,
     LoggingSettings,
     MCPServerSettings,
@@ -60,17 +63,17 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         suffix = path.suffix.lower()
         if suffix == ".toml":
             try:
-                import tomli as _toml  # type: ignore[import-not-found]
+                import tomli as _toml
             except ModuleNotFoundError:
                 try:
-                    import tomllib as _toml  # type: ignore[attr-defined]
+                    import tomllib as _toml
                 except ModuleNotFoundError:
                     return {}
             raw = _toml.loads(path.read_text(encoding="utf-8"))
             return _expand_env_refs(raw) if isinstance(raw, dict) else {}
         if suffix in {".yaml", ".yml"}:
             try:
-                import yaml  # type: ignore[import-not-found]
+                import yaml
             except ModuleNotFoundError:
                 return {}
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -93,7 +96,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         model=build_llm_model_settings(values),
         storage=StorageSettings(
             memory_db_path=values.get_str(
-                "FLOW_AGENT_MEMORY_DB_PATH",
+                "FLOW_AGENT_STORAGE_MEMORY_DB_PATH",
                 ("storage", "memory_db_path"),
                 str(project_root / ".flow" / "memory.db"),
             )
@@ -103,186 +106,143 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         ),
         session=SessionSettings(
             default_session_id=values.get_str(
-                "FLOW_AGENT_DEFAULT_SESSION",
+                "FLOW_AGENT_SESSION_DEFAULT_ID",
                 ("session", "default_session_id"),
                 "default",
-            )
+            ),
         ),
         tooling=ToolingSettings(
-            enabled=values.get_bool("FLOW_AGENT_TOOLS_ENABLED", ("tooling", "enabled"), True),
+            enabled=values.get_bool("FLOW_AGENT_TOOLING_ENABLED", ("tooling", "enabled"), True),
             max_tool_steps=values.get_int(
-                "FLOW_AGENT_MAX_TOOL_STEPS",
-                ("tooling", "max_tool_steps"),
-                5,
-                minimum=1,
+                "FLOW_AGENT_TOOLING_MAX_STEPS", ("tooling", "max_tool_steps"), 5, minimum=1
             ),
         ),
         retrieval=RetrievalSettings(
-            enabled=values.get_bool(
-                "FLOW_AGENT_RETRIEVAL_ENABLED",
-                ("retrieval", "enabled"),
-                True,
-            ),
+            enabled=values.get_bool("FLOW_AGENT_RETRIEVAL_ENABLED", ("retrieval", "enabled"), True),
             max_items=values.get_int(
-                "FLOW_AGENT_RETRIEVAL_MAX_ITEMS",
-                ("retrieval", "max_items"),
-                6,
-                minimum=0,
+                "FLOW_AGENT_RETRIEVAL_MAX_ITEMS", ("retrieval", "max_items"), 6, minimum=0
             ),
         ),
         observe=ObserveSettings(
             enabled=values.get_bool("FLOW_AGENT_OBSERVE_ENABLED", ("observe", "enabled"), True),
             trace_path=values.get_str(
-                "FLOW_AGENT_TRACE_PATH",
+                "FLOW_AGENT_OBSERVE_TRACE_PATH",
                 ("observe", "trace_path"),
                 str(project_root / ".flow" / "trace.jsonl"),
             ),
         ),
         memory_policy=MemoryPolicySettings(
             enabled=values.get_bool(
-                "FLOW_AGENT_MEMORY_POLICY_ENABLED",
-                ("memory_policy", "enabled"),
-                True,
+                "FLOW_AGENT_MEMORY_POLICY_ENABLED", ("memory_policy", "enabled"), True
             ),
             max_messages=values.get_int(
-                "FLOW_AGENT_MEMORY_MAX_MESSAGES",
-                ("memory_policy", "max_messages"),
-                200,
-                minimum=1,
+                "FLOW_AGENT_MEMORY_MAX_MESSAGES", ("memory_policy", "max_messages"), 200, minimum=1
             ),
             dedupe=values.get_bool(
-                "FLOW_AGENT_MEMORY_DEDUPE",
-                ("memory_policy", "dedupe"),
-                True,
+                "FLOW_AGENT_MEMORY_DEDUPE", ("memory_policy", "dedupe"), True
             ),
         ),
         proactive=ProactiveSettings(
-            enabled=values.get_bool("FLOW_AGENT_PROACTIVE_ENABLED", ("proactive", "enabled"), False),
-            interval_seconds=values.get_int(
-                "FLOW_AGENT_PROACTIVE_INTERVAL_SECONDS",
-                ("proactive", "interval_seconds"),
-                60,
-                minimum=1,
+            enabled=values.get_bool(
+                "FLOW_AGENT_PROACTIVE_ENABLED", ("proactive", "enabled"), False
             ),
-            cooldown_seconds=values.get_int(
-                "FLOW_AGENT_PROACTIVE_COOLDOWN_SECONDS",
-                ("proactive", "cooldown_seconds"),
-                300,
-                minimum=0,
+            max_per_day=values.get_int(
+                "FLOW_AGENT_PROACTIVE_MAX_PER_DAY", ("proactive", "max_per_day"), 5, minimum=0
             ),
-            dedup_ttl_seconds=values.get_int(
-                "FLOW_AGENT_PROACTIVE_DEDUP_TTL_SECONDS",
-                ("proactive", "dedup_ttl_seconds"),
-                86400,
-                minimum=1,
+            min_interval=values.get_float(
+                "FLOW_AGENT_PROACTIVE_MIN_INTERVAL", ("proactive", "min_interval"), 30.0, minimum=1.0
             ),
-            source_file=values.get_str(
-                "FLOW_AGENT_PROACTIVE_SOURCE_FILE",
-                ("proactive", "source_file"),
-                str(project_root / ".flow" / "proactive_items.txt"),
+            max_interval=values.get_float(
+                "FLOW_AGENT_PROACTIVE_MAX_INTERVAL", ("proactive", "max_interval"), 300.0, minimum=10.0
             ),
-            todo_file=values.get_str(
-                "FLOW_AGENT_PROACTIVE_TODO_FILE",
-                ("proactive", "todo_file"),
-                str(project_root / ".flow" / "todo_items.txt"),
+            cooldown=values.get_float(
+                "FLOW_AGENT_PROACTIVE_COOLDOWN", ("proactive", "cooldown"), 120.0, minimum=0.0
             ),
-            tasks_file=values.get_str(
-                "FLOW_AGENT_PROACTIVE_TASKS_FILE",
-                ("proactive", "tasks_file"),
-                str(project_root / ".flow" / "tasks.txt"),
+            judge_model=values.get_str(
+                "FLOW_AGENT_PROACTIVE_JUDGE_MODEL", ("proactive", "judge_model"), ""
+            ) or None,
+        ),
+        drift=DriftSettings(
+            enabled=values.get_bool("FLOW_AGENT_DRIFT_ENABLED", ("drift", "enabled"), False),
+            data_dir=values.get_str(
+                "FLOW_AGENT_DRIFT_DATA_DIR",
+                ("drift", "data_dir"),
+                str(project_root / ".flow" / "drift"),
             ),
-            rss_feed_files=values.get_csv(
-                "FLOW_AGENT_PROACTIVE_RSS_FEED_FILES",
-                ("proactive", "rss_feed_files"),
-                [],
+            min_interval_hours=values.get_float(
+                "FLOW_AGENT_DRIFT_MIN_INTERVAL_HOURS",
+                ("drift", "min_interval_hours"),
+                1.0,
+                minimum=0.1,
             ),
-            web_snapshot_files=values.get_csv(
-                "FLOW_AGENT_PROACTIVE_WEB_SNAPSHOT_FILES",
-                ("proactive", "web_snapshot_files"),
-                [],
-            ),
-            skills_dir=values.get_str(
-                "FLOW_AGENT_SKILLS_DIR",
-                ("proactive", "skills_dir"),
-                str(project_root / ".flow" / "skills"),
-            ),
-            min_priority_to_send=values.get_float(
-                "FLOW_AGENT_PROACTIVE_MIN_PRIORITY_TO_SEND",
-                ("proactive", "min_priority_to_send"),
-                0.5,
-            ),
-            qq_target_user_id=values.get_str(
-                "FLOW_AGENT_PROACTIVE_QQ_TARGET_USER_ID",
-                ("proactive", "qq_target_user_id"),
-                "",
+            max_steps=values.get_int(
+                "FLOW_AGENT_DRIFT_MAX_STEPS", ("drift", "max_steps"), 10, minimum=1
             ),
         ),
         channels=ChannelsSettings(
-            cli_enabled=values.get_bool("FLOW_AGENT_CHANNEL_CLI_ENABLED", ("channels", "cli_enabled"), True),
+            cli_enabled=values.get_bool(
+                "FLOW_AGENT_CHANNEL_CLI_ENABLED", ("channels", "cli_enabled"), True
+            ),
             http_enabled=values.get_bool(
-                "FLOW_AGENT_CHANNEL_HTTP_ENABLED",
-                ("channels", "http_enabled"),
-                False,
+                "FLOW_AGENT_CHANNEL_HTTP_ENABLED", ("channels", "http_enabled"), False
             ),
             http_host=values.get_str(
-                "FLOW_AGENT_CHANNEL_HTTP_HOST",
-                ("channels", "http_host"),
-                "127.0.0.1",
+                "FLOW_AGENT_CHANNEL_HTTP_HOST", ("channels", "http_host"), "127.0.0.1"
             ),
             http_port=values.get_int(
-                "FLOW_AGENT_CHANNEL_HTTP_PORT",
-                ("channels", "http_port"),
-                8788,
+                "FLOW_AGENT_CHANNEL_HTTP_PORT", ("channels", "http_port"), 8788
             ),
             dashboard_enabled=values.get_bool(
-                "FLOW_AGENT_CHANNEL_DASHBOARD_ENABLED",
-                ("channels", "dashboard_enabled"),
-                False,
+                "FLOW_AGENT_CHANNEL_DASHBOARD_ENABLED", ("channels", "dashboard_enabled"), False
             ),
             dashboard_host=values.get_str(
-                "FLOW_AGENT_CHANNEL_DASHBOARD_HOST",
-                ("channels", "dashboard_host"),
-                "127.0.0.1",
+                "FLOW_AGENT_CHANNEL_DASHBOARD_HOST", ("channels", "dashboard_host"), "127.0.0.1"
             ),
             dashboard_port=values.get_int(
-                "FLOW_AGENT_CHANNEL_DASHBOARD_PORT",
-                ("channels", "dashboard_port"),
-                8787,
+                "FLOW_AGENT_CHANNEL_DASHBOARD_PORT", ("channels", "dashboard_port"), 8787
             ),
-            qq_enabled=values.get_bool("FLOW_AGENT_CHANNEL_QQ_ENABLED", ("channels", "qq_enabled"), False),
-            qq_host=values.get_str("FLOW_AGENT_CHANNEL_QQ_HOST", ("channels", "qq_host"), "127.0.0.1"),
-            qq_port=values.get_int("FLOW_AGENT_CHANNEL_QQ_PORT", ("channels", "qq_port"), 8790),
+            qq_enabled=values.get_bool(
+                "FLOW_AGENT_CHANNEL_QQ_ENABLED", ("channels", "qq_enabled"), False
+            ),
+            qq_host=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQ_HOST", ("channels", "qq_host"), "127.0.0.1"
+            ),
+            qq_port=values.get_int(
+                "FLOW_AGENT_CHANNEL_QQ_PORT", ("channels", "qq_port"), 8790
+            ),
             qq_api_base=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQ_API_BASE",
-                ("channels", "qq_api_base"),
-                "http://127.0.0.1:3000",
+                "FLOW_AGENT_CHANNEL_QQ_API_BASE", ("channels", "qq_api_base"), "http://127.0.0.1:3000"
             ),
             qq_access_token=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQ_ACCESS_TOKEN",
-                ("channels", "qq_access_token"),
-                "",
+                "FLOW_AGENT_CHANNEL_QQ_ACCESS_TOKEN", ("channels", "qq_access_token"), ""
+            ),
+            qqbot_app_id=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQBOT_APP_ID", ("channels", "qqbot_app_id"), ""
+            ),
+            qqbot_token=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQBOT_TOKEN", ("channels", "qqbot_token"), ""
+            ),
+            qqbot_secret=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQBOT_SECRET", ("channels", "qqbot_secret"), ""
+            ),
+            qqbot_allowed_users=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQBOT_ALLOWED_USERS", ("channels", "qqbot_allowed_users"), ""
+            ),
+            qqbot_allowed_groups=values.get_str(
+                "FLOW_AGENT_CHANNEL_QQBOT_ALLOWED_GROUPS", ("channels", "qqbot_allowed_groups"), ""
             ),
         ),
         jobs=JobsSettings(
             max_async_queue=values.get_int(
-                "FLOW_AGENT_JOBS_MAX_ASYNC_QUEUE",
-                ("jobs", "max_async_queue"),
-                64,
-                minimum=1,
+                "FLOW_AGENT_JOBS_MAX_ASYNC_QUEUE", ("jobs", "max_async_queue"), 64, minimum=1
             ),
             timeout_seconds=values.get_float(
-                "FLOW_AGENT_JOBS_TIMEOUT_SECONDS",
-                ("jobs", "timeout_seconds"),
-                30.0,
-                minimum=0.1,
+                "FLOW_AGENT_JOBS_TIMEOUT_SECONDS", ("jobs", "timeout_seconds"), 30.0, minimum=0.1
             ),
         ),
         subagent=SubagentSettings(
             max_concurrency=values.get_int(
-                "FLOW_AGENT_SUBAGENT_MAX_CONCURRENCY",
-                ("subagent", "max_concurrency"),
-                2,
-                minimum=1,
+                "FLOW_AGENT_SUBAGENT_MAX_CONCURRENCY", ("subagent", "max_concurrency"), 2, minimum=1
             ),
             tasks_file=values.get_str(
                 "FLOW_AGENT_SUBAGENT_TASKS_FILE",
@@ -292,64 +252,41 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         ),
         governance=ConfigGovernanceSettings(
             config_version=values.get_str(
-                "FLOW_AGENT_CONFIG_VERSION",
-                ("governance", "config_version"),
-                "v1",
+                "FLOW_AGENT_CONFIG_VERSION", ("governance", "config_version"), "v1"
             ),
             external_config_path=external_path or None,
         ),
         persona=PersonaSettings(
             name=values.get_str("FLOW_AGENT_PERSONA_NAME", ("persona", "name"), "FlowAgent"),
             passive_tone=values.get_str(
-                "FLOW_AGENT_PERSONA_PASSIVE_TONE",
-                ("persona", "passive_tone"),
-                "professional, concise, helpful",
+                "FLOW_AGENT_PERSONA_PASSIVE_TONE", ("persona", "passive_tone"), "professional, concise, helpful"
             ),
             proactive_tone=values.get_str(
-                "FLOW_AGENT_PERSONA_PROACTIVE_TONE",
-                ("persona", "proactive_tone"),
-                "friendly, brief, actionable",
+                "FLOW_AGENT_PERSONA_PROACTIVE_TONE", ("persona", "proactive_tone"), "friendly, brief, actionable"
             ),
             style=values.get_str("FLOW_AGENT_PERSONA_STYLE", ("persona", "style"), "structured"),
         ),
         provider=build_llm_provider_settings(values),
         prompt_budget=PromptBudgetSettings(
             max_chars=values.get_int(
-                "FLOW_AGENT_PROMPT_MAX_CHARS",
-                ("prompt_budget", "max_chars"),
-                8000,
-                minimum=2000,
+                "FLOW_AGENT_PROMPT_MAX_CHARS", ("prompt_budget", "max_chars"), 8000, minimum=2000
             ),
             history_chars=values.get_int(
-                "FLOW_AGENT_PROMPT_HISTORY_CHARS",
-                ("prompt_budget", "history_chars"),
-                3000,
-                minimum=500,
+                "FLOW_AGENT_PROMPT_HISTORY_CHARS", ("prompt_budget", "history_chars"), 3000, minimum=500
             ),
             memory_chars=values.get_int(
-                "FLOW_AGENT_PROMPT_MEMORY_CHARS",
-                ("prompt_budget", "memory_chars"),
-                1500,
-                minimum=200,
+                "FLOW_AGENT_PROMPT_MEMORY_CHARS", ("prompt_budget", "memory_chars"), 1500, minimum=200
             ),
             tool_trace_chars=values.get_int(
-                "FLOW_AGENT_PROMPT_TOOL_TRACE_CHARS",
-                ("prompt_budget", "tool_trace_chars"),
-                1000,
-                minimum=200,
+                "FLOW_AGENT_PROMPT_TOOL_TRACE_CHARS", ("prompt_budget", "tool_trace_chars"), 1000, minimum=200
             ),
         ),
         delegation_policy=DelegationPolicySettings(
             max_local_chars=values.get_int(
-                "FLOW_AGENT_DELEGATION_MAX_LOCAL_CHARS",
-                ("delegation_policy", "max_local_chars"),
-                500,
-                minimum=100,
+                "FLOW_AGENT_DELEGATION_MAX_LOCAL_CHARS", ("delegation_policy", "max_local_chars"), 500, minimum=100
             ),
             enabled=values.get_bool(
-                "FLOW_AGENT_DELEGATION_ENABLED",
-                ("delegation_policy", "enabled"),
-                True,
+                "FLOW_AGENT_DELEGATION_ENABLED", ("delegation_policy", "enabled"), True
             ),
         ),
         mcp=MCPSettings(
