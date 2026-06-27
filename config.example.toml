@@ -1,0 +1,126 @@
+# Flow Agent 配置示例
+# 复制此文件为 config.toml 并根据需要修改
+
+
+[llm.main]
+# 主模型配置
+provider = "deepseek"  # deepseek | qwen
+model = "gpt-4o"
+api_key = ""  # 从环境变量 $DEEPSEEK_API_KEY 读取
+base_url = "https://api.deepseek.com/v1"
+enable_thinking = false
+
+[llm.fast]
+# 快速模型配置（可选）
+provider = "qwen"  # deepseek | qwen
+model = "qwen-turbo"
+api_key = ""  # 从环境变量 $QWEN_API_KEY 读取
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[embedding]
+# Embedding 模型配置
+provider = "qwen"  # deepseek | qwen
+model = "text-embedding-v3"
+api_key = ""  # 从环境变量 $QWEN_API_KEY 读取
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+[channels]
+# CLI 渠道
+cli_enabled = true
+
+# HTTP 渠道
+http_enabled = false
+http_host = "0.0.0.0"
+http_port = 9900
+
+# Dashboard 渠道
+dashboard_enabled = false
+dashboard_host = "127.0.0.1"
+dashboard_port = 9901
+
+# QQ 渠道 (OneBot 协议)
+qq_enabled = false
+qq_host = "0.0.0.0"
+qq_port = 8080
+qq_api_base = "http://localhost:3000"
+qq_access_token = ""
+
+
+[storage]
+# 存储配置
+memory_db_path = ".flow/data/memory.db"
+
+[logging]
+# 日志配置
+level = "INFO"
+
+[session]
+# 会话配置
+default_session_id = "default"
+
+[tooling]
+# 工具配置
+enabled = true
+max_tool_steps = 10
+max_tools = 5
+
+[retrieval]
+# 检索配置
+enabled = false
+max_items = 5
+
+[observe]
+# 观察配置
+enabled = false
+trace_path = ".flow/logs/trace.jsonl"
+
+[memory_policy]
+# 记忆策略配置
+enabled = true
+max_messages = 100
+dedupe = true
+
+[proactive]
+# 主动配置
+enabled = false
+max_per_day = 10
+min_interval = 300
+max_interval = 3600
+cooldown = 600
+qq_target_user_id = ""
+todo_file = ""
+source_file = ""
+rss_feed_files = []
+web_snapshot_files = []
+judge_model = ""
+
+[drift]
+# 漂移配置
+enabled = false
+data_dir = ".flow/data/drift"
+min_interval_hours = 24
+max_steps = 50
+
+[mcp]
+# MCP 配置
+enabled = false
+servers = []
+
+[background]
+# 后台任务配置
+consolidation_interval_hours = null
+
+[jobs]
+# 作业配置
+max_async_queue = 10
+
+[subagent]
+# 子代理配置
+max_concurrency = 3
+tasks_file = ".flow/sessions/subagent_tasks.jsonl"
+
+[governance]
+# 治理配置
+config_version = "v1"
+external_config_path = ""

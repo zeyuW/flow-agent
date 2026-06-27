@@ -31,3 +31,7 @@ FLOW_AGENT_CODEBASE.md
 PROJECT_SCAN_REPORT.md
 
 learning.md
+
+# config.example.toml
+# config.toml
+# .env.example

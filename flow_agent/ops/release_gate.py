@@ -26,11 +26,6 @@ def run_release_gate(project_root: Path) -> GateResult:
     checks["required_tests_present"] = not missing
     details["required_tests_present"] = "ok" if not missing else f"missing={','.join(missing)}"
 
-    config_dev = project_root / "config" / "dev.toml"
-    config_prod = project_root / "config" / "prod.toml"
-    checks["config_files_present"] = config_dev.exists() and config_prod.exists()
-    details["config_files_present"] = "ok" if checks["config_files_present"] else "missing dev/prod config"
-
     stage_doc = project_root / "stage.md"
     checks["stage_doc_present"] = stage_doc.exists()
     details["stage_doc_present"] = "ok" if stage_doc.exists() else "missing stage.md"

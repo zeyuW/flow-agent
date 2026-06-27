@@ -1,8 +1,13 @@
-"""MessagePushTool：Agent 主动向任意已注册通道推送消息的统一工具 (spec 4a-4d)。"""
+"""MessagePushTool：Agent 主动向任意已注册通道推送消息的统一工具 (spec 4a-4d)。
+
+遵循 Tool 协议：提供 name / description / input_schema / run。
+"""
 
 import json
 import logging
-from typing import Callable
+from typing import Any, Callable
+
+from flow_agent.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -27,47 +32,48 @@ _MESSAGE_PUSH_SCHEMA = {
 
 
 class MessagePushTool:
-    """统一主动推送工具：注册通道发送能力，由 Agent 通过工具调用触发 (spec 4a-4b)。"""
+    """统一主动推送工具：注册通道发送能力，由 Agent 通过工具调用触发 (spec 4a-4b)。
+
+    符合 Tool 协议，可直接注册到 ToolRegistry。
+    """
 
     def __init__(self) -> None:
         # {channel_name: {"send": fn, "send_file": fn, "send_image": fn}}
         self._senders: dict[str, dict[str, Callable]] = {}
 
+    # ── Tool 协议 ──
+
+    @property
+    def name(self) -> str:
+        return "message_push"
+
+    @property
+    def description(self) -> str:
+        return _MESSAGE_PUSH_SCHEMA["function"]["description"]
+
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return _MESSAGE_PUSH_SCHEMA["function"]["parameters"]
+
+    def run(self, tool_input: dict[str, str]) -> ToolResult:
+        """执行消息推送 (spec 4b)。"""
+        result = self.execute(tool_input)
+        return ToolResult(ok=True, content=result)
+
+    # ── 兼容接口 ──
+
     def schema(self) -> dict:
-        """返回工具 schema 用于 Agent 注册。"""
+        """返回完整 OpenAI function schema。"""
         return _MESSAGE_PUSH_SCHEMA
 
-    def register_channel(
-        self,
-        name: str,
-        *,
-        send: Callable | None = None,
-        send_file: Callable | None = None,
-        send_image: Callable | None = None,
-    ) -> None:
-        """注册通道的发送能力 (spec 4a)。
+    def execute(self, arguments: dict) -> str:
+        """执行消息推送并返回文本结果。
 
         Args:
-            name: 通道名
-            send: 发送文本消息的函数
-            send_file: 发送文件的函数
-            send_image: 发送图片的函数
-        """
-        self._senders[name] = {}
-        if send:
-            self._senders[name]["send"] = send
-        if send_file:
-            self._senders[name]["send_file"] = send_file
-        if send_image:
-            self._senders[name]["send_image"] = send_image
-        logger.info("message_push: registered channel %s (send=%s file=%s image=%s)",
-                     name, send is not None, send_file is not None, send_image is not None)
-
-    def execute(self, arguments: dict) -> str:
-        """执行消息推送 (spec 4b)。
-
-        根据 channel 参数查找对应的 sender 并调用。
-        返回执行结果字符串。
+            arguments: {"channel": "...", "chat_id": "...", "text": "...",
+                         "file_path": "...", "image_path": "..."}
+        Returns:
+            执行结果字符串。
         """
         channel = arguments.get("channel", "")
         chat_id = arguments.get("chat_id", "")
@@ -81,7 +87,6 @@ class MessagePushTool:
 
         results = []
 
-        # 发送文本
         if text:
             send_fn = senders.get("send")
             if send_fn:
@@ -93,7 +98,6 @@ class MessagePushTool:
             else:
                 results.append(f"通道 {channel} 不支持文本发送")
 
-        # 发送文件
         if file_path:
             send_file_fn = senders.get("send_file")
             if send_file_fn:
@@ -105,7 +109,6 @@ class MessagePushTool:
             else:
                 results.append(f"通道 {channel} 不支持文件发送")
 
-        # 发送图片
         if image_path:
             send_image_fn = senders.get("send_image")
             if send_image_fn:
@@ -118,3 +121,36 @@ class MessagePushTool:
                 results.append(f"通道 {channel} 不支持图片发送")
 
         return "\n".join(results) if results else "无内容发送"
+
+    # ── 通道注册 ──
+
+    def register_channel(
+        self,
+        name: str,
+        *,
+        send: Callable | None = None,
+        send_file: Callable | None = None,
+        send_image: Callable | None = None,
+    ) -> None:
+        """注册通道的发送能力 (spec 4a)。
+
+        Args:
+            name: 通道名
+            send: 发送文本消息的函数 (chat_id=, text=)
+            send_file: 发送文件的函数 (chat_id=, path=)
+            send_image: 发送图片的函数 (chat_id=, path=)
+        """
+        self._senders[name] = {}
+        if send:
+            self._senders[name]["send"] = send
+        if send_file:
+            self._senders[name]["send_file"] = send_file
+        if send_image:
+            self._senders[name]["send_image"] = send_image
+        logger.info(
+            "message_push: registered channel %s (send=%s file=%s image=%s)",
+            name,
+            send is not None,
+            send_file is not None,
+            send_image is not None,
+        )

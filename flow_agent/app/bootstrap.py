@@ -143,7 +143,8 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     if cfg.tooling.enabled:
         tool_registry.register(ReadFileTool())
-        tool_registry.register(SpawnTool())
+        spawn_tool = SpawnTool()
+        tool_registry.register(spawn_tool)
         undo_tool = UndoTool()
         undo_tool.session_manager = session_manager
         undo_tool.memory_store = None  # set after memory runtime creation
@@ -173,7 +174,7 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         recorder=recorder,
         organizer=organizer,
         dashboard=dashboard_store,
-        tool_selection_max=cfg.tooling.max_tools,
+        tool_selection_max=cfg.tooling.tool_selection_max,
     )
 
     return {
@@ -185,6 +186,9 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         "dashboard_store": dashboard_store,
         "orchestrator": orchestrator,
         "message_store": message_store,
+        "session_manager": session_manager,
+        "llm_client": llm_client,
+        "spawn_tool": spawn_tool if cfg.tooling.enabled else None,
     }
 
 
@@ -225,7 +229,7 @@ def create_passive_turn_pipeline(
         organizer=organizer,
         dashboard=dashboard,
         delegation_policy=DelegationPolicy(),
-        tool_selection_max=cfg.tooling.max_tools,
+        tool_selection_max=cfg.tooling.tool_selection_max,
     )
 
 
@@ -265,6 +269,9 @@ def create_app_runtime():
     recorder = components["recorder"]
     dashboard = components["dashboard_store"]
     orchestrator = components["orchestrator"]
+    session_manager = components["session_manager"]
+    llm_client = components["llm_client"]
+    spawn_tool = components["spawn_tool"]
 
     # 创建总线
     message_bus = create_message_bus()
@@ -299,26 +306,20 @@ def create_app_runtime():
 
     # ── 以下是原有初始化代码（保持向后兼容） ──
 
-    consolidation_worker = (
-        ConsolidationWorker(
-            memory_store=components["message_store"],
-            consolidator=MemoryConsolidator(timeout=60),
-        )
-        if cfg.background.consolidation_interval_hours is not None
-        else None
-    )
+    consolidation_worker = None  # TODO: re-enable when BackgroundSettings is added
 
     background_store = InMemoryJobStore()
     background_registry = InMemoryJobRegistry()
-    if consolidation_worker is not None:
-        background_registry.register(
-            "memory_consolidation",
-            JobSpec(
-                name="memory_consolidation",
-                run_fn=consolidation_worker.run,
-                schedule_interval_hours=cfg.background.consolidation_interval_hours,
-            ),
-        )
+    # TODO: re-enable when BackgroundSettings is added
+    # if consolidation_worker is not None:
+    #     background_registry.register(
+    #         "memory_consolidation",
+    #         JobSpec(
+    #             name="memory_consolidation",
+    #             run_fn=consolidation_worker.run,
+    #             schedule_interval_hours=cfg.background.consolidation_interval_hours,
+    #         ),
+    #     )
 
     background_runtime = BackgroundRuntime(
         registry=background_registry,
@@ -378,10 +379,9 @@ def create_app_runtime():
     spawn_tool._manager = subagent_runtime.manager
 
     dashboard_server = DashboardServer(
-        store=dashboard,
-        runtime_service=runtime_service,
         host=cfg.channels.dashboard_host,
         port=cfg.channels.dashboard_port,
+        store=dashboard,
     )
 
     return (
@@ -395,6 +395,7 @@ def create_app_runtime():
         event_bus,
         agent_loop,
         pipeline,
+        tool_registry,
         memory_runtime,
     )
 
@@ -406,7 +407,7 @@ def create_runtime_service(
     """创建 RuntimeService（保持原有逻辑）。"""
 
     cfg = settings.get()
-    runtime_service = RuntimeService()
+    runtime_service = RuntimeService(dashboard=dashboard)
 
     runtime_service.register(
         RuntimeUnit(

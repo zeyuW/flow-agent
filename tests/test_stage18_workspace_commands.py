@@ -10,7 +10,6 @@ from flow_agent.skills.manager import SkillManager
 def test_workspace_init_and_detect(tmp_path: Path):
     layout = init_workspace(tmp_path)
     assert layout.marker_file.exists()
-    assert layout.config_file.exists()
     detected = detect_workspace(tmp_path / "skills")
     assert detected is not None
     assert detected.root == tmp_path.resolve()

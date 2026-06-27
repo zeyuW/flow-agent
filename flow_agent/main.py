@@ -7,6 +7,8 @@ from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
 from flow_agent.channels.qq import QQChannel
 from flow_agent.proactive.dispatcher import QQProactiveDispatcher
+from flow_agent.channels.qqbot import QQBotChannel
+from flow_agent.tools.message_push import MessagePushTool
 
 
 logger = logging.getLogger(__name__)
@@ -36,6 +38,8 @@ def main() -> None:
             event_bus,
             agent_loop,
             pipeline,
+            tool_registry,
+            *_,
         ) = create_app_runtime()
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
@@ -49,6 +53,7 @@ def main() -> None:
     print("Use '/dashboard start|stop' to control dashboard server")
     print("Use '/http start|stop' to control http channel")
     print("Use '/qq start|stop|status' to control qq channel")
+    print("Use '/qqbot start|stop|status' to control qqbot channel")
     print("Use '/runtime snapshot|health' to inspect unified runtime")
     print("Use '/bus status' to inspect MessageBus/EventBus")
     current_session = cfg.session.default_session_id
@@ -72,11 +77,47 @@ def main() -> None:
     )
 
     # QQ 主动推送
-    if cfg.proactive.qq_target_user_id.strip().isdigit():
-        proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
-            qq_user_id=int(cfg.proactive.qq_target_user_id.strip()),
-            send_private_msg=qq._send_private_msg,
+    # TODO: re-enable when qq_target_user_id is added to ProactiveSettings
+    # if cfg.proactive.qq_target_user_id.strip().isdigit():
+    #     proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
+    #         qq_user_id=int(cfg.proactive.qq_target_user_id.strip()),
+    #         send_private_msg=qq._send_private_msg,
+    #     )
+
+    # QQ 官方机器人通道
+    qqbot = None
+    if cfg.channels.qqbot_app_id and cfg.channels.qqbot_token:
+        allowed_users = set()
+        allowed_groups = set()
+        if cfg.channels.qqbot_allowed_users:
+            allowed_users = {int(u.strip()) for u in cfg.channels.qqbot_allowed_users.split(",") if u.strip().isdigit()}
+        if cfg.channels.qqbot_allowed_groups:
+            allowed_groups = {int(g.strip()) for g in cfg.channels.qqbot_allowed_groups.split(",") if g.strip().isdigit()}
+
+        qqbot = QQBotChannel(
+            app_id=cfg.channels.qqbot_app_id,
+            token=cfg.channels.qqbot_token,
+            secret=cfg.channels.qqbot_secret,
+            message_bus=message_bus,
+            allowed_users=allowed_users,
+            allowed_groups=allowed_groups,
         )
+
+        # 注册 MessagePushTool
+        message_push = MessagePushTool()
+        message_push.register_channel(
+            "qq",
+            send=qqbot.send,
+            send_file=qqbot.send_file,
+            send_image=qqbot.send_image,
+        )
+        tool_registry.register(message_push)
+
+        if qqbot.enabled:
+            qqbot.start()
+            print(f"qqbot channel started (app_id={cfg.channels.qqbot_app_id[:8]}...)")
+        else:
+            print("qqbot requires the 'websockets' library. Install: pip install websockets")
 
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
@@ -154,6 +195,22 @@ def main() -> None:
                 print(f"Agent: qq channel running={s.running}, last_error={s.last_error}")
             else:
                 print("Agent: qq command should be start|stop|status")
+            continue
+        if user_input.startswith("/qqbot "):
+            cmd = user_input.removeprefix("/qqbot ").strip().lower()
+            if not qqbot:
+                print("Agent: qqbot channel is not configured")
+            elif cmd == "start":
+                qqbot.start()
+                print("Agent: qqbot channel started")
+            elif cmd == "stop":
+                qqbot.stop()
+                print("Agent: qqbot channel stopped")
+            elif cmd == "status":
+                s = qqbot.status()
+                print(f"Agent: qqbot channel running={s.running}, last_error={s.last_error}")
+            else:
+                print("Agent: qqbot command should be start|stop|status")
             continue
         if user_input.startswith("/runtime "):
             cmd = user_input.removeprefix("/runtime ").strip().lower()

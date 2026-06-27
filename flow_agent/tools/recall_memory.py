@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flow_agent.memory.memory_engine import MemoryEngine, MemoryQuery
-from flow_agent.tools.protocol import ToolProtocol
+from flow_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 

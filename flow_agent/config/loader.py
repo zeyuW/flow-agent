@@ -217,19 +217,19 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 "FLOW_AGENT_CHANNEL_QQ_ACCESS_TOKEN", ("channels", "qq_access_token"), ""
             ),
             qqbot_app_id=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQBOT_APP_ID", ("channels", "qqbot_app_id"), ""
+                "QQBOT_APP_ID", ("channels", "qqbot_app_id"), ""
             ),
             qqbot_token=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQBOT_TOKEN", ("channels", "qqbot_token"), ""
+                "QQBOT_TOKEN", ("channels", "qqbot_token"), ""
             ),
             qqbot_secret=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQBOT_SECRET", ("channels", "qqbot_secret"), ""
+                "QQBOT_SECRET", ("channels", "qqbot_secret"), ""
             ),
             qqbot_allowed_users=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQBOT_ALLOWED_USERS", ("channels", "qqbot_allowed_users"), ""
+                "QQBOT_ALLOWED_USERS", ("channels", "qqbot_allowed_users"), ""
             ),
             qqbot_allowed_groups=values.get_str(
-                "FLOW_AGENT_CHANNEL_QQBOT_ALLOWED_GROUPS", ("channels", "qqbot_allowed_groups"), ""
+                "QQBOT_ALLOWED_GROUPS", ("channels", "qqbot_allowed_groups"), ""
             ),
         ),
         jobs=JobsSettings(

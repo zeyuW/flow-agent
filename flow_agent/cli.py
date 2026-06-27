@@ -187,6 +187,8 @@ def main(argv: list[str] | None = None) -> int:
             "qq_host": cfg.channels.qq_host,
             "qq_port": cfg.channels.qq_port,
             "qq_api_base": cfg.channels.qq_api_base,
+            "qqbot_app_id": cfg.channels.qqbot_app_id[:8] + "***" if cfg.channels.qqbot_app_id else "",
+            "qqbot_configured": bool(cfg.channels.qqbot_app_id and cfg.channels.qqbot_token),
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
         return 0

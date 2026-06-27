@@ -11,7 +11,7 @@ from typing import Any
 from flow_agent.memory.memorizer import Memorizer
 from flow_agent.memory.memory_retriever import DualChannelRetriever
 from flow_agent.memory.vector_store import MemoryStore
-from flow_agent.tools.protocol import ToolProtocol
+from flow_agent.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 

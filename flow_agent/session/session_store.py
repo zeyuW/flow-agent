@@ -56,7 +56,7 @@ class SessionStore:
                 )
             """)
             conn.execute("""
-                CREATE TABLE IF NOT EXISTS messages (
+                CREATE TABLE IF NOT EXISTS messages_v2 (
                     id TEXT PRIMARY KEY,
                     session_key TEXT NOT NULL,
                     seq INTEGER NOT NULL,
@@ -68,8 +68,8 @@ class SessionStore:
                 )
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_messages_session_key_seq
-                ON messages(session_key, seq)
+                CREATE INDEX IF NOT EXISTS idx_messages_v2_session_key_seq
+                ON messages_v2(session_key, seq)
             """)
 
     # ── Session meta ──
@@ -135,7 +135,7 @@ class SessionStore:
         with self._connect() as conn:
             rows = conn.execute(
                 "SELECT id, seq, role, content, tool_chain, extra, ts "
-                "FROM messages WHERE session_key = ? ORDER BY seq ASC",
+                "FROM messages_v2 WHERE session_key = ? ORDER BY seq ASC",
                 (key,),
             ).fetchall()
         messages: list[dict[str, Any]] = []
@@ -173,7 +173,7 @@ class SessionStore:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT OR IGNORE INTO messages (id, session_key, seq, role, content, tool_chain, extra, ts)
+                INSERT OR IGNORE INTO messages_v2 (id, session_key, seq, role, content, tool_chain, extra, ts)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (msg_id, session_key, seq, role, content, tc_json, ex_json, ts_val),
@@ -232,14 +232,14 @@ class SessionStore:
             try:
                 # 5c: Query seq numbers of deleted messages
                 seq_rows = conn.execute(
-                    f"SELECT seq FROM messages WHERE session_key = ? AND id IN ({placeholders})",
+                    f"SELECT seq FROM messages_v2 WHERE session_key = ? AND id IN ({placeholders})",
                     [session_key] + ids,
                 ).fetchall()
                 deleted_seqs = [r["seq"] for r in seq_rows]
 
                 # 5b: Delete messages
                 cursor = conn.execute(
-                    f"DELETE FROM messages WHERE session_key = ? AND id IN ({placeholders})",
+                    f"DELETE FROM messages_v2 WHERE session_key = ? AND id IN ({placeholders})",
                     [session_key] + ids,
                 )
                 deleted_count = cursor.rowcount
