@@ -134,6 +134,10 @@ class RecallMemoryToolAdapter:
     def parameters(self) -> dict[str, Any]:
         return self.tool.schema
 
+    @property
+    def input_schema(self) -> dict[str, Any]:
+        return self.tool.schema
+
     def execute(self, **kwargs) -> str:
         payload = json.dumps(kwargs)
         return self.tool(payload)

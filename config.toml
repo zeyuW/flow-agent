@@ -89,7 +89,7 @@ enabled = false
 servers = []
 
 [background]
-consolidation_interval_hours = null
+consolidation_interval_hours = ""
 
 [jobs]
 max_async_queue = 10

@@ -13,6 +13,7 @@ AgentLoop 持续从 MessageBus 阻塞式消费入站消息，
 
 import asyncio
 import logging
+import threading
 import time
 
 from flow_agent.channels.models import InboundMessage
@@ -86,6 +87,7 @@ class AgentLoop:
         self._running = False
         self._processing = ProcessingState()
         self._active_tasks: set[asyncio.Task] = set()
+        self._thread: threading.Thread | None = None
 
     def run_once(self) -> bool:
         """处理一条入站消息（同步、非阻塞），返回是否处理了消息。
@@ -148,6 +150,29 @@ class AgentLoop:
         if self._active_tasks:
             await asyncio.gather(*self._active_tasks, return_exceptions=True)
         logger.info("agent loop stopped")
+
+    def start_background(self) -> None:
+        """在后台线程中启动 AgentLoop。
+
+        创建新线程并在其中运行 asyncio 事件循环，
+        使主线程可以继续执行同步代码（如 CLI 输入循环）。
+        """
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("agent loop already running in background")
+            return
+
+        def run_loop() -> None:
+            """在线程中运行异步事件循环。"""
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.run_forever())
+            finally:
+                loop.close()
+
+        self._thread = threading.Thread(target=run_loop, daemon=True)
+        self._thread.start()
+        logger.info("agent loop started in background thread")
 
     def _on_task_done(self, task: asyncio.Task) -> None:
         """任务完成回调：清理状态。"""

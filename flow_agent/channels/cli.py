@@ -77,7 +77,8 @@ class CLIChannel(MessageBusChannel):
         """
         self._last_outbound_text = message.text
         logger.debug("cli outbound: %s", message.text[:100])
-        # 出站文本通过 print 输出，供 main.py 的 CLI 循环显示
+        # CLI 渠道直接打印回复
+        print(f"Agent: {message.text or ''}")
         if message.metadata.get("fallback"):
             logger.warning("cli received fallback message: %s", message.text[:100])
 

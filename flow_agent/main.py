@@ -122,6 +122,17 @@ def main() -> None:
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
+    # 启动 MessageBus 后台分发任务（后台线程）
+    import threading
+    import asyncio
+    def run_dispatch():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(message_bus.start_dispatch_task())
+    dispatch_thread = threading.Thread(target=run_dispatch, daemon=True)
+    dispatch_thread.start()
+    print("MessageBus dispatch task started")
+
     # 启动渠道
     cli.start()
     if cfg.channels.dashboard_enabled:
@@ -248,12 +259,11 @@ def main() -> None:
             print(f"Agent: 已切换到会话 {current_session}")
             continue
         try:
-            reply = cli.handle_line(user_input, session_id=current_session)
+            cli.handle_line(user_input, session_id=current_session)
         except Exception:
             logger.exception("Unexpected error during agent run")
             print("Agent: 处理请求时发生异常，请稍后再试。")
             continue
-        print(f"Agent: {reply or ''}")
 
 
 if __name__ == "__main__":

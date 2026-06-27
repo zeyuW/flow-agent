@@ -195,7 +195,7 @@ class PassiveTurnPipeline:
         memory_block = self._build_memory_block(flow.session_id)
 
         # 构建 retrieval 块
-        retrieval_block = self._build_retrieval_block(flow.user_input)
+        retrieval_block = self._build_retrieval_block(flow.session_id, flow.user_input)
 
         # 构建工具说明
         tools = self.tool_registry.list_openai_tools()
@@ -220,12 +220,10 @@ class PassiveTurnPipeline:
     def _build_persona_block(self, proactive: bool, channel: str) -> str:
         """构建人设块。"""
         if self.agent.persona_resolver is not None:
-            persona = self.agent.persona_resolver.resolve(
-                proactive=proactive,
+            return self.agent.persona_resolver.render_block(
                 channel=channel,
-                mode="passive",
+                proactive_mode=proactive,
             )
-            return persona.to_prompt_block()
         return ""
 
     def _build_memory_block(self, session_id: str) -> str:
@@ -241,12 +239,12 @@ class PassiveTurnPipeline:
             lines.append(f"- {label}: {content}")
         return "\n".join(lines)
 
-    def _build_retrieval_block(self, user_input: str) -> str:
+    def _build_retrieval_block(self, session_id: str, user_input: str) -> str:
         """构建检索块。"""
         if self.retriever is None:
             return ""
         try:
-            memories = self.retriever.retrieve(user_input, max_items=self.retrieval_max_items)
+            memories = self.retriever.retrieve(session_id, user_input, max_items=self.retrieval_max_items)
             if not memories:
                 return ""
             lines = ["## 相关记忆"]
@@ -276,6 +274,7 @@ class PassiveTurnPipeline:
         - 再通过 OutboundPort 发送回复，确保回复发送的可靠性
         - 如果先发送后广播，发送失败会导致状态不一致
         """
+        logger.info("after_turn: final_output=%s", flow.final_output[:100] if flow.final_output else "EMPTY")
         # 记忆持久化
         self.context_store.commit(
             user_input=flow.user_input,
@@ -350,6 +349,7 @@ class PassiveTurnPipeline:
             logger.warning("no outbound_port configured, cannot send reply")
             return
 
+        logger.info("sending outbound reply: channel=%s, text=%s", flow.channel, flow.final_output[:100])
         dispatch = OutboundDispatch(
             channel=flow.channel,
             session_id=flow.session_id,

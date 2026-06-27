@@ -287,6 +287,7 @@ class MessageBus:
                 continue
 
             channel = message.channel
+            logger.info("dispatching outbound message: channel=%s, text=%s", channel, message.text[:100] if message.text else "EMPTY")
             if not self.outbound.has_subscribers(channel):
                 logger.warning(
                     "outbound dispatch: no subscribers for channel=%s, dropping message", channel
@@ -294,7 +295,9 @@ class MessageBus:
                 continue
 
             # 遍历该 channel 的所有订阅者并调用回调
-            for callback in self._get_subscribers(channel):
+            subscribers = self._get_subscribers(channel)
+            logger.info("found %d subscribers for channel=%s", len(subscribers), channel)
+            for callback in subscribers:
                 await self._dispatch_with_retry(message, callback)
 
     async def _dispatch_with_retry(
