@@ -99,6 +99,7 @@ class PassiveTurnPipeline:
             user_input=inbound.text,
             session_id=inbound.session_id,
             channel=inbound.channel,
+            inbound_metadata=inbound.metadata or {},  # 保存入站 metadata
             trace_id=uuid4().hex[:12],
         )
         self.agent.set_session(flow.session_id)
@@ -350,19 +351,26 @@ class PassiveTurnPipeline:
             return
 
         logger.info("sending outbound reply: channel=%s, text=%s", flow.channel, flow.final_output[:100])
+        
+        # 合并入站 metadata 和管道 metadata
+        metadata = {
+            "trace_id": flow.trace_id,
+            "tool_trace": flow.tool_trace,
+        }
+        # 添加渠道特定的 metadata（如 telegram_chat_id）
+        if flow.inbound_metadata:
+            metadata.update(flow.inbound_metadata)
+        
         dispatch = OutboundDispatch(
             channel=flow.channel,
             session_id=flow.session_id,
             text=flow.final_output,
-            metadata={
-                "trace_id": flow.trace_id,
-                "tool_trace": flow.tool_trace,
-            },
+            metadata=metadata,
         )
 
         try:
             self.outbound_port.send(dispatch)
-            logger.debug("outbound reply dispatched: channel=%s session=%s", flow.channel, flow.session_id)
+            logger.debug("outbound reply dispatched: channel=%s session=%s metadata=%s", flow.channel, flow.session_id, list(metadata.keys()))
         except Exception:
             logger.exception("failed to dispatch outbound reply")
 

@@ -25,6 +25,9 @@ class TurnFlow:
     channel: str
     trace_id: str
 
+    # 入站消息的原始 metadata（用于渠道特定信息传递）
+    inbound_metadata: dict[str, Any] = field(default_factory=dict)
+
     # PromptRender 阶段产出
     messages: list[dict[str, Any]] = field(default_factory=list)
     tools: list[dict[str, Any]] = field(default_factory=list)

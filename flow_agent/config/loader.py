@@ -323,6 +323,19 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             qqbot_allowed_groups=values.get_str(
                 "QQBOT_ALLOWED_GROUPS", ("channels", "qqbot_allowed_groups"), ""
             ),
+            # Telegram Bot
+            telegram_enabled=values.get_bool(
+                "FLOW_AGENT_CHANNEL_TELEGRAM_ENABLED", ("channels", "telegram_enabled"), False
+            ),
+            telegram_bot_token=values.get_str(
+                "TELEGRAM_BOT_TOKEN", ("channels", "telegram_bot_token"), ""
+            ),
+            telegram_allowed_users=values.get_str(
+                "TELEGRAM_ALLOWED_USERS", ("channels", "telegram_allowed_users"), ""
+            ),
+            telegram_allowed_groups=values.get_str(
+                "TELEGRAM_ALLOWED_GROUPS", ("channels", "telegram_allowed_groups"), ""
+            ),
         ),
         jobs=JobsSettings(
             max_async_queue=values.get_int(

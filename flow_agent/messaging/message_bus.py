@@ -108,7 +108,7 @@ class OutboundQueue:
         """投递一条出站消息到队列（由 BusOutboundPort 调用）。"""
         with self._lock:
             self._queue.append(message)
-            logger.debug("outbound queued: channel=%s session=%s", message.channel, message.session_id)
+            logger.debug(f"outbound queued: channel={message.channel} session={message.session_id} queue_size={len(self._queue)}")
 
     def dispatch(self, message: OutboundMessage) -> None:
         """同步投递一条出站消息：入队并立即推送给对应渠道的所有订阅者。"""
@@ -146,8 +146,11 @@ class OutboundQueue:
         while True:
             with self._lock:
                 if self._queue:
-                    return self._queue.popleft()
+                    msg = self._queue.popleft()
+                    logger.debug(f"consumed outbound message: channel={msg.channel} session={msg.session_id} remaining={len(self._queue)}")
+                    return msg
             await asyncio.sleep(poll_interval_ms / 1000.0)
+        return None
 
     def drain(self) -> list[OutboundMessage]:
         """清空并返回到目前为止入队的消息。"""
@@ -261,6 +264,11 @@ class MessageBus:
         self._running = True
         self._dispatch_task = asyncio.create_task(self._dispatch_loop())
         logger.info("dispatch_outbound background task started")
+        # 等待任务完成（实际上会一直运行直到 stop_dispatch_task 被调用）
+        try:
+            await self._dispatch_task
+        except asyncio.CancelledError:
+            logger.info("dispatch task cancelled")
 
     async def stop_dispatch_task(self) -> None:
         """停止后台出站分发任务。"""
@@ -281,6 +289,7 @@ class MessageBus:
         每个出站消息遍历对应 channel 的所有订阅者并调用回调。
         容错重试：失败后等待 2 秒重试一次；再次失败发送降级错误通知。
         """
+        logger.info("dispatch loop started, waiting for messages...")
         while self._running:
             message = await self.outbound.consume_one_async(poll_interval_ms=100)
             if message is None:
@@ -288,6 +297,7 @@ class MessageBus:
 
             channel = message.channel
             logger.info("dispatching outbound message: channel=%s, text=%s", channel, message.text[:100] if message.text else "EMPTY")
+            
             if not self.outbound.has_subscribers(channel):
                 logger.warning(
                     "outbound dispatch: no subscribers for channel=%s, dropping message", channel
@@ -296,7 +306,7 @@ class MessageBus:
 
             # 遍历该 channel 的所有订阅者并调用回调
             subscribers = self._get_subscribers(channel)
-            logger.info("found %d subscribers for channel=%s", len(subscribers), channel)
+            logger.debug("found %d subscribers for channel=%s", len(subscribers), channel)
             for callback in subscribers:
                 await self._dispatch_with_retry(message, callback)
 

@@ -138,6 +138,11 @@ class ChannelsSettings(BaseModel):
     qqbot_secret: str = ""
     qqbot_allowed_users: str = ""   # 逗号分隔的用户 ID 列表
     qqbot_allowed_groups: str = ""  # 逗号分隔的群 ID 列表
+    # Telegram Bot
+    telegram_enabled: bool = False
+    telegram_bot_token: str = ""
+    telegram_allowed_users: str = ""   # 逗号分隔的用户 ID 列表
+    telegram_allowed_groups: str = ""  # 逗号分隔的群 ID 列表
 
 
 # ── 后台任务 ──

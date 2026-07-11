@@ -6,6 +6,7 @@ from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.cli import CLIChannel
 from flow_agent.channels.http import HTTPChannel
 from flow_agent.channels.qq import QQChannel
+from flow_agent.channels.telegram import TelegramChannel
 from flow_agent.proactive.dispatcher import QQProactiveDispatcher
 from flow_agent.channels.qqbot import QQBotChannel
 from flow_agent.tools.message_push import MessagePushTool
@@ -54,6 +55,7 @@ def main() -> None:
     print("Use '/http start|stop' to control http channel")
     print("Use '/qq start|stop|status' to control qq channel")
     print("Use '/qqbot start|stop|status' to control qqbot channel")
+    print("Use '/telegram start|stop|status' to control telegram channel")
     print("Use '/runtime snapshot|health' to inspect unified runtime")
     print("Use '/bus status' to inspect MessageBus/EventBus")
     current_session = cfg.session.default_session_id
@@ -76,15 +78,44 @@ def main() -> None:
         access_token=cfg.channels.qq_access_token,
     )
 
+    # Telegram 渠道
+    telegram = None
+    if cfg.channels.telegram_bot_token:
+        allowed_users = set()
+        allowed_groups = set()
+        if cfg.channels.telegram_allowed_users:
+            allowed_users = {u.strip() for u in cfg.channels.telegram_allowed_users.split(",") if u.strip()}
+        if cfg.channels.telegram_allowed_groups:
+            allowed_groups = {int(g.strip()) for g in cfg.channels.telegram_allowed_groups.split(",") if g.strip().isdigit()}
+        
+        telegram = TelegramChannel(
+            bot_token=cfg.channels.telegram_bot_token,
+            message_bus=message_bus,
+            allowed_users=list(allowed_users),
+            allowed_groups=list(allowed_groups),
+        )
+
+        # 注册 MessagePushTool
+        message_push = MessagePushTool()
+        message_push.register_channel(
+            "telegram",
+            send=telegram.send,
+            send_file=telegram.send_file,
+            send_image=telegram.send_image,
+        )
+        tool_registry.register(message_push)
+
     # QQ 主动推送
     # TODO: re-enable when qq_target_user_id is added to ProactiveSettings
-    # if cfg.proactive.qq_target_user_id.strip().isdigit():
-    #     proactive_runtime.tick_runner.dispatcher = QQProactiveDispatcher(
-    #         qq_user_id=int(cfg.proactive.qq_target_user_id.strip()),
-    #         send_private_msg=qq._send_private_msg,
+    # if cfg.channels.qq_enabled and cfg.proactive.qq_target_user_id:
+    #     qq_dispatcher = QQProactiveDispatcher(
+    #         qq_channel=qq,
+    #         target_user_id=cfg.proactive.qq_target_user_id,
+    #         message_bus=message_bus,
     #     )
+    #     event_bus.subscribe(qq_dispatcher)
 
-    # QQ 官方机器人通道
+    # QQ Bot 渠道
     qqbot = None
     if cfg.channels.qqbot_app_id and cfg.channels.qqbot_token:
         allowed_users = set()
@@ -93,7 +124,7 @@ def main() -> None:
             allowed_users = {int(u.strip()) for u in cfg.channels.qqbot_allowed_users.split(",") if u.strip().isdigit()}
         if cfg.channels.qqbot_allowed_groups:
             allowed_groups = {int(g.strip()) for g in cfg.channels.qqbot_allowed_groups.split(",") if g.strip().isdigit()}
-
+        
         qqbot = QQBotChannel(
             app_id=cfg.channels.qqbot_app_id,
             token=cfg.channels.qqbot_token,
@@ -119,6 +150,18 @@ def main() -> None:
         else:
             print("qqbot requires the 'websockets' library. Install: pip install websockets")
 
+    # 启动渠道（先启动渠道，让它们订阅 MessageBus）
+    cli.start()
+    if cfg.channels.dashboard_enabled:
+        dashboard_server.start()
+    if cfg.channels.http_enabled:
+        http.start()
+    if cfg.channels.qq_enabled:
+        qq.start()
+    if cfg.channels.telegram_enabled and telegram:
+        telegram.start()
+        print("telegram channel started")
+
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
@@ -132,15 +175,6 @@ def main() -> None:
     dispatch_thread = threading.Thread(target=run_dispatch, daemon=True)
     dispatch_thread.start()
     print("MessageBus dispatch task started")
-
-    # 启动渠道
-    cli.start()
-    if cfg.channels.dashboard_enabled:
-        dashboard_server.start()
-    if cfg.channels.http_enabled:
-        http.start()
-    if cfg.channels.qq_enabled:
-        qq.start()
 
     while True:
         user_input = input("You: ")
@@ -222,6 +256,21 @@ def main() -> None:
                 print(f"Agent: qqbot channel running={s.running}, last_error={s.last_error}")
             else:
                 print("Agent: qqbot command should be start|stop|status")
+            continue
+        if user_input.startswith("/telegram "):
+            cmd = user_input.removeprefix("/telegram ").strip().lower()
+            if not telegram:
+                print("Agent: telegram channel is not configured")
+            elif cmd == "start":
+                telegram.start()
+                print("Agent: telegram channel started")
+            elif cmd == "stop":
+                telegram.stop()
+                print("Agent: telegram channel stopped")
+            elif cmd == "status":
+                print(f"Agent: telegram channel running={telegram._running}")
+            else:
+                print("Agent: telegram command should be start|stop|status")
             continue
         if user_input.startswith("/runtime "):
             cmd = user_input.removeprefix("/runtime ").strip().lower()
