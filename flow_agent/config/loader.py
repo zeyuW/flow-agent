@@ -1,14 +1,9 @@
-"""配置加载器：从 env / .env / 外部 TOML 加载 Settings。"""
+"""配置加载器：仅从 config.toml 加载 Settings，不再使用环境变量。"""
 
 import os
 from pathlib import Path
 import re
 from typing import Any
-
-try:
-    from dotenv import load_dotenv as _load_dotenv
-except ModuleNotFoundError:
-    _load_dotenv = None
 
 from flow_agent.config.settings import (
     ChannelsSettings,
@@ -81,12 +76,18 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         return {}
 
     project_root = Path(__file__).resolve().parents[2]
-    if _load_dotenv is not None:
-        _load_dotenv(project_root / ".env")
+    
+    # 默认从项目根目录的 config.toml 读取
+    config_path = project_root / "config.toml"
     external_path = os.getenv("FLOW_AGENT_CONFIG_FILE", "")
-    external_config = _as_dict(Path(external_path)) if external_path else {}
+    
+    # 如果指定了外部配置文件，优先使用
+    if external_path:
+        config_path = Path(external_path)
+    
+    external_config = _as_dict(config_path)
+    
     values = ConfigValues(
-        env=dict(os.environ),
         external_config=external_config,
         project_root=project_root,
         external_path=external_path,
@@ -99,10 +100,10 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 "FLOW_AGENT_STORAGE_MEMORY_DB_PATH",
                 ("storage", "memory_db_path"),
                 str(project_root / ".flow" / "memory.db"),
-            )
+            ),
         ),
         logging=LoggingSettings(
-            level=values.get_str("FLOW_AGENT_LOG_LEVEL", ("logging", "level"), "INFO")
+            level=values.get_str("FLOW_AGENT_LOGGING_LEVEL", ("logging", "level"), "INFO"),
         ),
         session=SessionSettings(
             default_session_id=values.get_str(
@@ -110,17 +111,59 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 ("session", "default_session_id"),
                 "default",
             ),
+            max_history_messages=values.get_int(
+                "FLOW_AGENT_SESSION_MAX_HISTORY_MESSAGES",
+                ("session", "max_history_messages"),
+                500,
+                minimum=1,
+            ),
+            cache_size=values.get_int(
+                "FLOW_AGENT_SESSION_CACHE_SIZE",
+                ("session", "cache_size"),
+                64,
+                minimum=1,
+            ),
+            undo_enabled=values.get_bool(
+                "FLOW_AGENT_SESSION_UNDO_ENABLED",
+                ("session", "undo_enabled"),
+                True,
+            ),
+            tool_result_max_chars=values.get_int(
+                "FLOW_AGENT_SESSION_TOOL_RESULT_MAX_CHARS",
+                ("session", "tool_result_max_chars"),
+                10000,
+                minimum=100,
+            ),
         ),
         tooling=ToolingSettings(
             enabled=values.get_bool("FLOW_AGENT_TOOLING_ENABLED", ("tooling", "enabled"), True),
             max_tool_steps=values.get_int(
-                "FLOW_AGENT_TOOLING_MAX_STEPS", ("tooling", "max_tool_steps"), 5, minimum=1
+                "FLOW_AGENT_TOOLING_MAX_TOOL_STEPS",
+                ("tooling", "max_tool_steps"),
+                5,
+                minimum=1,
+            ),
+            tool_selection_max=values.get_int(
+                "FLOW_AGENT_TOOLING_TOOL_SELECTION_MAX",
+                ("tooling", "tool_selection_max"),
+                8,
+                minimum=1,
             ),
         ),
         retrieval=RetrievalSettings(
             enabled=values.get_bool("FLOW_AGENT_RETRIEVAL_ENABLED", ("retrieval", "enabled"), True),
             max_items=values.get_int(
-                "FLOW_AGENT_RETRIEVAL_MAX_ITEMS", ("retrieval", "max_items"), 6, minimum=0
+                "FLOW_AGENT_RETRIEVAL_MAX_ITEMS",
+                ("retrieval", "max_items"),
+                6,
+                minimum=1,
+            ),
+            min_score=values.get_float(
+                "FLOW_AGENT_RETRIEVAL_MIN_SCORE",
+                ("retrieval", "min_score"),
+                0.18,
+                minimum=0.0,
+                maximum=1.0,
             ),
         ),
         observe=ObserveSettings(
@@ -133,34 +176,82 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         ),
         memory_policy=MemoryPolicySettings(
             enabled=values.get_bool(
-                "FLOW_AGENT_MEMORY_POLICY_ENABLED", ("memory_policy", "enabled"), True
+                "FLOW_AGENT_MEMORY_POLICY_ENABLED",
+                ("memory_policy", "enabled"),
+                True,
             ),
             max_messages=values.get_int(
-                "FLOW_AGENT_MEMORY_MAX_MESSAGES", ("memory_policy", "max_messages"), 200, minimum=1
+                "FLOW_AGENT_MEMORY_POLICY_MAX_MESSAGES",
+                ("memory_policy", "max_messages"),
+                200,
+                minimum=1,
             ),
             dedupe=values.get_bool(
-                "FLOW_AGENT_MEMORY_DEDUPE", ("memory_policy", "dedupe"), True
+                "FLOW_AGENT_MEMORY_POLICY_DEDUPE",
+                ("memory_policy", "dedupe"),
+                True,
             ),
         ),
         proactive=ProactiveSettings(
-            enabled=values.get_bool(
-                "FLOW_AGENT_PROACTIVE_ENABLED", ("proactive", "enabled"), False
-            ),
+            enabled=values.get_bool("FLOW_AGENT_PROACTIVE_ENABLED", ("proactive", "enabled"), False),
             max_per_day=values.get_int(
-                "FLOW_AGENT_PROACTIVE_MAX_PER_DAY", ("proactive", "max_per_day"), 5, minimum=0
+                "FLOW_AGENT_PROACTIVE_MAX_PER_DAY",
+                ("proactive", "max_per_day"),
+                5,
+                minimum=1,
             ),
             min_interval=values.get_float(
-                "FLOW_AGENT_PROACTIVE_MIN_INTERVAL", ("proactive", "min_interval"), 30.0, minimum=1.0
+                "FLOW_AGENT_PROACTIVE_MIN_INTERVAL",
+                ("proactive", "min_interval"),
+                60.0,
+                minimum=1.0,
             ),
             max_interval=values.get_float(
-                "FLOW_AGENT_PROACTIVE_MAX_INTERVAL", ("proactive", "max_interval"), 300.0, minimum=10.0
+                "FLOW_AGENT_PROACTIVE_MAX_INTERVAL",
+                ("proactive", "max_interval"),
+                1800.0,
+                minimum=1.0,
             ),
             cooldown=values.get_float(
-                "FLOW_AGENT_PROACTIVE_COOLDOWN", ("proactive", "cooldown"), 120.0, minimum=0.0
+                "FLOW_AGENT_PROACTIVE_COOLDOWN",
+                ("proactive", "cooldown"),
+                120.0,
+                minimum=0.0,
             ),
-            judge_model=values.get_str(
-                "FLOW_AGENT_PROACTIVE_JUDGE_MODEL", ("proactive", "judge_model"), ""
-            ) or None,
+            judge_model=values.prefixed_str(
+                "FLOW_AGENT_PROACTIVE_JUDGE_MODEL",
+                ("proactive", "judge_model"),
+                "",
+            ),
+            hawkes_enabled=values.get_bool(
+                "FLOW_AGENT_PROACTIVE_HAWKES_ENABLED",
+                ("proactive", "hawkes_enabled"),
+                True,
+            ),
+            hawkes_base_intensity=values.get_float(
+                "FLOW_AGENT_PROACTIVE_HAWKES_BASE_INTENSITY",
+                ("proactive", "hawkes_base_intensity"),
+                0.1,
+                minimum=0.0,
+            ),
+            hawkes_excitation_alpha=values.get_float(
+                "FLOW_AGENT_PROACTIVE_HAWKES_EXCITATION_ALPHA",
+                ("proactive", "hawkes_excitation_alpha"),
+                0.5,
+                minimum=0.0,
+            ),
+            hawkes_decay_beta=values.get_float(
+                "FLOW_AGENT_PROACTIVE_HAWKES_DECAY_BETA",
+                ("proactive", "hawkes_decay_beta"),
+                0.1,
+                minimum=0.0,
+            ),
+            hawkes_time_constant=values.get_float(
+                "FLOW_AGENT_PROACTIVE_HAWKES_TIME_CONSTANT",
+                ("proactive", "hawkes_time_constant"),
+                60.0,
+                minimum=1.0,
+            ),
         ),
         drift=DriftSettings(
             enabled=values.get_bool("FLOW_AGENT_DRIFT_ENABLED", ("drift", "enabled"), False),
@@ -184,7 +275,8 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 "FLOW_AGENT_CHANNEL_CLI_ENABLED", ("channels", "cli_enabled"), True
             ),
             http_enabled=values.get_bool(
-                "FLOW_AGENT_CHANNEL_HTTP_ENABLED", ("channels", "http_enabled"), False
+                "FLOW_AGENT_CHANNEL_HTTP_ENABLED", ("channels", "http_enabled"),
+ False
             ),
             http_host=values.get_str(
                 "FLOW_AGENT_CHANNEL_HTTP_HOST", ("channels", "http_host"), "127.0.0.1"

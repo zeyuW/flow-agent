@@ -9,7 +9,6 @@ build/
 *.egg-info/
 .idea/
 .vscode/
-.env
 .flow/
 *.db
 *.db-journal
@@ -22,7 +21,6 @@ view_db.sh
 
 stage.md
 
-docs/
 config/
 frontend/
 
@@ -30,8 +28,10 @@ AKASHIC_AGENT_CODEBASE.md
 FLOW_AGENT_CODEBASE.md
 PROJECT_SCAN_REPORT.md
 
-learning.md
+_handbook/
+docs
 
-# config.example.toml
-# config.toml
-# .env.example
+AGENTS.md
+config.example.toml
+config.toml
+ARCHITECTURE.md

@@ -1,8 +1,4 @@
-"""Pydantic 配置模型：统一定义所有可配置项及其默认值。
-
-env 前缀: FLOW_AGENT_<SECTION>_<FIELD>
-外部 TOML: 按 section.field 路径嵌套
-"""
+"""Pydantic 配置模型：统一定义所有可配置项及其默认值。"""
 
 from __future__ import annotations
 
@@ -85,10 +81,16 @@ class ProactiveSettings(BaseModel):
     """主动消息推送配置 (spec proactive 1-6)。"""
     enabled: bool = False
     max_per_day: int = 5
-    min_interval: float = 30.0
-    max_interval: float = 300.0
+    min_interval: float = 60.0
+    max_interval: float = 1800.0
     cooldown: float = 120.0
     judge_model: str | None = None
+    # 霍克斯过程配置
+    hawkes_enabled: bool = True
+    hawkes_base_intensity: float = 0.1
+    hawkes_excitation_alpha: float = 0.5
+    hawkes_decay_beta: float = 0.1
+    hawkes_time_constant: float = 60.0
 
 
 # ── 漂移模式 ──

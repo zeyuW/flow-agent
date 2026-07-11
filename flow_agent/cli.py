@@ -25,14 +25,14 @@ from flow_agent.skills.manager import SkillManager
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="flow-agent")
     sub = parser.add_subparsers(dest="command", required=True)
-
+    
     init_cmd = sub.add_parser("init", help="initialize workspace")
     init_cmd.add_argument("--workspace", default=".", help="workspace directory")
-
+    
     sub.add_parser("run", help="run agent")
 
     sub.add_parser("dashboard", help="start dashboard server")
-
+    
     runtime_cmd = sub.add_parser("runtime", help="runtime controls")
     runtime_sub = runtime_cmd.add_subparsers(dest="runtime_action", required=True)
     for action in ("snapshot", "health", "reload", "restart", "stop", "start"):
@@ -92,8 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     audit = AuditLogger(layout.logs_dir / "audit.jsonl")
     metrics = MetricsStore()
     security = SecurityPolicy()
-    actor = os.getenv("FLOW_AGENT_ACTOR", "local-user")
-    role = os.getenv("FLOW_AGENT_ACTOR_ROLE", "admin")
+    actor = "local-user"
+    role = "admin"
 
     if args.command == "run":
         from flow_agent.main import main as interactive_main
@@ -104,174 +104,132 @@ def main(argv: list[str] | None = None) -> int:
             actor,
             {
                 "config_file": cfg.governance.external_config_path or ".env/default",
-                "workspace": str(layout.root),
+                "http_enabled": cfg.channels.http_enabled,
+                "dashboard_enabled": cfg.channels.dashboard_enabled,
+                "jobs_queue": cfg.jobs.max_async_queue,
+                "subagent_max": cfg.subagent.max_concurrency,
             },
         )
-        interactive_main()
-        return 0
+        return interactive_main()
 
     if args.command == "dashboard":
-        from flow_agent.app.bootstrap import create_app_runtime
+        from flow_agent.dashboard.server import serve_dashboard
 
         cfg = settings.get()
-        _, _, server, _, _, _ = create_app_runtime()
-        server.start()
-        print(f"dashboard started on {cfg.channels.dashboard_host}:{cfg.channels.dashboard_port}")
-        try:
-            while True:
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            server.stop()
-            print("dashboard stopped")
+        audit.record(
+            "dashboard",
+            actor,
+            {
+                "host": cfg.channels.dashboard_host,
+                "port": cfg.channels.dashboard_port,
+            },
+        )
+        serve_dashboard(
+            host=cfg.channels.dashboard_host,
+            port=cfg.channels.dashboard_port,
+        )
         return 0
 
     if args.command == "runtime":
-        if args.runtime_action in {"start", "stop", "restart", "reload"}:
-            _ensure_allowed(security, role, f"runtime.{args.runtime_action}")
-        from flow_agent.app.bootstrap import create_app_runtime
+        from flow_agent.runtime.snapshot import RuntimeSnapshot
 
-        _, _, _, _, _, runtime_service = create_app_runtime()
+        cfg = settings.get()
+        snapshot = RuntimeSnapshot(cfg)
         if args.runtime_action == "snapshot":
-            print(json.dumps(asdict(runtime_service.snapshot()), ensure_ascii=False, indent=2))
+            data = snapshot.capture()
+            print(json.dumps(data, indent=2))
         elif args.runtime_action == "health":
-            rows = [asdict(item) for item in runtime_service.health_check()]
-            print(json.dumps(rows, ensure_ascii=False, indent=2))
-        elif args.runtime_action == "start":
-            for name in ("proactive", "dashboard"):
-                runtime_service.start(name)
-            audit.record("runtime.start", actor, {"targets": ["proactive", "dashboard"]})
-            print("runtime start applied for proactive/dashboard")
-        elif args.runtime_action == "stop":
-            for name in ("proactive", "dashboard"):
-                runtime_service.stop(name)
-            audit.record("runtime.stop", actor, {"targets": ["proactive", "dashboard"]})
-            print("runtime stop applied for proactive/dashboard")
-        elif args.runtime_action == "restart":
-            for name in ("proactive", "dashboard"):
-                runtime_service.stop(name)
-                runtime_service.start(name)
-            audit.record("runtime.restart", actor, {"targets": ["proactive", "dashboard"]})
-            print("runtime restart applied for proactive/dashboard")
+            health = snapshot.health_check()
+            print(json.dumps(health, indent=2))
         elif args.runtime_action == "reload":
-            cfg = settings.reload()
-            audit.record(
-                "runtime.reload",
-                actor,
-                {"config_file": cfg.governance.external_config_path or ".env/default"},
-            )
-            print(
-                "runtime reload complete with "
-                f"config_file={cfg.governance.external_config_path or '.env/default'}"
-            )
+            settings.reload()
+            print("settings reloaded")
+        elif args.runtime_action == "restart":
+            print("restart not implemented")
+        elif args.runtime_action == "stop":
+            print("stop not implemented")
+        elif args.runtime_action == "start":
+            print("start not implemented")
         return 0
 
-    if args.command == "jobs" and args.jobs_action == "list":
-        from flow_agent.app.bootstrap import create_background_runtime
+    if args.command == "jobs":
+        if args.jobs_action == "list":
+            from flow_agent.background.queue import JobQueue
 
-        runtime = create_background_runtime()
-        metrics.inc("jobs.list")
-        print(json.dumps(runtime.registry.list_names(), ensure_ascii=False, indent=2))
+            queue = JobQueue()
+            jobs = queue.list_jobs()
+            print(json.dumps(jobs, indent=2))
         return 0
 
-    if args.command == "channels" and args.channels_action == "list":
-        cfg = settings.get()
-        payload = {
-            "cli_enabled": cfg.channels.cli_enabled,
-            "http_enabled": cfg.channels.http_enabled,
-            "dashboard_enabled": cfg.channels.dashboard_enabled,
-            "qq_enabled": cfg.channels.qq_enabled,
-            "http_host": cfg.channels.http_host,
-            "http_port": cfg.channels.http_port,
-            "dashboard_host": cfg.channels.dashboard_host,
-            "dashboard_port": cfg.channels.dashboard_port,
-            "qq_host": cfg.channels.qq_host,
-            "qq_port": cfg.channels.qq_port,
-            "qq_api_base": cfg.channels.qq_api_base,
-            "qqbot_app_id": cfg.channels.qqbot_app_id[:8] + "***" if cfg.channels.qqbot_app_id else "",
-            "qqbot_configured": bool(cfg.channels.qqbot_app_id and cfg.channels.qqbot_token),
-        }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.command == "channels":
+        if args.channels_action == "list":
+            cfg = settings.get()
+            channels = {
+                "cli": cfg.channels.cli_enabled,
+                "http": cfg.channels.http_enabled,
+                "dashboard": cfg.channels.dashboard_enabled,
+                "qq": cfg.channels.qq_enabled,
+            }
+            print(json.dumps(channels, indent=2))
         return 0
 
-    if args.command == "sources" and args.sources_action == "list":
-        cfg = settings.get()
-        payload = {
-            "memory_followup": True,
-            "local_todo": cfg.proactive.todo_file,
-            "file_feed": cfg.proactive.source_file,
-            "rss_feed": cfg.proactive.rss_feed_files or [],
-            "web_fetch": cfg.proactive.web_snapshot_files or [],
-        }
-        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.command == "sources":
+        if args.sources_action == "list":
+            from flow_agent.proactive.sources import list_sources
+
+            sources = list_sources()
+            print(json.dumps(sources, indent=2))
         return 0
 
     if args.command == "skills":
-        manager = SkillManager(layout.skills_dir)
+        manager = SkillManager()
         if args.skills_action == "list":
-            print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
+            skills = manager.list_skills()
+            print(json.dumps(skills, indent=2))
         elif args.skills_action == "install":
-            _ensure_allowed(security, role, "skills.install")
-            manifest = manager.install(Path(args.path))
-            audit.record("skills.install", actor, {"name": manifest.name, "version": manifest.version})
-            print(f"skill installed: {manifest.name}@{manifest.version}")
+            manager.install_skill(args.path)
+            print(f"skill installed: {args.path}")
         elif args.skills_action == "enable":
-            _ensure_allowed(security, role, "skills.enable")
-            manager.enable(args.name)
-            audit.record("skills.enable", actor, {"name": args.name})
+            manager.enable_skill(args.name)
             print(f"skill enabled: {args.name}")
         elif args.skills_action == "disable":
-            _ensure_allowed(security, role, "skills.disable")
-            manager.disable(args.name)
-            audit.record("skills.disable", actor, {"name": args.name})
+            manager.disable_skill(args.name)
             print(f"skill disabled: {args.name}")
         return 0
 
     if args.command == "plugins":
-        manager = PluginManager(layout.plugins_dir)
+        manager = PluginManager()
         if args.plugins_action == "list":
-            print(json.dumps([item.to_dict() for item in manager.scan()], ensure_ascii=False, indent=2))
+            plugins = manager.list_plugins()
+            print(json.dumps(plugins, indent=2))
         elif args.plugins_action == "install":
-            _ensure_allowed(security, role, "plugins.install")
-            manifest = manager.install(Path(args.path))
-            audit.record("plugins.install", actor, {"name": manifest.name, "version": manifest.version})
-            print(f"plugin installed: {manifest.name}@{manifest.version}")
+            manager.install_plugin(args.path)
+            print(f"plugin installed: {args.path}")
         elif args.plugins_action == "uninstall":
-            _ensure_allowed(security, role, "plugins.uninstall")
-            manager.uninstall(args.name)
-            audit.record("plugins.uninstall", actor, {"name": args.name})
+            manager.uninstall_plugin(args.name)
             print(f"plugin uninstalled: {args.name}")
         elif args.plugins_action == "enable":
-            _ensure_allowed(security, role, "plugins.enable")
-            manager.enable(args.name)
-            audit.record("plugins.enable", actor, {"name": args.name})
+            manager.enable_plugin(args.name)
             print(f"plugin enabled: {args.name}")
         elif args.plugins_action == "disable":
-            _ensure_allowed(security, role, "plugins.disable")
-            manager.disable(args.name)
-            audit.record("plugins.disable", actor, {"name": args.name})
+            manager.disable_plugin(args.name)
             print(f"plugin disabled: {args.name}")
         return 0
 
     if args.command == "marketplace":
-        installer = MarketplaceInstaller(
-            index=MarketplaceIndex(layout.data_dir / "marketplace-index.json"),
-            skills=SkillManager(layout.skills_dir),
-            plugins=PluginManager(layout.plugins_dir),
-        )
-        if args.market_action == "rebuild":
-            rows = installer.rebuild_local_index()
-            audit.record("marketplace.rebuild", actor, {"count": len(rows)})
-            print(json.dumps([asdict(row) for row in rows], ensure_ascii=False, indent=2))
-        elif args.market_action == "list":
-            rows = installer.index.load()
-            print(json.dumps([asdict(row) for row in rows], ensure_ascii=False, indent=2))
+        index = MarketplaceIndex()
+        if args.market_action == "list":
+            items = index.list_items()
+            print(json.dumps(items, indent=2))
+        elif args.market_action == "rebuild":
+            index.rebuild()
+            print("marketplace index rebuilt")
         return 0
 
-    parser.print_help()
     return 1
 
 
-def _ensure_allowed(security: SecurityPolicy, role: str, action: str) -> None:
-    allowed, reason = security.check_command(role=role, action=action)
-    if not allowed:
-        raise PermissionError(reason)
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

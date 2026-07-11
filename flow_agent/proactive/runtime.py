@@ -1,4 +1,4 @@
-"""Proactive runtime factory: build_proactive_runtime (spec 1a)."""
+"""Proactive runtime factory: build_proactive_runtime with Hawkes process (spec proactive)。"""
 
 from flow_agent.proactive.data_gateway import DataGateway
 from flow_agent.proactive.drift_store import DriftStateStore
@@ -6,7 +6,7 @@ from flow_agent.proactive.drift_pipeline import DriftTurnPipeline
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore
 from flow_agent.proactive.judge_loop import JudgeLoop
 from flow_agent.proactive.mcp_pool import McpClientPool
-from flow_agent.proactive.proactive_loop import ProactiveLoop
+from flow_agent.proactive.proactive_loop import HawkesConfig, ProactiveLoop
 from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
 
 
@@ -19,16 +19,22 @@ def build_proactive_runtime(
     outbound_port=None,
     mcp_servers: list[dict] | None = None,
     max_per_day: int = 5,
-    min_interval: float = 30.0,
-    max_interval: float = 300.0,
+    min_interval: float = 60.0,
+    max_interval: float = 1800.0,
     is_busy_fn=None,
     cooldown: float = 120.0,
     drift_enabled: bool = False,
     drift_data_dir: str = "",
     drift_min_interval_hours: float = 1.0,
     drift_max_steps: int = 10,
+    # 霍克斯过程配置
+    hawkes_enabled: bool = True,
+    hawkes_base_intensity: float = 0.1,
+    hawkes_excitation_alpha: float = 0.5,
+    hawkes_decay_beta: float = 0.1,
+    hawkes_time_constant: float = 60.0,
 ) -> ProactiveLoop:
-    """构建完整主动链路运行时 (spec 1a)。
+    """构建完整主动链路运行时，支持霍克斯过程模型 (spec proactive)。
 
     返回的 ProactiveLoop 可作为后台任务启动。
     """
@@ -68,6 +74,18 @@ def build_proactive_runtime(
         drift_min_interval_hours=drift_min_interval_hours,
     )
 
+    # 霍克斯过程配置
+    hawkes_config = None
+    if hawkes_enabled:
+        hawkes_config = HawkesConfig(
+            base_intensity=hawkes_base_intensity,
+            excitation_alpha=hawkes_excitation_alpha,
+            decay_beta=hawkes_decay_beta,
+            time_constant=hawkes_time_constant,
+            min_interval=min_interval,
+            max_interval=max_interval,
+        )
+
     loop = ProactiveLoop(
         pipeline=pipeline,
         mcp_pool=pool,
@@ -75,6 +93,7 @@ def build_proactive_runtime(
         min_interval=min_interval,
         max_interval=max_interval,
         is_busy_fn=is_busy_fn,
+        hawkes_config=hawkes_config,
     )
 
     return loop
