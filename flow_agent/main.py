@@ -90,7 +90,6 @@ def main() -> None:
         
         telegram = TelegramChannel(
             bot_token=cfg.channels.telegram_bot_token,
-            message_bus=message_bus,
             allowed_users=list(allowed_users),
             allowed_groups=list(allowed_groups),
         )
@@ -151,6 +150,31 @@ def main() -> None:
             print("qqbot requires the 'websockets' library. Install: pip install websockets")
 
     # 启动渠道（先启动渠道，让它们订阅 MessageBus）
+    from flow_agent.channels.protocol import ChannelContext
+    
+    # 创建渠道上下文
+    channel_ctx = ChannelContext(
+        bus=message_bus,
+        event_bus=event_bus,
+        log=logger,
+    )
+    
+    # 启动 Telegram 渠道（使用新协议，在后台线程运行）
+    if cfg.channels.telegram_enabled and telegram:
+        import threading
+        import asyncio
+        def run_telegram():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            # 启动渠道后保持事件循环运行
+            loop.run_until_complete(telegram.start(channel_ctx))
+            # start 方法会创建轮询任务，这里需要保持循环运行
+            loop.run_forever()
+        telegram_thread = threading.Thread(target=run_telegram, daemon=True)
+        telegram_thread.start()
+        print("telegram channel started")
+    
+    # 启动其他渠道（保持原有逻辑）
     cli.start()
     if cfg.channels.dashboard_enabled:
         dashboard_server.start()
@@ -158,9 +182,6 @@ def main() -> None:
         http.start()
     if cfg.channels.qq_enabled:
         qq.start()
-    if cfg.channels.telegram_enabled and telegram:
-        telegram.start()
-        print("telegram channel started")
 
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()

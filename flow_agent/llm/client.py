@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import json
 import logging
-from typing import Any
+from typing import Any, Callable, Iterator
 from typing import Protocol
 
 from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
@@ -35,6 +35,14 @@ class LLMClient(Protocol):
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResult:
+        ...
+    
+    def generate_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> LLMResult:
         ...
 
@@ -121,6 +129,74 @@ class OpenAILLMClient:
             return LLMResult(content="模型返回了空内容，请重试一次。")
 
         return LLMResult(content=content, tool_calls=parsed_tool_calls or None)
+    
+    # 流式生成文本
+    def generate_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResult:
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+        }
+        if tools:
+            request_kwargs["tools"] = tools
+
+        def _request():
+            return retry_call(
+                lambda: self.client.chat.completions.create(**request_kwargs),  # type: ignore[arg-type]
+                policy=RetryPolicy(max_attempts=2, delay_seconds=0.1, backoff_factor=1.8),
+                should_retry=lambda exc: isinstance(exc, (APIConnectionError, APITimeoutError)),
+            )
+
+        try:
+            response = with_fallback(
+                _request,
+                lambda exc: (_raise(exc)),
+            )
+        except AuthenticationError as exc:
+            logger.exception("LLM authentication failed, please check API key")
+            return LLMResult(content="认证失败：请检查 API Key 是否正确。")
+        except (APIConnectionError, APITimeoutError) as exc:
+            logger.exception("LLM network request failed")
+            return LLMResult(content="网络异常：暂时无法连接到模型服务，请稍后重试。")
+        except APIError as exc:
+            logger.exception("LLM API returned an error")
+            return LLMResult(content="模型服务暂时不可用，请稍后重试。")
+        except Exception:
+            logger.exception("Unexpected error during LLM request")
+            return LLMResult(content="发生未知错误，请稍后重试。")
+
+        full_content = ""
+        raw_tool_calls: list[Any] = []
+        
+        try:
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    delta = chunk.choices[0].delta.content
+                    full_content += delta
+                    if on_delta:
+                        on_delta(delta)
+                
+                # 处理工具调用（流式模式下工具调用比较复杂，暂时简化处理）
+                if chunk.choices and chunk.choices[0].delta.tool_calls:
+                    # 流式模式下工具调用处理较复杂，这里简化处理
+                    pass
+                    
+        except Exception as e:
+            logger.exception("Error during streaming")
+            # 如果流式失败，回退到非流式
+            return self.generate(messages, tools)
+        
+        # 如果没有工具调用，直接返回内容
+        if not raw_tool_calls:
+            return LLMResult(content=full_content, tool_calls=None)
+        
+        # 有工具调用的情况需要特殊处理，暂时回退到非流式
+        return self.generate(messages, tools)
 
     def _parse_tool_arguments(self, arguments_json: str) -> dict[str, str]:
         try:

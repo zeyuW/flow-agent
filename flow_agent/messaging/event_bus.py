@@ -69,6 +69,105 @@ class TurnCommitted(Event):
         self.tool_trace = tool_trace or []
 
 
+class StreamDeltaReady(Event):
+    """流式输出增量事件：在生成过程中实时广播。
+
+    用于渠道实时显示模型思考过程或生成内容。
+    """
+
+    __slots__ = ("delta", "channel", "chat_id")
+
+    def __init__(
+        self,
+        trace_id: str = "",
+        session_id: str = "",
+        delta: str = "",
+        channel: str = "",
+        chat_id: str = "",
+    ) -> None:
+        super().__init__(
+            event_type="stream_delta_ready",
+            trace_id=trace_id,
+            session_id=session_id,
+            payload={
+                "delta": delta,
+                "channel": channel,
+                "chat_id": chat_id,
+            },
+        )
+        self.delta = delta
+        self.channel = channel
+        self.chat_id = chat_id
+
+
+class ToolCallStarted(Event):
+    """工具调用开始事件：在工具调用开始时广播。
+
+    用于渠道实时显示工具调用状态。
+    """
+
+    __slots__ = ("tool_name", "tool_args", "channel", "chat_id")
+
+    def __init__(
+        self,
+        trace_id: str = "",
+        session_id: str = "",
+        tool_name: str = "",
+        tool_args: dict[str, str] | None = None,
+        channel: str = "",
+        chat_id: str = "",
+    ) -> None:
+        super().__init__(
+            event_type="tool_call_started",
+            trace_id=trace_id,
+            session_id=session_id,
+            payload={
+                "tool_name": tool_name,
+                "tool_args": tool_args or {},
+                "channel": channel,
+                "chat_id": chat_id,
+            },
+        )
+        self.tool_name = tool_name
+        self.tool_args = tool_args or {}
+        self.channel = channel
+        self.chat_id = chat_id
+
+
+class ToolCallCompleted(Event):
+    """工具调用完成事件：在工具调用完成时广播。
+
+    用于渠道实时显示工具调用结果。
+    """
+
+    __slots__ = ("tool_name", "result", "channel", "chat_id")
+
+    def __init__(
+        self,
+        trace_id: str = "",
+        session_id: str = "",
+        tool_name: str = "",
+        result: str = "",
+        channel: str = "",
+        chat_id: str = "",
+    ) -> None:
+        super().__init__(
+            event_type="tool_call_completed",
+            trace_id=trace_id,
+            session_id=session_id,
+            payload={
+                "tool_name": tool_name,
+                "result": result,
+                "channel": channel,
+                "chat_id": chat_id,
+            },
+        )
+        self.tool_name = tool_name
+        self.result = result
+        self.channel = channel
+        self.chat_id = chat_id
+
+
 class EventSubscriber(Protocol):
     """事件订阅者协议。"""
 

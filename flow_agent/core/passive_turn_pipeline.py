@@ -25,7 +25,7 @@ from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.dashboard.store import InMemoryDashboardStore
-from flow_agent.messaging.event_bus import EventBus, TurnCommitted
+from flow_agent.messaging.event_bus import EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,7 @@ class PassiveTurnPipeline:
         dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
+        enable_thinking: bool = False,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -67,6 +68,7 @@ class PassiveTurnPipeline:
         self.retriever = retriever
         self.retrieval_max_items = retrieval_max_items
         self.max_tool_steps = max_tool_steps
+        self.enable_thinking = enable_thinking
         self.recorder = recorder
         self.organizer = organizer
         self.dashboard = dashboard
@@ -257,6 +259,52 @@ class PassiveTurnPipeline:
             return ""
 
     def _reasoner(self, flow: TurnFlow) -> TurnFlow:
+        # 如果启用思考模式，使用流式生成
+        if self.enable_thinking and self.event_bus:
+            chat_id = flow.inbound_metadata.get("telegram_chat_id") if flow.inbound_metadata else ""
+            if chat_id:
+                # 发送初始状态
+                self.event_bus.publish(StreamDeltaReady(
+                    trace_id=flow.trace_id,
+                    session_id=flow.session_id,
+                    delta="🤔 正在思考...",
+                    channel=flow.channel,
+                    chat_id=str(chat_id),
+                ))
+                
+                # 定义流式回调函数
+                def on_delta(delta: str) -> None:
+                    self.event_bus.publish(StreamDeltaReady(
+                        trace_id=flow.trace_id,
+                        session_id=flow.session_id,
+                        delta=delta,
+                        channel=flow.channel,
+                        chat_id=str(chat_id),
+                    ))
+                
+                # 使用流式生成（如果有流式方法）
+                if hasattr(self.agent.llm_client, 'generate_stream'):
+                    # 先构建消息
+                    messages = self.agent.build_turn_messages(
+                        user_input=flow.user_input,
+                        persona_block="",
+                        memory_block="",
+                        retrieval_block="",
+                        tool_instructions="",
+                    )
+                    
+                    # 调用流式生成
+                    result = self.agent.llm_client.generate_stream(
+                        messages=messages,
+                        tools=flow.tools,
+                        on_delta=on_delta,
+                    )
+                    
+                    # 更新 flow 的结果
+                    flow.final_output = result.content
+                    return flow
+        
+        # 非思考模式或流式失败，使用正常流程
         return self._run_tool_loop(flow)
 
     def _after_reasoning(self, flow: TurnFlow) -> TurnFlow:

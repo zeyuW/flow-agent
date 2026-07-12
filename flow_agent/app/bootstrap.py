@@ -217,6 +217,8 @@ def create_passive_turn_pipeline(
     六个阶段：BeforeTurn → BeforeReasoning → PromptRender → Reasoner → AfterReasoning → AfterTurn
     """
     cfg = settings.get()
+    # 获取 enable_thinking 配置，默认为 False
+    enable_thinking = True  # 临时启用思考模式进行测试
     return PassiveTurnPipeline(
         agent=agent,
         tool_registry=tool_registry,
@@ -230,6 +232,7 @@ def create_passive_turn_pipeline(
         dashboard=dashboard,
         delegation_policy=DelegationPolicy(),
         tool_selection_max=cfg.tooling.tool_selection_max,
+        enable_thinking=enable_thinking,
     )
 
 
