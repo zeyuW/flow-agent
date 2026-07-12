@@ -40,6 +40,16 @@ class Plugin:
     def turn_started_modules(self) -> list:
         return []
 
+    # ── Proactive Sources (参考 akashic-agent) ──
+
+    def proactive_sources(self) -> list:
+        """声明主动推送数据源（参考 akashic-agent ProactiveSourceSpec）。
+        
+        返回 ProactiveSourceSpec 列表，用于插件声明数据源配置。
+        默认返回空列表，子类可覆盖。
+        """
+        return []
+
     # ── Lifecycle ──
 
     async def initialize(self) -> None:

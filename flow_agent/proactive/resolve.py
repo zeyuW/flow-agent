@@ -15,6 +15,8 @@ def resolve_decision(
     *,
     state_store: ProactiveStateStore,
     chat_id: str = "",
+    mcp_pool=None,
+    sources: list = None,
 ) -> ResolveResult:
     """Final decision with delivery dedup and semantic dedup (spec 5a-5e)."""
 
@@ -35,7 +37,7 @@ def resolve_decision(
         return ResolveResult(decision="skip", delivery_key=delivery_key)
 
     # spec 5e: send
-    effects = _build_side_effects(judge.cited_item_ids, delivery_key, state_store)
+    effects = _build_side_effects(judge.cited_item_ids, delivery_key, state_store, mcp_pool, sources)
     return ResolveResult(
         decision="send",
         message=judge.message,
@@ -56,8 +58,14 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:24]
 
 
-def _build_side_effects(cited: list[str], delivery_key: str, store: ProactiveStateStore) -> list:
-    """Create side effect callbacks: mark_delivery, ack sources (spec 7a, 7d)."""
+def _build_side_effects(
+    cited: list[str],
+    delivery_key: str,
+    store: ProactiveStateStore,
+    mcp_pool=None,
+    sources: list = None,
+) -> list:
+    """Create side effect callbacks: mark_delivery, ack sources (spec 7a, 7d, 7b-7c)."""
     effects = []
 
     def mark_delivery():
@@ -66,4 +74,23 @@ def _build_side_effects(cited: list[str], delivery_key: str, store: ProactiveSta
         logger.info("delivery marked: key=%s", delivery_key[:16])
 
     effects.append(mark_delivery)
+
+    # spec 7b-7c: ACK 被引用的条目（参考 akashic-agent）
+    if cited and mcp_pool and sources:
+        async def ack_cited_items():
+            for source in sources:
+                if not source.spec.ack_tool:
+                    continue
+                try:
+                    await mcp_pool.call(
+                        source.spec.server,
+                        source.spec.ack_tool,
+                        {"event_ids": cited}
+                    )
+                    logger.info("ack sent to source %s for %d items", source.spec.id, len(cited))
+                except Exception as e:
+                    logger.warning("ack failed for source %s: %s", source.spec.id, e)
+
+        effects.append(ack_cited_items)
+
     return effects

@@ -38,10 +38,15 @@ class PluginManager:
         self._loaded: dict[str, Plugin] = {}
         self._tool_names: dict[str, list[str]] = {}  # module_path -> tool names
         self._tool_hook_executor = ToolHookExecutor()
+        self._proactive_sources: dict[str, list] = {}  # plugin_id -> proactive sources
 
     @property
     def tool_hook_executor(self) -> ToolHookExecutor:
         return self._tool_hook_executor
+
+    def get_proactive_sources(self) -> dict[str, list]:
+        """获取所有插件的主动推送数据源声明"""
+        return self._proactive_sources
 
     # ── Discovery (spec 1a) ──
 
@@ -106,6 +111,18 @@ class PluginManager:
         self._bind_handlers(instance, name, handlers)
         self._bind_tools(instance, name, tools)
         self._bind_tool_hooks(instance, name, handlers)
+
+        # Collect proactive sources
+        if hasattr(instance, "proactive_sources"):
+            proactive_sources = instance.proactive_sources()
+            if proactive_sources:
+                from flow_agent.proactive.specs import RegisteredProactiveSource
+                registered = [
+                    RegisteredProactiveSource(spec=spec, plugin_id=name)
+                    for spec in proactive_sources
+                ]
+                self._proactive_sources[name] = registered
+                logger.info("plugin %s registered %d proactive sources", name, len(registered))
 
         # 1e: Async init with rollback
         try:

@@ -29,6 +29,9 @@ class ProactiveTurnPipeline:
         drift_pipeline=None,
         drift_enabled: bool = False,
         drift_min_interval_hours: float = 1.0,
+        mcp_pool=None,
+        proactive_sources: list = None,
+        channel: str = "cli",
     ) -> None:
         self._state = state_store
         self._gateway = gateway
@@ -40,6 +43,10 @@ class ProactiveTurnPipeline:
         self._drift = drift_pipeline
         self._drift_enabled = drift_enabled
         self._drift_min_interval = drift_min_interval_hours * 3600
+        self._mcp_pool = mcp_pool
+        self._proactive_sources = proactive_sources or []
+        self._channel = channel
+        logger.info(f"ProactiveTurnPipeline initialized with channel={channel}")
 
     async def run(self, *, chat_id: str = "", base_score: float = 0.0, is_busy: bool = False) -> AgentTick:
         """执行一次完整 tick：Gate → Fetch → Judge → Resolve → Deliver，无数据时尝试漂移。"""
@@ -90,6 +97,8 @@ class ProactiveTurnPipeline:
             tick.judge_result,
             state_store=self._state,
             chat_id=chat_id,
+            mcp_pool=self._mcp_pool,
+            sources=self._proactive_sources,
         )
 
         # Stage 5: Deliver (spec 6)
@@ -99,6 +108,7 @@ class ProactiveTurnPipeline:
                 chat_id=chat_id,
                 session_manager=self._session_manager,
                 outbound_port=self._outbound_port,
+                channel=self._channel if hasattr(self, '_channel') else "cli",
             )
 
         return tick

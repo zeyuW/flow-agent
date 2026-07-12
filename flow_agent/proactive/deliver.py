@@ -13,6 +13,7 @@ async def deliver_message(
     chat_id: str = "",
     session_manager=None,
     outbound_port=None,
+    channel: str = "cli",
 ) -> DeliverResult:
     """Persist proactive session and dispatch outbound (spec 6a-6e)."""
     if resolve.decision != "send" or not resolve.message:
@@ -36,21 +37,29 @@ async def deliver_message(
     if outbound_port:
         try:
             from flow_agent.messaging.message_bus import OutboundDispatch
+            metadata = {"proactive": True, "cited": resolve.cited_item_ids}
+            # 为 Telegram 添加 telegram_chat_id
+            if channel == "telegram" and chat_id:
+                metadata["telegram_chat_id"] = chat_id
             outbound_port.send(OutboundDispatch(
-                channel="cli",
+                channel=channel,
                 session_id=chat_id,
                 text=resolve.message,
-                metadata={"proactive": True, "cited": resolve.cited_item_ids},
+                metadata=metadata,
             ))
-            logger.info("proactive message dispatched to %s", chat_id)
+            logger.info("proactive message dispatched to %s via %s", chat_id, channel)
         except Exception:
             logger.exception("proactive dispatch failed")
             return DeliverResult(sent=False, message=resolve.message, chat_id=chat_id, error="dispatch failed")
 
-    # spec 6e: run side effects
+    # spec 6e: run side effects (包括异步 ACK)
     for effect in resolve.side_effects:
         try:
-            effect()
+            import asyncio
+            result = effect()
+            if asyncio.iscoroutine(result):
+                # 异步 side effect（如 ACK），在后台执行
+                asyncio.create_task(result)
         except Exception:
             logger.exception("side effect failed")
 

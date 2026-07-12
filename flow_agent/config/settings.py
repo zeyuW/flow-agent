@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 class ModelSettings(BaseModel):
     model: str
-    api_key: str = ""
+    api_key: str | None = None
     base_url: str | None = None
     system_prompt: str = "You are a helpful AI assistant."
     enable_thinking: bool = False
@@ -91,6 +91,7 @@ class ProactiveSettings(BaseModel):
     hawkes_excitation_alpha: float = 0.5
     hawkes_decay_beta: float = 0.1
     hawkes_time_constant: float = 60.0
+    telegram_target_user_id: str | None = None
 
 
 # ── 漂移模式 ──
@@ -103,44 +104,20 @@ class DriftSettings(BaseModel):
     max_steps: int = 10
 
 
-# ── MCP ──
-
-class MCPServerSettings(BaseModel):
-    name: str
-    enabled: bool = True
-    tools: list[str] = Field(default_factory=list)
-
-
-class MCPSettings(BaseModel):
-    enabled: bool = False
-    servers: list[MCPServerSettings] = Field(default_factory=list)
-
-
 # ── 通道 ──
 
 class ChannelsSettings(BaseModel):
-    cli_enabled: bool = True
-    http_enabled: bool = False
-    http_host: str = "127.0.0.1"
-    http_port: int = 8788
+    # Web 控制台
     dashboard_enabled: bool = False
     dashboard_host: str = "127.0.0.1"
     dashboard_port: int = 8787
-    # QQ OneBot (旧)
-    qq_enabled: bool = False
-    qq_host: str = "127.0.0.1"
-    qq_port: int = 8790
-    qq_api_base: str = "http://127.0.0.1:3000"
-    qq_access_token: str = ""
-    # QQ 官方 Bot
-    qqbot_app_id: str = ""
-    qqbot_token: str = ""
-    qqbot_secret: str = ""
-    qqbot_allowed_users: str = ""   # 逗号分隔的用户 ID 列表
-    qqbot_allowed_groups: str = ""  # 逗号分隔的群 ID 列表
+    # HTTP API（Web 页面后端）
+    http_enabled: bool = False
+    http_host: str = "127.0.0.1"
+    http_port: int = 8788
     # Telegram Bot
     telegram_enabled: bool = False
-    telegram_bot_token: str = ""
+    telegram_bot_token: str | None = None
     telegram_allowed_users: str = ""   # 逗号分隔的用户 ID 列表
     telegram_allowed_groups: str = ""  # 逗号分隔的群 ID 列表
 
@@ -157,13 +134,6 @@ class JobsSettings(BaseModel):
 class SubagentSettings(BaseModel):
     max_concurrency: int = 2
     tasks_file: str = ".flow/subagent_tasks.jsonl"
-
-
-# ── 治理 ──
-
-class ConfigGovernanceSettings(BaseModel):
-    config_version: str = "v1"
-    external_config_path: str | None = None
 
 
 # ── 人设 ──
@@ -207,12 +177,10 @@ class Settings(BaseModel):
     channels: ChannelsSettings = Field(default_factory=ChannelsSettings)
     jobs: JobsSettings = Field(default_factory=JobsSettings)
     subagent: SubagentSettings = Field(default_factory=SubagentSettings)
-    governance: ConfigGovernanceSettings = Field(default_factory=ConfigGovernanceSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
     prompt_budget: PromptBudgetSettings = Field(default_factory=PromptBudgetSettings)
     delegation_policy: DelegationPolicySettings = Field(default_factory=DelegationPolicySettings)
-    mcp: MCPSettings = Field(default_factory=MCPSettings)
 
     @property
     def model_name(self) -> str:

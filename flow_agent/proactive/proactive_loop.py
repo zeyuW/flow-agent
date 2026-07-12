@@ -147,7 +147,7 @@ class HawkesProcessModel:
 
 class ProactiveLoop:
     """主动循环：基于霍克斯过程模型的自适应间隔，MCP 连接池，Tick 分发 (spec proactive)。"""
-    
+
     def __init__(
         self,
         pipeline: ProactiveTurnPipeline,
@@ -158,6 +158,7 @@ class ProactiveLoop:
         max_interval: float = 1800.0,
         is_busy_fn = None,
         hawkes_config: HawkesConfig | None = None,
+        polling_module=None,
     ) -> None:
         self._pipeline = pipeline
         self._pool = mcp_pool
@@ -167,7 +168,8 @@ class ProactiveLoop:
         self._is_busy_fn = is_busy_fn
         self._running = False
         self._task: asyncio.Task | None = None
-        
+        self._polling_module = polling_module
+
         # 霍克斯过程模型
         if hawkes_config is None:
             hawkes_config = HawkesConfig(
@@ -185,6 +187,14 @@ class ProactiveLoop:
             await self._pool.connect_all()
         except Exception:
             logger.exception("MCP 连接池连接失败")
+
+        # 启动 MCP 轮询模块（如果有）
+        if self._polling_module:
+            try:
+                await self._polling_module.start()
+                logger.info("MCP 轮询模块已启动")
+            except Exception:
+                logger.exception("MCP 轮询模块启动失败")
 
         # 主自适应循环，使用霍克斯过程
         await self._run_loop()
@@ -222,6 +232,15 @@ class ProactiveLoop:
         self._running = False
         if self._task:
             self._task.cancel()
+
+        # 停止 MCP 轮询模块（如果有）
+        if self._polling_module:
+            try:
+                await self._polling_module.stop()
+                logger.info("MCP 轮询模块已停止")
+            except Exception:
+                logger.exception("MCP 轮询模块停止失败")
+
         await self._pool.close_all()
 
     async def start_background(self) -> asyncio.Task:

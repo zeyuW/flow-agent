@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
             "run",
             actor,
             {
-                "config_file": cfg.governance.external_config_path or ".env/default",
+                "config_file": ".env/default",
                 "http_enabled": cfg.channels.http_enabled,
                 "dashboard_enabled": cfg.channels.dashboard_enabled,
                 "jobs_queue": cfg.jobs.max_async_queue,

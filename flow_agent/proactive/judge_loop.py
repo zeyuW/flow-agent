@@ -19,7 +19,8 @@ Tools:
 
 Rules:
 - Evaluate each item against user preferences and recent context.
-- Only mark interesting if the user would genuinely care.
+- Be proactive: if an item contains important information, urgent alerts, security warnings, or time-sensitive updates, mark it as interesting.
+- Security alerts, urgent system messages, and critical updates should always be marked as interesting.
 - If any items are interesting, call message_push then finish_turn("reply").
 - If nothing is interesting, finish_turn("skip").
 """
@@ -53,6 +54,8 @@ class JudgeLoop:
             f"- [{i}][{it.source}] {it.title}: {it.summary[:120]}"
             for i, it in enumerate(items)
         )
+        logger.info(f"Judge evaluating {len(items)} items:\n{item_list}")
+        
         messages = [
             {"role": "system", "content": _JUDGE_SYSTEM},
             {"role": "user", "content": f"Evaluate these items:\n\n{item_list}"},
@@ -64,20 +67,41 @@ class JudgeLoop:
         decision = "skip"
 
         for step in range(self._max_steps):
+            logger.info(f"Judge step {step+1}/{self._max_steps}")
             response = self._llm.generate(messages=messages, tools=TOOL_SCHEMAS)
+            logger.info(f"Judge response: {response.content[:200]}, tool_calls: {len(response.tool_calls or [])}")
 
             if not response.tool_calls:
+                # 如果没有工具调用但有有趣项目，强制调用 message_push
+                if interesting and not draft_message:
+                    logger.info("No tool calls but items marked interesting, forcing message_push")
+                    # 使用第一个有趣项目的内容作为消息
+                    first_interesting_idx = interesting[0]
+                    if first_interesting_idx.isdigit() and int(first_interesting_idx) < len(items):
+                        draft_message = items[int(first_interesting_idx)].content
+                        decision = "reply"
+                        break
                 decision = "skip"
                 break
 
             for tc in response.tool_calls:
+                logger.info(f"Tool call: {tc.name}, args: {tc.arguments}")
                 result_text = self._dispatch_tool(tc, items, interesting, discarded, draft_message)
                 if tc.name == "message_push":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
                     draft_message = args.get("text", "")
+                    logger.info(f"Draft message staged: {draft_message[:100]}...")
+                    # 如果调用了 message_push，强制决策为 reply（优先级最高）
+                    decision = "reply"
                 elif tc.name == "finish_turn":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
-                    decision = args.get("decision", "skip")
+                    # 只有在还没有草稿消息时才使用 finish_turn 的决策
+                    if not draft_message:
+                        decision = args.get("decision", "skip")
+                    else:
+                        # 如果已经有草稿消息，强制为 reply
+                        decision = "reply"
+                    logger.info(f"Judge decision: {decision}")
                     break
 
             messages.append({"role": "assistant", "content": response.content, "tool_calls": [
@@ -87,6 +111,11 @@ class JudgeLoop:
             for tc in response.tool_calls:
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(tc.name)})
 
+            # 如果有有趣项目但没有草稿消息，继续循环
+            if interesting and not draft_message and decision != "reply":
+                logger.info("Items marked interesting but no draft message yet, continuing loop")
+                continue
+                
             if decision in ("reply", "skip"):
                 break
 
@@ -98,6 +127,8 @@ class JudgeLoop:
 
         cited = [items[int(i)].item_id for i in interesting if i.isdigit() and int(i) < len(items)]
 
+        logger.info(f"Judge final decision: {decision}, message: {draft_message[:100] if draft_message else 'none'}")
+        
         return JudgeResult(
             decision=decision,
             message=draft_message,

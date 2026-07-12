@@ -47,6 +47,8 @@ from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.spawn import SpawnTool
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.tools.registry import ToolRegistry
+from flow_agent.plugins.plugin_loader import PluginManager
+from flow_agent.proactive.sources import LocalFileSource
 
 
 """新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
@@ -135,7 +137,6 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
     tool_registry.set_guard(
         ToolGuard(
             whitelist={"read_file"}
-            | {f"mcp:{s.name}:{t}" for s in (cfg.mcp.servers or []) for t in (s.tools or [])}
             if cfg.tooling.enabled
             else None
         )
@@ -152,7 +153,7 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     # MCP
     mcp_registry = _build_mcp_registry(cfg, Path(DATA_DIR))
-    _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg)
+    # _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg)  # 暂时禁用，使用新的 mcp_servers 配置
 
     # Agent
     agent = Agent(
@@ -264,6 +265,7 @@ def create_app_runtime():
          agent_loop, pipeline)
     """
     cfg = settings.get()
+    
     components = create_core_components()
     agent = components["agent"]
     tool_registry = components["tool_registry"]
@@ -330,8 +332,16 @@ def create_app_runtime():
         dashboard=dashboard,
     )
 
+    # 插件系统暂时禁用，避免异步问题
+    proactive_sources = None
+
+    # 使用配置的 telegram_target_user_id，必须配置
+    print(f"Checking proactive config: telegram_target_user_id = {cfg.proactive.telegram_target_user_id}")
+    if not cfg.proactive.telegram_target_user_id:
+        raise ValueError("telegram_target_user_id not configured in config.toml")
+
     proactive_loop = build_proactive_runtime(
-        chat_id="default",
+        chat_id=cfg.proactive.telegram_target_user_id,
         llm_client=OpenAILLMClient(
             cfg,
             model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
@@ -341,6 +351,7 @@ def create_app_runtime():
         memory_engine=memory_runtime.engine,
         session_manager=session_manager,
         outbound_port=message_bus.outbound_port,
+        mcp_servers=mcp_servers,
         max_per_day=cfg.proactive.max_per_day,
         min_interval=cfg.proactive.min_interval,
         max_interval=cfg.proactive.max_interval,
@@ -349,6 +360,8 @@ def create_app_runtime():
         drift_data_dir=cfg.drift.data_dir,
         drift_min_interval_hours=cfg.drift.min_interval_hours,
         drift_max_steps=cfg.drift.max_steps,
+        proactive_sources=proactive_sources,
+        channel="telegram" if cfg.channels.telegram_enabled else "cli",
     )
 
     runtime_service = create_runtime_service(
@@ -483,20 +496,4 @@ def _build_mcp_registry(settings, data_dir) -> McpServerRegistry:
         config_path=data_dir / "mcp_servers.json",
         tool_registry=None,
     )
-    if not settings.mcp.enabled:
-        return mcp_registry
     return mcp_registry
-
-
-def _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg):
-    if not cfg.mcp.enabled:
-        return
-    for server in (cfg.mcp.servers or []):
-        if not server.enabled:
-            continue
-        tool_registry.unregister(f"mcp:{server.name}")
-        mcp_registry._config_server_specs[server.name] = {
-            "command": getattr(server, "command", [f"echo", server.name]),
-            "env": {},
-            "cwd": None,
-        }

@@ -21,8 +21,6 @@ view_db.sh
 
 stage.md
 
-config/
-frontend/
 
 AKASHIC_AGENT_CODEBASE.md
 FLOW_AGENT_CODEBASE.md
