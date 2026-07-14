@@ -9,7 +9,6 @@ from typing import Callable
 from flow_agent.channels.base import ChannelStatus, MessageBusChannel
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
-from flow_agent.ops.metrics import MetricsStore
 from flow_agent.security.auth import APIKeyAuth
 from flow_agent.security.policy import SecurityPolicy
 
@@ -39,7 +38,6 @@ class HTTPChannel(MessageBusChannel):
     message_bus: MessageBus
     auth: APIKeyAuth | None = None
     security_policy: SecurityPolicy | None = None
-    metrics: MetricsStore | None = None
     _server: HTTPServer | None = None
     _thread: threading.Thread | None = None
     _running: bool = False
@@ -136,8 +134,6 @@ class HTTPChannel(MessageBusChannel):
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
                     self.wfile.write(raw)
-                    if parent.metrics is not None:
-                        parent.metrics.inc("channel.http.request_ok")
                 except Exception as exc:
                     parent._last_error = str(exc)
                     logger.exception("http channel request failed")
@@ -148,12 +144,6 @@ class HTTPChannel(MessageBusChannel):
                     self.send_header("Content-Length", str(len(raw)))
                     self.end_headers()
                     self.wfile.write(raw)
-                    if parent.metrics is not None:
-                        parent.metrics.inc("channel.http.request_failed")
-                finally:
-                    if parent.metrics is not None:
-                        elapsed_ms = round((perf_counter() - started) * 1000)
-                        parent.metrics.inc(f"channel.http.latency_bucket_ms_{min(1000, elapsed_ms // 100 * 100)}")
 
             def log_message(self, format: str, *args) -> None:
                 return
