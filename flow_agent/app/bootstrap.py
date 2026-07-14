@@ -153,6 +153,7 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
 
     # MCP
     mcp_registry = _build_mcp_registry(cfg, Path(DATA_DIR))
+    mcp_servers = []  # 暂时使用空列表，后续可从配置加载
     # _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg)  # 暂时禁用，使用新的 mcp_servers 配置
 
     # Agent
@@ -265,6 +266,9 @@ def create_app_runtime():
          agent_loop, pipeline)
     """
     cfg = settings.get()
+    
+    # MCP 服务器配置
+    mcp_servers = []  # 暂时使用空列表，后续可从配置加载
     
     components = create_core_components()
     agent = components["agent"]

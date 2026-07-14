@@ -111,6 +111,19 @@ def main() -> None:
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
+    # 启动主动回复循环（后台任务）
+    if proactive_runtime:
+        import asyncio
+        import threading
+        def run_proactive():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(proactive_runtime.start_background())
+            loop.run_forever()
+        proactive_thread = threading.Thread(target=run_proactive, daemon=True)
+        proactive_thread.start()
+        print("proactive loop started")
+
     # 等待 Telegram 渠道完成订阅（延迟启动 MessageBus 分发任务）
     import time
     time.sleep(1.0)  # 等待 1 秒确保渠道订阅完成

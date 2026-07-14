@@ -60,10 +60,12 @@ class AnyActionGate:
     def should_act(self, store: ProactiveStateStore, base_score: float) -> bool:
         if store.daily_count >= self.max_per_day:
             return False
-        last = store.get_last_sent_at()
-        if last > 0 and (time.time() - last) < self.min_interval:
-            return False
-        if base_score < self.prob_threshold:
+        # 跳过 min_interval 检查，让霍克斯过程完全控制间隔
+        # last = store.get_last_sent_at()
+        # if last > 0 and (time.time() - last) < self.min_interval:
+        #     return False
+        # 当 base_score 为 -1 时，跳过概率检查（用于霍克斯模型）
+        if base_score >= 0 and base_score < self.prob_threshold:
             return False
         return True
 

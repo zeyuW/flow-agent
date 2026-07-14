@@ -61,7 +61,8 @@ def build_proactive_runtime(
     
     gateway = DataGateway(pool, all_proactive_sources, local_source_file=Path(DATA_DIR) / "proactive" / "test_feed.txt")
     judge = JudgeLoop(llm_client=llm_client, memory_engine=memory_engine)
-    any_action = AnyActionGate(max_per_day=max_per_day)
+    # 使用 cooldown 作为 min_interval，让霍克斯过程完全控制间隔
+    any_action = AnyActionGate(max_per_day=max_per_day, min_interval=cooldown)
 
     # 漂移管道
     drift_pipeline = None

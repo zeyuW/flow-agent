@@ -1,8 +1,10 @@
 """Telegram 渠道：基于 Telegram Bot API 的消息适配器。"""
 
 import asyncio
+import http.client
 import json
 import logging
+import ssl
 import urllib.parse
 import urllib.request
 from typing import Any
@@ -231,26 +233,49 @@ class TelegramChannel(Channel, EventSubscriber):
             "offset": self._offset + 1,
             "timeout": 5,  # 减少长轮询超时时间，提高响应速度
         }
-        try:
-            data = urllib.parse.urlencode(params).encode()
-            req = urllib.request.Request(url, data=data, method="GET")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read())
-                if result.get("ok"):
-                    updates = result.get("result", [])
-                    if updates:
-                        self._offset = max(u.get("update_id", 0) for u in updates)
-                    return updates
-        except urllib.error.HTTPError as e:
-            # 409 Conflict 错误通常表示多个轮询实例，忽略并重试
-            if e.code == 409:
-                logger.warning(f"telegram get_updates conflict (409), will retry")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                data = urllib.parse.urlencode(params).encode()
+                req = urllib.request.Request(url, data=data, method="GET")
+                # 增加超时时间，避免 SSL 握手超时
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    result = json.loads(resp.read())
+                    if result.get("ok"):
+                        updates = result.get("result", [])
+                        if updates:
+                            self._offset = max(u.get("update_id", 0) for u in updates)
+                        return updates
+            except urllib.error.HTTPError as e:
+                # 409 Conflict 错误通常表示多个轮询实例，忽略并重试
+                if e.code == 409:
+                    logger.warning(f"telegram get_updates conflict (409), will retry")
+                    return []
+                else:
+                    logger.error(f"telegram get_updates HTTP error: {e.code}")
+                    if attempt < max_retries - 1:
+                        logger.info(f"Retrying telegram get_updates ({attempt + 1}/{max_retries})")
+                        import time
+                        time.sleep(2 ** attempt)  # 指数退避
+                        continue
+                    raise
+            except (urllib.error.URLError, ssl.SSLError, http.client.RemoteDisconnected) as e:
+                # SSL 错误和连接错误，重试
+                logger.warning(f"telegram get_updates connection error: {e.__class__.__name__}, retrying ({attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(2 ** attempt)  # 指数退避
+                    continue
+                else:
+                    logger.error(f"telegram get_updates failed after {max_retries} retries")
+                    return []
+            except Exception as e:
+                logger.exception(f"telegram get_updates unexpected error: {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(2 ** attempt)
+                    continue
                 return []
-            else:
-                logger.error(f"telegram get_updates HTTP error: {e.code}")
-                raise
-        except Exception:
-            logger.exception("telegram get_updates failed")
         return []
     
     async def _handle_update(self, update: dict) -> None:

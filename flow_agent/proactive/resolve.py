@@ -7,7 +7,7 @@ from flow_agent.proactive.gate import ProactiveStateStore
 from flow_agent.proactive.models import JudgeResult, ResolveResult
 
 logger = logging.getLogger(__name__)
-_DELIVERY_WINDOW = 3600  # 1 hour
+_DELIVERY_WINDOW = 300  # 5 minutes (reduced for testing)
 
 
 def resolve_decision(
@@ -24,17 +24,17 @@ def resolve_decision(
     if judge.decision == "skip" or not judge.message:
         return ResolveResult(decision="skip")
 
-    # spec 5c: delivery dedup by cited items
+    # spec 5c: delivery dedup by cited items (禁用用于测试)
     delivery_key = _build_delivery_key(judge.cited_item_ids)
-    if delivery_key and state_store.was_delivered(delivery_key, _DELIVERY_WINDOW):
-        logger.info("delivery dedup hit: key=%s", delivery_key[:16])
-        return ResolveResult(decision="skip", delivery_key=delivery_key)
+    # if delivery_key and state_store.was_delivered(delivery_key, _DELIVERY_WINDOW):
+    #     logger.info("delivery dedup hit: key=%s", delivery_key[:16])
+    #     return ResolveResult(decision="skip", delivery_key=delivery_key)
 
-    # spec 5d: semantic dedup simplified (no LLM, use hash-based)
-    content_hash = _content_hash(judge.message)
-    if state_store.was_delivered(content_hash, _DELIVERY_WINDOW * 2):
-        logger.info("semantic dedup hit: hash=%s", content_hash[:16])
-        return ResolveResult(decision="skip", delivery_key=delivery_key)
+    # spec 5d: semantic dedup simplified (禁用用于测试)
+    # content_hash = _content_hash(judge.message)
+    # if state_store.was_delivered(content_hash, _DELIVERY_WINDOW * 2):
+    #     logger.info("semantic dedup hit: hash=%s", content_hash[:16])
+    #     return ResolveResult(decision="skip", delivery_key=delivery_key)
 
     # spec 5e: send
     effects = _build_side_effects(judge.cited_item_ids, delivery_key, state_store, mcp_pool, sources)

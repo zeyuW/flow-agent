@@ -201,20 +201,25 @@ class ProactiveLoop:
 
     async def _run_loop(self) -> None:
         """主循环：使用霍克斯过程模型计算 tick 间隔。"""
+        logger.info("主动回复循环启动")
         while self._running:
             # 检查是否忙碌
             is_busy = self._is_busy_fn() if self._is_busy_fn else False
+            logger.debug(f"主动回复 tick 开始: chat_id={self._chat_id}, is_busy={is_busy}")
             
             # 执行 tick
             tick = await self._pipeline.run(
                 chat_id=self._chat_id,
-                base_score=0.0,  # 霍克斯模型不需要 base_score
+                base_score=-1.0,  # 霍克斯模型不需要 base_score，使用 -1 跳过概率检查
                 is_busy=is_busy,
             )
+            
+            logger.info(f"主动回复 tick 完成: gate_passed={tick.gate_result.passed if tick.gate_result else False}, reason={tick.gate_result.reason if tick.gate_result else 'no_gate'}")
 
             # 如果 tick 通过，记录为一次交互事件
             if tick.gate_result and tick.gate_result.passed:
                 self._hawkes.add_interaction("proactive_tick")
+                logger.info("主动回复 tick 通过，记录交互事件")
 
             # 使用霍克斯过程模型计算下一个 tick 间隔
             next_interval = self._hawkes.compute_next_interval()
