@@ -5,7 +5,6 @@ from flow_agent.infra.trace import TraceRecorder
 from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.dashboard.store import InMemoryDashboardStore
 from flow_agent.core.delegation import DelegationPolicy
 
 
@@ -19,7 +18,6 @@ class Orchestrator:
         retrieval_max_items: int = 6,
         recorder: TraceRecorder | None = None,
         organizer: MemoryOrganizer | None = None,
-        dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
     ) -> None:
@@ -31,7 +29,6 @@ class Orchestrator:
             retrieval_max_items=retrieval_max_items,
             recorder=recorder,
             organizer=organizer,
-            dashboard=dashboard,
             delegation_policy=delegation_policy,
             tool_selection_max=tool_selection_max,
         )

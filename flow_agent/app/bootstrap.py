@@ -28,8 +28,6 @@ from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_e
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
-from flow_agent.dashboard.store import InMemoryDashboardStore
-from flow_agent.dashboard.api import DashboardServer
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
 from flow_agent.background.jobs import JobSpec
@@ -59,7 +57,7 @@ from flow_agent.proactive.sources import LocalFileSource
 """
 
 
-def create_core_components(dashboard: InMemoryDashboardStore | None = None):
+def create_core_components():
     """创建核心组件：Agent, ToolRegistry, LLM 客户端等。
 
     返回组装好的组件字典，供 create_app_runtime 使用。
@@ -88,8 +86,6 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         if cfg.memory_policy.enabled
         else None
     )
-
-    dashboard_store = dashboard or InMemoryDashboardStore()
 
     # 事件记录器
     recorder = (
@@ -175,7 +171,6 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         retrieval_max_items=cfg.retrieval.max_items,
         recorder=recorder,
         organizer=organizer,
-        dashboard=dashboard_store,
         tool_selection_max=cfg.tooling.tool_selection_max,
     )
 
@@ -185,7 +180,6 @@ def create_core_components(dashboard: InMemoryDashboardStore | None = None):
         "retriever": retriever,
         "organizer": organizer,
         "recorder": recorder,
-        "dashboard_store": dashboard_store,
         "orchestrator": orchestrator,
         "message_store": message_store,
         "session_manager": session_manager,
@@ -212,7 +206,6 @@ def create_passive_turn_pipeline(
     retriever=None,
     organizer=None,
     recorder=None,
-    dashboard=None,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
 
@@ -231,7 +224,6 @@ def create_passive_turn_pipeline(
         max_tool_steps=cfg.tooling.max_tool_steps,
         recorder=recorder,
         organizer=organizer,
-        dashboard=dashboard,
         delegation_policy=DelegationPolicy(),
         tool_selection_max=cfg.tooling.tool_selection_max,
         enable_thinking=enable_thinking,
@@ -251,9 +243,9 @@ def create_agent_loop(
 
 
 # 原有 bootstrap 函数保持兼容
-def create_orchestrator(dashboard: InMemoryDashboardStore | None = None) -> Orchestrator:
+def create_orchestrator() -> Orchestrator:
     """创建 Orchestrator（保持向后兼容）。"""
-    components = create_core_components(dashboard=dashboard)
+    components = create_core_components()
     return components["orchestrator"]
 
 
@@ -261,7 +253,7 @@ def create_app_runtime():
     """组装完整应用运行时。
 
     返回:
-        (orchestrator, proactive_loop, dashboard_server, background_runtime,
+        (orchestrator, proactive_loop, background_runtime,
          subagent_runtime, runtime_service, message_bus, event_bus,
          agent_loop, pipeline)
     """
@@ -276,7 +268,6 @@ def create_app_runtime():
     retriever = components["retriever"]
     organizer = components["organizer"]
     recorder = components["recorder"]
-    dashboard = components["dashboard_store"]
     orchestrator = components["orchestrator"]
     session_manager = components["session_manager"]
     llm_client = components["llm_client"]
@@ -304,7 +295,6 @@ def create_app_runtime():
         retriever=retriever,
         organizer=organizer,
         recorder=recorder,
-        dashboard=dashboard,
     )
 
     # 创建 Agent 主循环
@@ -333,7 +323,6 @@ def create_app_runtime():
     background_runtime = BackgroundRuntime(
         registry=background_registry,
         store=background_store,
-        dashboard=dashboard,
     )
 
     # 插件系统暂时禁用，避免异步问题
@@ -369,7 +358,6 @@ def create_app_runtime():
     )
 
     runtime_service = create_runtime_service(
-        dashboard=dashboard,
         proactive_loop=proactive_loop,
     )
 
@@ -388,7 +376,6 @@ def create_app_runtime():
 
     subagent_runtime = create_subagent_runtime(
         DATA_DIR,
-        dashboard=dashboard,
         tasks_file=cfg.subagent.tasks_file,
         max_concurrency=cfg.subagent.max_concurrency,
         message_bus=message_bus,
@@ -398,16 +385,9 @@ def create_app_runtime():
     # Wire SpawnTool to subagent manager
     spawn_tool._manager = subagent_runtime.manager
 
-    dashboard_server = DashboardServer(
-        host=cfg.channels.dashboard_host,
-        port=cfg.channels.dashboard_port,
-        store=dashboard,
-    )
-
     return (
         orchestrator,
         proactive_loop,
-        dashboard_server,
         background_runtime,
         subagent_runtime,
         runtime_service,
@@ -421,13 +401,12 @@ def create_app_runtime():
 
 
 def create_runtime_service(
-    dashboard: InMemoryDashboardStore,
     proactive_loop,
 ) -> RuntimeService:
     """创建 RuntimeService（保持原有逻辑）。"""
 
     cfg = settings.get()
-    runtime_service = RuntimeService(dashboard=dashboard)
+    runtime_service = RuntimeService()
 
     runtime_service.register(
         RuntimeUnit(

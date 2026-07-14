@@ -16,7 +16,6 @@ def main() -> None:
     print(
         "Config summary: "
         f"http_enabled={cfg.channels.http_enabled}, "
-        f"dashboard_enabled={cfg.channels.dashboard_enabled}, "
         f"jobs_queue={cfg.jobs.max_async_queue}, "
         f"subagent_max={cfg.subagent.max_concurrency}"
     )
@@ -25,7 +24,6 @@ def main() -> None:
         (
             orchestrator,
             proactive_runtime,
-            dashboard_server,
             background_runtime,
             subagent_runtime,
             runtime_service,
@@ -103,8 +101,6 @@ def main() -> None:
         print("telegram channel started")
     
     # 启动其他渠道
-    if cfg.channels.dashboard_enabled:
-        dashboard_server.start()
     if cfg.channels.http_enabled:
         http.start()
 

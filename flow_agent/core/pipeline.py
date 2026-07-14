@@ -15,7 +15,6 @@ from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.models import RetrievedMemory
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.dashboard.store import InMemoryDashboardStore
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +44,6 @@ class TurnPipeline:
         max_tool_steps: int = 5,
         recorder: TraceRecorder | None = None,
         organizer: MemoryOrganizer | None = None,
-        dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
     ) -> None:
@@ -56,7 +54,6 @@ class TurnPipeline:
         self.max_tool_steps = max_tool_steps
         self.recorder = recorder
         self.organizer = organizer
-        self.dashboard = dashboard
         self.delegation_policy = delegation_policy or DelegationPolicy()
         self.tool_selection_max = max(1, tool_selection_max)
         self.context_store = ContextStore(
@@ -329,11 +326,6 @@ class TurnPipeline:
         return state
 
     def _record_event(self, event: dict[str, Any]) -> None:
-        if self.dashboard is not None:
-            try:
-                self.dashboard.record(event)
-            except Exception:
-                logger.exception("dashboard record failed")
         if self.recorder is None:
             return
         self.recorder.record(event)

@@ -33,12 +33,10 @@ class SubagentManager:
         tasks_path: Path,
         message_bus: Any = None,
         llm_client: Any = None,
-        dashboard: Any = None,
     ) -> None:
         self.tasks_path = tasks_path
         self._bus = message_bus
         self._llm = llm_client
-        self._dashboard = dashboard
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._running_jobs: dict[str, RunningSubagentJob] = {}
         self.max_concurrency = 2
@@ -52,13 +50,6 @@ class SubagentManager:
             parent_trace_id=parent_trace_id,
         )
         self._persist(task)
-        if self._dashboard:
-            self._dashboard.record({
-                "type": "subagent_task_created",
-                "task_id": task.task_id,
-                "kind": kind,
-                "parent_trace_id": parent_trace_id,
-            })
         return task
 
     def run_task(self, task, executor) -> None:
@@ -67,12 +58,6 @@ class SubagentManager:
             task.status = "running"
             task.started_at = datetime.now(timezone.utc).isoformat()
             self._persist(task)
-            if self._dashboard:
-                self._dashboard.record({
-                    "type": "subagent_task_started",
-                    "task_id": task.task_id,
-                    "kind": task.kind,
-                })
             try:
                 result = executor(task)
                 task.status = "completed"
@@ -84,14 +69,6 @@ class SubagentManager:
             finally:
                 task.finished_at = datetime.now(timezone.utc).isoformat()
                 self._persist(task)
-                if self._dashboard:
-                    self._dashboard.record({
-                        "type": "subagent_task_finished",
-                        "task_id": task.task_id,
-                        "kind": task.kind,
-                        "status": task.status,
-                        "parent_trace_id": task.parent_trace_id,
-                    })
         threading.Thread(target=_run, daemon=True).start()
 
     def list_recent_tasks(self, limit: int = 10) -> list:
@@ -312,20 +289,6 @@ class SubagentManager:
         )
         self._bus.publish_inbound(msg)  # 5d-5e: MessageBus → AgentLoop consumes
         logger.info("[spawn] completion announced: job_id=%s status=%s", job_id, status)
-
-    # ── Dashboard tracing ──
-
-    def _trace(self, job_id: str, phase: str, payload: dict) -> None:
-        if self._dashboard:
-            try:
-                self._dashboard.record({
-                    "type": "spawn_trace",
-                    "job_id": job_id,
-                    "phase": phase,
-                    **payload,
-                })
-            except Exception:
-                pass
 
     @property
     def running_count(self) -> int:

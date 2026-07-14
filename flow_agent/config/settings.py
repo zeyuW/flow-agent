@@ -107,10 +107,6 @@ class DriftSettings(BaseModel):
 # ── 通道 ──
 
 class ChannelsSettings(BaseModel):
-    # Web 控制台
-    dashboard_enabled: bool = False
-    dashboard_host: str = "127.0.0.1"
-    dashboard_port: int = 8787
     # HTTP API（Web 页面后端）
     http_enabled: bool = False
     http_host: str = "127.0.0.1"

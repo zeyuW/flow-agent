@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import InMemoryJobStore, JobRun
-from flow_agent.dashboard.store import InMemoryDashboardStore
 from flow_agent.guard.guards import BackgroundReentryGuard
 from flow_agent.runtime.retry import RetryPolicy, retry_call
 
@@ -34,7 +33,6 @@ class BackgroundRuntime:
 
     registry: InMemoryJobRegistry
     store: InMemoryJobStore
-    dashboard: InMemoryDashboardStore | None = None
     max_async_queue: int = 64
     _lock: threading.Lock = field(default_factory=threading.Lock)
     reentry_guard: BackgroundReentryGuard = field(default_factory=BackgroundReentryGuard)
@@ -106,12 +104,7 @@ class BackgroundRuntime:
         threading.Thread(target=_run, daemon=True).start()
 
     def _record(self, event: dict[str, object]) -> None:
-        if self.dashboard is None:
-            return
-        try:
-            self.dashboard.record(event)
-        except Exception:
-            logger.exception("dashboard record job event failed")
+        pass
 
 
 def _utc_now():

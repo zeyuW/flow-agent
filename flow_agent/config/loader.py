@@ -232,10 +232,6 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
         ),
         channels=ChannelsSettings(
-            # Web 控制台
-            dashboard_enabled=values.get_bool(("channels", "dashboard_enabled"), False),
-            dashboard_host=values.get_str(("channels", "dashboard_host"), "127.0.0.1"),
-            dashboard_port=values.get_int(("channels", "dashboard_port"), 8787),
             # HTTP API（Web 页面后端）
             http_enabled=values.get_bool(("channels", "http_enabled"), False),
             http_host=values.get_str(("channels", "http_host"), "127.0.0.1"),

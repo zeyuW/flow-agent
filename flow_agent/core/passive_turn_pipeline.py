@@ -24,7 +24,6 @@ from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.organizer import MemoryOrganizer
 from flow_agent.memory.retriever import MemoryRetriever
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.dashboard.store import InMemoryDashboardStore
 from flow_agent.messaging.event_bus import EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
 
@@ -52,7 +51,6 @@ class PassiveTurnPipeline:
         max_tool_steps: int = 5,
         recorder: TraceRecorder | None = None,
         organizer: MemoryOrganizer | None = None,
-        dashboard: InMemoryDashboardStore | None = None,
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
         enable_thinking: bool = False,
@@ -71,7 +69,6 @@ class PassiveTurnPipeline:
         self.enable_thinking = enable_thinking
         self.recorder = recorder
         self.organizer = organizer
-        self.dashboard = dashboard
         self.delegation_policy = delegation_policy or DelegationPolicy()
         self.tool_selection_max = max(1, tool_selection_max)
         self.context_store = ContextStore(
@@ -532,10 +529,5 @@ class PassiveTurnPipeline:
             raise
 
     def _record_event(self, event: dict[str, Any]) -> None:
-        if self.dashboard is not None:
-            try:
-                self.dashboard.record(event)
-            except Exception:
-                logger.exception("dashboard record failed")
         if self.recorder is not None:
             self.recorder.record(event)
