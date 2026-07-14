@@ -1,4 +1,4 @@
-"""MCP 数据源轮询模块（参考 akashic-agent modules_source.py）。"""
+"""MCP 数据源轮询模块。"""
 
 import asyncio
 import logging
@@ -19,7 +19,7 @@ def source_key(source: RegisteredProactiveSource) -> str:
 
 
 async def poll_source_async(pool: McpClientPool, source: RegisteredProactiveSource) -> None:
-    """调用 MCP 源的 poll_tool 进行轮询（参考 akashic-agent poll_source_async）。"""
+    """调用 MCP 源的 poll_tool 进行轮询。"""
     if not source.spec.poll_tool:
         return
     
@@ -32,7 +32,7 @@ async def poll_source_async(pool: McpClientPool, source: RegisteredProactiveSour
 
 
 class McpPollingModule:
-    """MCP 数据源轮询模块（参考 akashic-agent McpRuntimeModule）。
+    """MCP 数据源轮询模块。
     
     为带 poll_tool 的数据源创建周期任务，定期调用 poll_tool 更新上游缓存。
     """

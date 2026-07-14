@@ -1,14 +1,14 @@
-"""Data models for the proactive pipeline."""
+"""主动管道的数据模型。"""
 
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 
-# ── Tick context ──
+# ── Tick 上下文 ──
 
 @dataclass(slots=True)
 class AgentTick:
-    """Context carried through all pipeline stages."""
+    """在所有管道阶段中传递的上下文。"""
     chat_id: str = ""
     base_score: float = 0.0
     gate_result: "GateResult | None" = None
@@ -20,7 +20,7 @@ class AgentTick:
     trace: str = ""
 
 
-# ── Gate (spec 2) ──
+# ── Gate ──
 
 @dataclass(slots=True)
 class GateResult:
@@ -29,7 +29,7 @@ class GateResult:
     next_interval: float = 60.0
 
 
-# ── Fetch / DataGateway (spec 3) ──
+# ── Fetch / DataGateway ──
 
 @dataclass(slots=True)
 class DataItem:
@@ -53,7 +53,7 @@ class GatewayResult:
         return self.alerts + self.content + self.context
 
 
-# ── Judge (spec 4) ──
+# ── Judge ──
 
 @dataclass(slots=True)
 class JudgeResult:
@@ -64,7 +64,7 @@ class JudgeResult:
     evidence: dict = field(default_factory=dict)
 
 
-# ── Resolve (spec 5) ──
+# ── Resolve ──
 
 @dataclass(slots=True)
 class ResolveResult:
@@ -75,7 +75,7 @@ class ResolveResult:
     side_effects: list[Callable] = field(default_factory=list)
 
 
-# ── Deliver (spec 6) ──
+# ── Deliver ──
 
 @dataclass(slots=True)
 class DeliverResult:

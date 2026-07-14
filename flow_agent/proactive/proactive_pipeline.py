@@ -1,4 +1,4 @@
-"""ProactiveTurnPipeline: 5-stage pipeline + drift fallback (spec 1e, 2-6, drift 1a-1e)."""
+"""ProactiveTurnPipeline: 五阶段管道 + 漂移回退。"""
 
 import logging
 import time
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 class ProactiveTurnPipeline:
-    """单次主动 tick 的五阶段管道 + 漂移回退 (spec 2a, drift 1a-1d)。"""
+    """单次主动 tick 的五阶段管道 + 漂移回退。"""
 
     def __init__(
         self,
@@ -52,7 +52,7 @@ class ProactiveTurnPipeline:
         """执行一次完整 tick：Gate → Fetch → Judge → Resolve → Deliver，无数据时尝试漂移。"""
         tick = AgentTick(chat_id=chat_id, base_score=base_score)
 
-        # Stage 1: Gate (spec 2)
+        # 阶段 1: Gate
         tick.gate_result = check_gate(
             chat_id=chat_id,
             is_busy=is_busy,
@@ -65,14 +65,14 @@ class ProactiveTurnPipeline:
             logger.debug("gate blocked: %s", tick.gate_result.reason)
             return tick
 
-        # Stage 2: Fetch (spec 3)
+        # 阶段 2: Fetch
         tick.gateway_result = await self._gateway.run()
 
-        # ── 漂移回退：无数据时尝试 drift (spec drift 1a-1e) ──
+        # ── 漂移回退：无数据时尝试漂移 ──
         if self._should_enter_drift(tick.gateway_result):
             drift_tick = await self._drift.run(connected_mcp=set())
             tick.drift_tick = drift_tick
-            # 标记 drift 运行时间 (spec 5d)
+            # 标记 drift 运行时间
             self._state.mark_drift_run()
             logger.info("drift executed: runs=%d msg=%s", len(drift_tick.runs), bool(drift_tick.message))
             # 如果 drift 产生了消息，走发送链路
@@ -89,10 +89,10 @@ class ProactiveTurnPipeline:
                     )
             return tick
 
-        # Stage 3: Judge (spec 4)
+        # 阶段 3: Judge
         tick.judge_result = await self._judge.evaluate(tick.gateway_result, chat_id)
 
-        # Stage 4: Resolve (spec 5)
+        # 阶段 4: Resolve
         tick.resolve_result = resolve_decision(
             tick.judge_result,
             state_store=self._state,
@@ -101,7 +101,7 @@ class ProactiveTurnPipeline:
             sources=self._proactive_sources,
         )
 
-        # Stage 5: Deliver (spec 6)
+        # 阶段 5: Deliver
         if tick.resolve_result.decision == "send":
             tick.deliver_result = await deliver_message(
                 tick.resolve_result,
@@ -114,14 +114,13 @@ class ProactiveTurnPipeline:
         return tick
 
     def _should_enter_drift(self, gateway_result) -> bool:
-        """检查是否应进入漂移模式 (spec drift 1a-1c)。"""
-        # spec 1a: 无 alert 且无 content
+        # 无 alert 且无 content
         if not self._drift or not self._drift_enabled:
             return False
         if gateway_result.alerts or gateway_result.content:
             return False
 
-        # spec 1c: 检查最小间隔
+        # 检查最小间隔
         last = self._state.get_drift_last_at()
         if last > 0 and (time.time() - last) < self._drift_min_interval:
             return False

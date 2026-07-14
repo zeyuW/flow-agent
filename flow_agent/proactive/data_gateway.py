@@ -1,4 +1,4 @@
-"""DataGateway: parallel fetch from MCP sources (spec 3)."""
+"""DataGateway: 从 MCP 数据源并行获取。"""
 
 import asyncio
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class DataGateway:
-    """Parallel data fetch from MCP alert/content/context sources (spec 3b-3e)."""
+    """从 MCP 告警/内容/上下文数据源并行获取数据。"""
 
     def __init__(self, pool: McpClientPool, proactive_sources: list = None, local_source_file: Path = None) -> None:
         self._pool = pool
@@ -32,7 +32,7 @@ class DataGateway:
                     self._channel_servers[channel].append(source.spec.server)
 
     async def run(self) -> GatewayResult:
-        """Parallel fetch three data streams (spec 3c)."""
+        """并行获取三个数据流。"""
         alerts, content, context = await asyncio.gather(
             self._fetch_alerts(),
             self._fetch_content(),
@@ -125,7 +125,7 @@ class DataGateway:
         return items
 
     async def _fetch_body(self, item: DataItem) -> str:
-        """Fetch full content body (spec 3d)."""
+        """获取完整内容主体。"""
         # 如果已经有 content，直接返回
         if item.content:
             logger.debug(f"Item {item.key} 已有 content，跳过获取")

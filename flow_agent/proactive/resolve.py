@@ -1,4 +1,4 @@
-"""Resolve: delivery dedup + semantic dedup (spec 5)."""
+"""Resolve: 交付去重 + 语义去重。"""
 
 import hashlib
 import logging
@@ -18,25 +18,22 @@ def resolve_decision(
     mcp_pool=None,
     sources: list = None,
 ) -> ResolveResult:
-    """Final decision with delivery dedup and semantic dedup (spec 5a-5e)."""
+    """最终决策，包含交付去重和语义去重。"""
 
-    # spec 5b: skip
+    # 跳过
     if judge.decision == "skip" or not judge.message:
         return ResolveResult(decision="skip")
 
-    # spec 5c: delivery dedup by cited items (禁用用于测试)
+    # 简化的去重机制：仅基于内容哈希去重
     delivery_key = _build_delivery_key(judge.cited_item_ids)
-    # if delivery_key and state_store.was_delivered(delivery_key, _DELIVERY_WINDOW):
-    #     logger.info("delivery dedup hit: key=%s", delivery_key[:16])
-    #     return ResolveResult(decision="skip", delivery_key=delivery_key)
+    content_hash = _content_hash(judge.message)
+    
+    # 检查内容是否在去重窗口内已发送
+    if state_store.was_delivered(content_hash, _DELIVERY_WINDOW):
+        logger.info("content dedup hit: hash=%s", content_hash[:16])
+        return ResolveResult(decision="skip", delivery_key=delivery_key)
 
-    # spec 5d: semantic dedup simplified (禁用用于测试)
-    # content_hash = _content_hash(judge.message)
-    # if state_store.was_delivered(content_hash, _DELIVERY_WINDOW * 2):
-    #     logger.info("semantic dedup hit: hash=%s", content_hash[:16])
-    #     return ResolveResult(decision="skip", delivery_key=delivery_key)
-
-    # spec 5e: send
+    # 发送
     effects = _build_side_effects(judge.cited_item_ids, delivery_key, state_store, mcp_pool, sources)
     return ResolveResult(
         decision="send",
@@ -65,7 +62,7 @@ def _build_side_effects(
     mcp_pool=None,
     sources: list = None,
 ) -> list:
-    """Create side effect callbacks: mark_delivery, ack sources (spec 7a, 7d, 7b-7c)."""
+    """创建副作用回调：标记交付、确认数据源。"""
     effects = []
 
     def mark_delivery():
@@ -75,7 +72,7 @@ def _build_side_effects(
 
     effects.append(mark_delivery)
 
-    # spec 7b-7c: ACK 被引用的条目（参考 akashic-agent）
+    # 确认被引用的条目
     if cited and mcp_pool and sources:
         async def ack_cited_items():
             for source in sources:

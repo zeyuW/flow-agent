@@ -1,12 +1,12 @@
-"""Proactive message delivery system: adaptive loop with 5-stage pipeline.
+"""主动消息投递系统：自适应循环 + 五阶段管道。
 
-ProactiveLoop       — adaptive interval loop, MCP pool, background task (spec 1)
-ProactiveTurnPipeline— Gate → Fetch → Judge → Resolve → Deliver (spec 2-6)
-Gate / AnyActionGate — admission: busy, cooldown, quota (spec 2)
-DataGateway          — parallel fetch from MCP alert/content/context (spec 3)
-JudgeLoop            — LLM tool-call loop for content classification (spec 4)
-Resolve              — delivery dedup + semantic dedup (spec 5)
-Deliver              — session persist + outbound dispatch (spec 6)
-McpClientPool        — persistent MCP connections (spec 3e)
-build_proactive_runtime — factory to assemble the full runtime (spec 1a)
+ProactiveLoop       — 自适应间隔循环，MCP 连接池，后台任务
+ProactiveTurnPipeline— Gate → Fetch → Judge → Resolve → Deliver
+Gate / AnyActionGate — 准入检查：忙碌、冷却、配额
+DataGateway          — 从 MCP 并行获取告警/内容/上下文
+JudgeLoop            — LLM 工具调用循环，用于内容分类
+Resolve              — 交付去重 + 语义去重
+Deliver              — 会话持久化 + 出站分发
+McpClientPool        — 持久化 MCP 连接
+build_proactive_runtime — 组装完整运行时的工厂
 """

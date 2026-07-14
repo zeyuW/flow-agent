@@ -1,4 +1,4 @@
-"""Gate: admission checks before proactive tick (spec 2)."""
+"""Gate: 主动 tick 前的准入检查。"""
 
 import time
 from dataclasses import dataclass, field
@@ -42,30 +42,20 @@ class ProactiveStateStore:
         return self._daily_count
 
     def mark_drift_run(self) -> None:
-        """记录 drift 运行时间戳 (spec 5d)。"""
         self._drift_last_at = time.time()
 
     def get_drift_last_at(self) -> float:
-        """获取上次 drift 运行时间戳 (spec 1c)。"""
         return self._drift_last_at
 
 
 @dataclass(slots=True)
 class AnyActionGate:
-    """Quota-based admission: daily limit, min interval, probability (spec 2e)."""
+    """简化的 Gate 机制：仅保留每日最大次数限制，调度完全由霍克斯过程控制。"""
     max_per_day: int = 5
-    min_interval: float = 300.0
-    prob_threshold: float = 0.3
 
     def should_act(self, store: ProactiveStateStore, base_score: float) -> bool:
+        # 只检查每日最大次数限制
         if store.daily_count >= self.max_per_day:
-            return False
-        # 跳过 min_interval 检查，让霍克斯过程完全控制间隔
-        # last = store.get_last_sent_at()
-        # if last > 0 and (time.time() - last) < self.min_interval:
-        #     return False
-        # 当 base_score 为 -1 时，跳过概率检查（用于霍克斯模型）
-        if base_score >= 0 and base_score < self.prob_threshold:
             return False
         return True
 
@@ -79,12 +69,12 @@ def check_gate(
     cooldown: float = 120.0,
     base_score: float = 0.0,
 ) -> GateResult:
-    """Run all gate checks in priority order (spec 2a-2e).
+    """按优先级顺序运行所有 gate 检查。
 
-    1. Target check (spec 2b)
-    2. Busy check (spec 2c)
-    3. Cooldown (spec 2d)
-    4. AnyAction quota (spec 2e)
+    1. 目标检查
+    2. 忙碌检查
+    3. 冷却时间
+    4. AnyAction 配额
     """
     if not chat_id:
         return GateResult(passed=False, reason="no_target")

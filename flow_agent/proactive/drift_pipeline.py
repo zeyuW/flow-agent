@@ -1,4 +1,4 @@
-"""漂移执行管道：Scan → Prepare → Execute → 持久化 (spec 1d, 2-5)。"""
+"""漂移执行管道：扫描 → 准备 → 执行 → 持久化。"""
 
 import asyncio
 import json
@@ -24,7 +24,7 @@ _DRIFT_SYSTEM_PROMPT = """你是一个漂移模式执行器。当没有外部推
 
 
 class DriftTurnPipeline:
-    """漂移模式四阶段执行管道：Scan → Prepare → Execute → 持久化 (spec 1d)。"""
+    """漂移模式四阶段执行管道：扫描 → 准备 → 执行 → 持久化。"""
 
     def __init__(
         self,
@@ -44,21 +44,21 @@ class DriftTurnPipeline:
         self._workspace = workspace
 
     async def run(self, connected_mcp: set[str]) -> DriftTick:
-        """执行一次漂移：Scan → Prepare → Execute → 持久化 (spec 1d)。"""
+        """执行一次漂移：扫描 → 准备 → 执行 → 持久化。"""
         tick = DriftTick()
 
-        # Stage 1: Scan (spec 2a-2d)
+        # 阶段 1: 扫描
         all_skills = self._store.scan_skills()
         tick.skills = self._store.filter_by_mcp(all_skills, connected_mcp)
         if not tick.skills:
             logger.debug("无可用漂移技能")
             return tick
 
-        # Stage 2: Prepare (spec 3a-3c)
+        # 阶段 2: 准备
         messages = self._build_messages(tick.skills)
         tools = get_drift_tool_schemas()
 
-        # Stage 3: Execute (spec 4a-4e)
+        # 阶段 3: 执行
         ctx = {
             "message": "",
             "pushed": False,
@@ -90,7 +90,7 @@ class DriftTurnPipeline:
         # 提取暂存消息
         tick.message = ctx.get("message", "")
 
-        # Stage 4: 持久化 (spec 5a-5d)
+        # 阶段 4: 持久化
         self._store.append_run(tick)
         for skill in tick.skills:
             self._store.save_skill_state(skill)
@@ -99,7 +99,7 @@ class DriftTurnPipeline:
         return tick
 
     def _build_messages(self, skills: list[DriftSkill]) -> list[dict]:
-        """构建初始 messages：system prompt + 技能列表 + 运行历史 (spec 3c)。"""
+        """构建初始消息：系统提示词 + 技能列表 + 运行历史。"""
         skill_desc = "\n".join(
             f"- **{s.name}**: {s.description}"
             + (f" (需要 MCP: {', '.join(s.requires_mcp)})" if s.requires_mcp else "")

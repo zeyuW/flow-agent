@@ -1,4 +1,4 @@
-"""Judge: LLM tool-call loop for content classification (spec 4)."""
+"""Judge: LLM 工具调用循环，用于内容分类。"""
 
 import json
 import logging
@@ -37,7 +37,7 @@ TOOL_SCHEMAS = [
 
 
 class JudgeLoop:
-    """LLM tool-call loop for proactive content evaluation (spec 4a-4e)."""
+    """LLM 工具调用循环，用于主动内容评估。"""
 
     def __init__(self, llm_client, memory_engine=None, max_steps: int = 12) -> None:
         self._llm = llm_client
@@ -45,7 +45,7 @@ class JudgeLoop:
         self._max_steps = max_steps
 
     async def evaluate(self, gateway: GatewayResult, chat_id: str = "") -> JudgeResult:
-        """Run the judge loop: LLM classifies content via tools (spec 4b-4e)."""
+        """运行 judge 循环：LLM 通过工具分类内容。"""
         items = gateway.all_items
         if not items:
             return JudgeResult(decision="skip")
@@ -120,7 +120,7 @@ class JudgeLoop:
             if decision in ("reply", "skip"):
                 break
 
-        # spec 4c: force classify unclassified items
+        # 强制分类未分类的项目
         classified = set(interesting) | set(discarded)
         unclassified = [it for i, it in enumerate(items) if str(i) not in classified and it.item_id not in classified]
         for it in unclassified:

@@ -1,4 +1,4 @@
-"""Deliver: persist session and dispatch outbound message (spec 6)."""
+"""Deliver: 持久化会话并分发出站消息。"""
 
 import logging
 
@@ -15,11 +15,11 @@ async def deliver_message(
     outbound_port=None,
     channel: str = "cli",
 ) -> DeliverResult:
-    """Persist proactive session and dispatch outbound (spec 6a-6e)."""
+    """持久化主动会话并分发到出站。"""
     if resolve.decision != "send" or not resolve.message:
         return DeliverResult(sent=False, message="no message to send", chat_id=chat_id)
 
-    # spec 6c: persist to session
+    # 持久化到会话
     if session_manager:
         try:
             session = session_manager.get_or_create(chat_id)
@@ -33,7 +33,7 @@ async def deliver_message(
         except Exception:
             logger.exception("failed to persist proactive session")
 
-    # spec 6d: dispatch to outbound
+    # 分发到出站
     if outbound_port:
         try:
             from flow_agent.messaging.message_bus import OutboundDispatch
@@ -52,7 +52,7 @@ async def deliver_message(
             logger.exception("proactive dispatch failed")
             return DeliverResult(sent=False, message=resolve.message, chat_id=chat_id, error="dispatch failed")
 
-    # spec 6e: run side effects (包括异步 ACK)
+    # 运行副作用（包括异步 ACK）
     for effect in resolve.side_effects:
         try:
             import asyncio

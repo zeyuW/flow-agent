@@ -1,4 +1,4 @@
-"""Proactive source specifications for plugin integration (参考 akashic-agent)."""
+"""插件集成的主动推送数据源规范。"""
 
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -6,7 +6,7 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class ProactiveSourceSpec(Protocol):
-    """主动推送数据源规范（参考 akashic-agent ProactiveSourceSpec）。
+    """主动推送数据源规范。
     
     插件通过 proactive_sources() 方法返回此规范，声明数据源配置。
     """

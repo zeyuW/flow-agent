@@ -1,4 +1,4 @@
-"""Proactive runtime factory: build_proactive_runtime with Hawkes process (spec proactive)。"""
+"""主动运行时工厂：使用霍克斯过程构建 build_proactive_runtime。"""
 
 from pathlib import Path
 
@@ -42,7 +42,7 @@ def build_proactive_runtime(
     # 通道配置
     channel: str = "cli",
 ) -> ProactiveLoop:
-    """构建完整主动链路运行时，支持霍克斯过程模型和插件系统 (spec proactive)。
+    """构建完整主动链路运行时，支持霍克斯过程模型和插件系统。
 
     返回的 ProactiveLoop 可作为后台任务启动。
     """
@@ -61,8 +61,8 @@ def build_proactive_runtime(
     
     gateway = DataGateway(pool, all_proactive_sources, local_source_file=Path(DATA_DIR) / "proactive" / "test_feed.txt")
     judge = JudgeLoop(llm_client=llm_client, memory_engine=memory_engine)
-    # 使用 cooldown 作为 min_interval，让霍克斯过程完全控制间隔
-    any_action = AnyActionGate(max_per_day=max_per_day, min_interval=cooldown)
+    # 简化的 Gate：仅保留每日最大次数限制，调度完全由霍克斯过程控制
+    any_action = AnyActionGate(max_per_day=max_per_day)
 
     # 漂移管道
     drift_pipeline = None

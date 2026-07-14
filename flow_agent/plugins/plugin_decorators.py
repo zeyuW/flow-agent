@@ -1,4 +1,4 @@
-"""Plugin decorators: @on_before_turn, @on_after_turn, @on_tool_pre, @tool (spec 3,4,5)."""
+"""插件装饰器：@on_before_turn, @on_after_turn, @on_tool_pre, @tool。"""
 
 import functools
 import inspect
@@ -13,25 +13,25 @@ from flow_agent.plugins.plugin_registry import (
 )
 
 
-# ── EventBus lifecycle decorators (spec 3a-3b) ──
+# ── EventBus 生命周期装饰器 ──
 
 def on_before_turn(**options: Any):
-    """GATE handler: can abort the turn (spec 3a)."""
+    """GATE 处理器：可以中止回合。"""
     return _lifecycle_decorator("before_turn", HandlerType.GATE, **options)
 
 
 def on_after_turn(**options: Any):
-    """TAP handler: observe only (spec 3a)."""
+    """TAP 处理器：仅观察。"""
     return _lifecycle_decorator("after_turn", HandlerType.TAP, **options)
 
 
 def on_turn_started(**options: Any):
-    """TAP handler for turn started."""
+    """回合开始时的 TAP 处理器。"""
     return _lifecycle_decorator("turn_started", HandlerType.TAP, **options)
 
 
 def on_after_reasoning(**options: Any):
-    """TAP handler for after reasoning."""
+    """推理后的 TAP 处理器。"""
     return _lifecycle_decorator("after_reasoning", HandlerType.TAP, **options)
 
 
@@ -50,10 +50,10 @@ def _lifecycle_decorator(event_type: str, handler_type: HandlerType, **options: 
     return decorator
 
 
-# ── Tool pre-call hook (spec 4a) ──
+# ── 工具调用前钩子 ──
 
 def on_tool_pre(*, tool_name: str | None = None, **options: Any):
-    """Intercept tool calls before execution. Return None to pass, HookOutcome to block/modify (spec 4a)."""
+    """在执行前拦截工具调用。返回 None 表示通过，返回 HookOutcome 表示阻止或修改。"""
     def decorator(fn: Callable) -> Callable:
         meta = HandlerMeta(
             kind=MetadataKind.TOOL_HOOK,
@@ -67,10 +67,10 @@ def on_tool_pre(*, tool_name: str | None = None, **options: Any):
     return decorator
 
 
-# ── Tool registration (spec 5a-5b) ──
+# ── 工具注册 ──
 
 def tool(**options: Any):
-    """Register a method as an LLM-callable tool. Schema auto-generated from signature + docstring."""
+    """将方法注册为 LLM 可调用工具。模式从签名和文档字符串自动生成。"""
     def decorator(fn: Callable) -> Callable:
         name = options.get("name") or fn.__name__
         desc = options.get("description") or _doc_short(fn)
@@ -81,7 +81,7 @@ def tool(**options: Any):
     return decorator
 
 
-# ── Schema builder (spec 5b) ──
+# ── 模式构建器 ──
 
 _TYPE_MAP = {str: "string", int: "integer", float: "number", bool: "boolean", list: "array", dict: "object"}
 

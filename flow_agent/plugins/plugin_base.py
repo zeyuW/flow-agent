@@ -1,4 +1,4 @@
-"""Plugin base class with auto-registration, 7 phase methods, initialize() (spec 2a)."""
+"""插件基类，支持自动注册、7 个阶段方法、initialize()。"""
 
 from pathlib import Path
 
@@ -7,7 +7,7 @@ from flow_agent.plugins.plugin_registry import plugin_registry
 
 
 class Plugin:
-    """Base class for all plugins. Subclasses auto-register via __init_subclass__ (spec 1c)."""
+    """所有插件的基类。子类通过 __init_subclass__ 自动注册。"""
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
@@ -17,7 +17,7 @@ class Plugin:
         self.context: PluginContext | None = None
         self._plugin_dir: Path | None = None
 
-    # ── 7 phase module methods (spec 2a) ──
+    # ── 7 个阶段模块方法 ──
 
     def before_turn_modules(self) -> list:  # PhaseModule instances
         return []
@@ -40,10 +40,10 @@ class Plugin:
     def turn_started_modules(self) -> list:
         return []
 
-    # ── Proactive Sources (参考 akashic-agent) ──
+    # ── 主动回复数据源 ──
 
     def proactive_sources(self) -> list:
-        """声明主动推送数据源（参考 akashic-agent ProactiveSourceSpec）。
+        """声明主动推送数据源。
         
         返回 ProactiveSourceSpec 列表，用于插件声明数据源配置。
         默认返回空列表，子类可覆盖。
@@ -53,12 +53,12 @@ class Plugin:
     # ── Lifecycle ──
 
     async def initialize(self) -> None:
-        """Async init hook. Called after PluginContext is injected (spec 1e)."""
+        """异步初始化钩子。在 PluginContext 注入后调用。"""
 
     async def shutdown(self) -> None:
         """Cleanup hook."""
 
-    # ── Context injection (spec 6b) ──
+    # ── 上下文注入 ──
 
     def _inject_context(self, ctx: PluginContext, plugin_dir: Path) -> None:
         self.context = ctx
