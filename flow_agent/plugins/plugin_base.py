@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from flow_agent.mcp.config import McpServerSpec
 from flow_agent.plugins.plugin_context import PluginConfig, PluginContext, PluginKVStore
 from flow_agent.plugins.plugin_registry import plugin_registry
 
@@ -19,7 +20,7 @@ class Plugin:
 
     # ── 7 个阶段模块方法 ──
 
-    def before_turn_modules(self) -> list:  # PhaseModule instances
+    def before_turn_modules(self) -> list:  # 返回 PhaseModule 实例
         return []
 
     def before_reasoning_modules(self) -> list:
@@ -50,13 +51,18 @@ class Plugin:
         """
         return []
 
-    # ── Lifecycle ──
+    @classmethod
+    def mcp_servers(cls) -> list[McpServerSpec]:
+        """声明插件提供的 MCP 服务，路径相对插件目录解析。"""
+        return []
+
+    # ── 生命周期 ──
 
     async def initialize(self) -> None:
         """异步初始化钩子。在 PluginContext 注入后调用。"""
 
     async def shutdown(self) -> None:
-        """Cleanup hook."""
+        """释放插件持有的运行时资源。"""
 
     # ── 上下文注入 ──
 

@@ -131,6 +131,7 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
         layout.plugins_dir,
         layout.plugin_data_dir,
         layout.mcp_dir,
+        layout.mcp_dir / "servers",
         layout.sources_dir,
         layout.rss_sources_dir,
         layout.snapshot_sources_dir,
@@ -167,11 +168,15 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
         ),
         (
             layout.plugins_dir / "README.md",
-            "# 插件\n\n每个插件目录包含 plugin.py 和 plugin.json；用户配置与状态应写入 plugin-data。\n",
+            "# 插件\n\n每个插件目录以 plugin.py 声明工具、MCP 服务和主动信息源；用户配置与状态应写入 plugin-data。\n",
         ),
         (
             layout.plugin_data_dir / "README.md",
             "# 插件私有数据\n\n按插件名称保存 plugin_config.json、.kv.json 和缓存，不与插件程序文件混放。\n",
+        ),
+        (
+            layout.mcp_dir / "servers" / "README.md",
+            "# MCP 服务声明\n\n每个 TOML 文件声明一个 stdio MCP 服务，文件名必须与 name 一致。\n",
         ),
         (
             layout.sources_dir / "README.md",

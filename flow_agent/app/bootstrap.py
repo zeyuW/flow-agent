@@ -7,7 +7,7 @@ from flow_agent.messaging.event_bus import EventBus
 from flow_agent.core.agent_loop import AgentLoop
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
 from flow_agent.mcp.server_registry import McpServerRegistry
-from flow_agent.tools.mcp_manage import McpAddTool, McpRemoveTool, McpListTool
+from flow_agent.tools.mcp_manage import McpListTool
 from flow_agent.core.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.context import ConversationContext
@@ -36,6 +36,7 @@ from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.runtime.workspace import init_workspace
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import build_proactive_runtime
+from flow_agent.proactive.mcp_pool import RegistryMcpPool
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
@@ -112,9 +113,8 @@ def create_core_components():
     tool_registry = ToolRegistry()
     tool_registry.set_guard(
         ToolGuard(
-            whitelist={"read_file", "recall_memory", "memorize"}
-            if cfg.tooling.enabled
-            else None
+            # 只有已注册的内置、插件或声明式 MCP 工具才能进入执行路径。
+            whitelist=None,
         )
     )
 
@@ -128,10 +128,12 @@ def create_core_components():
         tool_registry.register(undo_tool)
 
     # MCP
-    mcp_registry = _build_mcp_registry(cfg, WORKSPACE_LAYOUT.mcp_servers_file)
+    mcp_registry = _build_mcp_registry(
+        cfg,
+        WORKSPACE_LAYOUT.mcp_servers_file,
+        tool_registry,
+    )
     if cfg.tooling.enabled:
-        tool_registry.register(McpAddTool(mcp_registry))
-        tool_registry.register(McpRemoveTool(mcp_registry))
         tool_registry.register(McpListTool(mcp_registry))
 
     # Agent
@@ -151,6 +153,7 @@ def create_core_components():
         "session_manager": session_manager,
         "llm_client": llm_client,
         "spawn_tool": spawn_tool if cfg.tooling.enabled else None,
+        "mcp_registry": mcp_registry,
     }
 
 
@@ -211,7 +214,8 @@ def create_app_runtime():
     返回:
         (proactive_loop, background_runtime, subagent_runtime,
          runtime_service, message_bus, event_bus, agent_loop, pipeline,
-         tool_registry, memory_runtime, memory_optimizer_loop)
+         tool_registry, memory_runtime, memory_optimizer_loop,
+         mcp_registry, plugin_manager)
     """
     cfg = settings.get()
     
@@ -225,10 +229,29 @@ def create_app_runtime():
     session_manager = components["session_manager"]
     llm_client = components["llm_client"]
     spawn_tool = components["spawn_tool"]
+    mcp_registry = components["mcp_registry"]
 
     # 创建总线
     message_bus = create_message_bus()
     event_bus = create_event_bus()
+
+    plugin_manager = PluginManager(
+        WORKSPACE_LAYOUT.plugins_dir,
+        event_bus=event_bus,
+        tool_registry=tool_registry,
+        workspace=WORKSPACE_LAYOUT.flow_dir,
+        plugin_data_dir=WORKSPACE_LAYOUT.plugin_data_dir,
+    )
+    import asyncio
+    asyncio.run(plugin_manager.load_all())
+
+    if cfg.mcp.enabled:
+        try:
+            mcp_registry.start(plugin_manager.get_mcp_servers())
+        except Exception:
+            # 声明或连接失败不应阻止被动对话启动；修复声明后重启即可重试。
+            import logging
+            logging.getLogger(__name__).exception("MCP 服务代际启动失败")
 
     # 创建记忆运行时（双层记忆架构）
     memory_runtime = build_memory_runtime(
@@ -287,7 +310,7 @@ def create_app_runtime():
     )
 
     # 插件系统暂时禁用，避免异步问题
-    proactive_sources = None
+    proactive_sources = plugin_manager.get_proactive_sources()
 
     local_sources = [
         LocalFileSource(WORKSPACE_LAYOUT.proactive_source_file),
@@ -315,6 +338,7 @@ def create_app_runtime():
             outbound_port=message_bus.outbound_port,
             event_bus=event_bus,
             mcp_servers=mcp_servers,
+            mcp_pool=RegistryMcpPool(mcp_registry),
             max_per_day=cfg.proactive.max_per_day,
             min_interval=cfg.proactive.min_interval,
             max_interval=cfg.proactive.max_interval,
@@ -376,6 +400,8 @@ def create_app_runtime():
         tool_registry,
         memory_runtime,
         memory_optimizer_loop,
+        mcp_registry,
+        plugin_manager,
     )
 
 
@@ -460,9 +486,11 @@ def create_runtime_service(
     return runtime_service
 
 
-def _build_mcp_registry(settings, config_path) -> McpServerRegistry:
+def _build_mcp_registry(settings, config_path, tool_registry) -> McpServerRegistry:
     mcp_registry = McpServerRegistry(
         config_path=config_path,
-        tool_registry=None,
+        tool_registry=tool_registry,
+        startup_timeout=settings.mcp.startup_timeout_seconds,
+        call_timeout=settings.mcp.call_timeout_seconds,
     )
     return mcp_registry

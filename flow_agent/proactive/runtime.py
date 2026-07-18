@@ -40,6 +40,7 @@ def build_proactive_runtime(
     outbound_port=None,
     event_bus=None,
     mcp_servers: list[dict] | None = None,
+    mcp_pool=None,
     max_per_day: int = 5,
     min_interval: float = 60.0,
     max_interval: float = 1800.0,
@@ -66,9 +67,10 @@ def build_proactive_runtime(
     if not enabled:
         return None
 
-    pool = McpClientPool()
+    pool = mcp_pool or McpClientPool()
     for server in mcp_servers or []:
-        pool.add_server(**server)
+        if hasattr(pool, "add_server"):
+            pool.add_server(**server)
 
     sources = _flatten_sources(proactive_sources)
     local_path = Path(local_source_file) if local_source_file else None

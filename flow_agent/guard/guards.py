@@ -14,13 +14,18 @@ class ToolGuard:
     """Tool whitelist/blacklist and simple file path risk guard."""
 
     whitelist: set[str] | None = None
+    whitelist_prefixes: tuple[str, ...] = ()
     blacklist: set[str] = field(default_factory=set)
     blocked_path_keywords: tuple[str, ...] = (".ssh", ".aws", "id_rsa", "credentials")
 
     def check_tool(self, tool_name: str) -> GuardDecision:
         if tool_name in self.blacklist:
             return GuardDecision(False, "tool_blacklisted")
-        if self.whitelist is not None and tool_name not in self.whitelist:
+        if (
+            self.whitelist is not None
+            and tool_name not in self.whitelist
+            and not any(tool_name.startswith(prefix) for prefix in self.whitelist_prefixes)
+        ):
             return GuardDecision(False, "tool_not_whitelisted")
         return GuardDecision(True, "ok")
 
@@ -99,4 +104,3 @@ class ProactiveFrequencyGuard:
             return GuardDecision(False, "proactive_rate_limited")
         self._last_ok_at = now
         return GuardDecision(True, "ok")
-

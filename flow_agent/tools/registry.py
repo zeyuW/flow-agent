@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 import re
+import threading
 
 from flow_agent.guard.guards import ToolGuard
 from flow_agent.tools.base import Tool, ToolResult
@@ -9,30 +10,36 @@ from flow_agent.tools.base import Tool, ToolResult
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, Tool] = {}
+        self._lock = threading.RLock()
         self._guard: ToolGuard | None = None
         self._execution_policy = self.ToolExecutionPolicy()
 
     def register(self, tool: Tool) -> None:
-        self._tools[tool.name] = tool
+        with self._lock:
+            self._tools[tool.name] = tool
 
     def register_with_meta(self, tool, risk="read-only", source_type="", source_name=""):
-        self._tools[tool.name] = tool
-        if hasattr(self, '_execution_policy'):
-            self._execution_policy.risk_by_tool[tool.name] = risk
+        with self._lock:
+            self._tools[tool.name] = tool
+            if hasattr(self, '_execution_policy'):
+                self._execution_policy.risk_by_tool[tool.name] = risk
 
     def unregister(self, tool_name):
-        self._tools.pop(tool_name, None)
-        if hasattr(self, '_execution_policy'):
-            self._execution_policy.risk_by_tool.pop(tool_name, None)
+        with self._lock:
+            self._tools.pop(tool_name, None)
+            if hasattr(self, '_execution_policy'):
+                self._execution_policy.risk_by_tool.pop(tool_name, None)
 
     def list_tool_descriptions(self) -> list[dict[str, str]]:
-        return [
-            {"name": tool.name, "description": tool.description}
-            for tool in self._tools.values()
-        ]
+        with self._lock:
+            return [
+                {"name": tool.name, "description": tool.description}
+                for tool in self._tools.values()
+            ]
 
     def list_tool_names(self) -> set[str]:
-        return set(self._tools.keys())
+        with self._lock:
+            return set(self._tools.keys())
 
     def set_guard(self, guard: ToolGuard) -> None:
         self._guard = guard
@@ -59,7 +66,8 @@ class ToolRegistry:
         return policy.risk_by_tool.get(tool_name, "read-only")
 
     def execute(self, tool_name: str, tool_input: dict[str, str]) -> ToolResult:
-        tool = self._tools.get(tool_name)
+        with self._lock:
+            tool = self._tools.get(tool_name)
         if tool is None:
             return ToolResult(ok=False, content=f"Unknown tool: {tool_name}")
         if self._guard is not None:
@@ -97,6 +105,8 @@ class ToolRegistry:
         }
 
     def list_openai_tools(self) -> list[dict[str, Any]]:
+        with self._lock:
+            tools = list(self._tools.values())
         return [
             {
                 "type": "function",
@@ -106,7 +116,7 @@ class ToolRegistry:
                     "parameters": tool.input_schema,
                 },
             }
-            for tool in self._tools.values()
+            for tool in tools
         ]
 
     def select_openai_tools(self, user_input: str, *, max_tools: int = 8) -> list[dict[str, Any]]:
@@ -123,8 +133,8 @@ class ToolRegistry:
             tool_tokens = _tokenize(text)
             overlap = len(query_tokens & tool_tokens)
             score = overlap / max(1, len(query_tokens))
-            # Prefer core built-in tools when equally matched.
-            if not tool_name.startswith("mcp:"):
+            # 匹配度相同时略微优先内置工具，避免外部工具无条件抢占。
+            if not tool_name.startswith("mcp__"):
                 score += 0.05
             scored.append((score, item))
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -138,4 +148,8 @@ _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
 
 
 def _tokenize(text: str) -> set[str]:
-    return {token.lower() for token in _TOKEN_RE.findall(text or "")}
+    tokens = {token.lower() for token in _TOKEN_RE.findall(text or "")}
+    cjk = "".join(char for char in (text or "") if "\u4e00" <= char <= "\u9fff")
+    tokens.update(cjk)
+    tokens.update(cjk[index:index + 2] for index in range(max(0, len(cjk) - 1)))
+    return {token for token in tokens if token}

@@ -43,6 +43,8 @@ def run_service() -> None:
             tool_registry,
             memory_runtime,
             memory_optimizer_loop,
+            mcp_registry,
+            plugin_manager,
         ) = create_app_runtime()
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
@@ -167,6 +169,9 @@ def run_service() -> None:
             proactive_runtime.request_stop()
         if memory_optimizer_loop is not None:
             memory_optimizer_loop.stop()
+        mcp_registry.stop_all()
+        import asyncio
+        asyncio.run(plugin_manager.shutdown_all())
         if proactive_thread is not None:
             proactive_thread.join(timeout=5.0)
         if telegram:

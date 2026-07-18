@@ -189,8 +189,10 @@ class PassiveTurnPipeline:
         memory_block = self._build_memory_block(flow.session_id, flow.user_input)
 
         # 构建工具说明
-        tools = self.tool_registry.list_openai_tools()
-        flow.tools = tools[:self.tool_selection_max] if tools else []
+        flow.tools = self.tool_registry.select_openai_tools(
+            flow.user_input,
+            max_tools=self.tool_selection_max,
+        )
 
         names = [t.get("function", {}).get("name", "") for t in flow.tools]
         tool_instructions = (

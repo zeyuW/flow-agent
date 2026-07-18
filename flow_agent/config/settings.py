@@ -61,6 +61,14 @@ class ToolingSettings(BaseModel):
     tool_selection_max: int = 8
 
 
+class McpSettings(BaseModel):
+    """MCP 外部工具运行参数。"""
+
+    enabled: bool = True
+    startup_timeout_seconds: float = 30.0
+    call_timeout_seconds: float = 60.0
+
+
 # ── 检索 ──
 
 class RetrievalSettings(BaseModel):
@@ -190,6 +198,7 @@ class Settings(BaseModel):
     logging: LoggingSettings
     session: SessionSettings
     tooling: ToolingSettings
+    mcp: McpSettings = Field(default_factory=McpSettings)
     retrieval: RetrievalSettings
     observe: ObserveSettings = Field(default_factory=ObserveSettings)
     memory_policy: MemoryPolicySettings = Field(default_factory=MemoryPolicySettings)

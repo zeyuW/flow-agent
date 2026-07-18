@@ -11,6 +11,7 @@ from flow_agent.config.settings import (
     LoggingSettings,
     MemoryMaintenanceSettings,
     MemoryPolicySettings,
+    McpSettings,
     ObserveSettings,
     PersonaSettings,
     PromptBudgetSettings,
@@ -132,6 +133,19 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 ("tooling", "tool_selection_max"),
                 8,
                 minimum=1,
+            ),
+        ),
+        mcp=McpSettings(
+            enabled=values.get_bool(("mcp", "enabled"), True),
+            startup_timeout_seconds=values.get_float(
+                ("mcp", "startup_timeout_seconds"),
+                30.0,
+                minimum=1.0,
+            ),
+            call_timeout_seconds=values.get_float(
+                ("mcp", "call_timeout_seconds"),
+                60.0,
+                minimum=1.0,
             ),
         ),
         retrieval=RetrievalSettings(

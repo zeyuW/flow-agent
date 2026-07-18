@@ -1,4 +1,4 @@
-"""McpClientPool: pool of persistent MCP connections for data fetch (spec 3e)."""
+"""主动数据采集使用的 MCP 常驻连接池。"""
 
 import asyncio
 import logging
@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class McpClientPool:
-    """Pool of MCP client connections. Each server gets one persistent client."""
+    """为每个服务维护一条常驻 MCP 连接。"""
 
     def __init__(self) -> None:
         self._clients: dict[str, Any] = {}
@@ -18,7 +18,7 @@ class McpClientPool:
         self._servers.append({"name": name, "command": command, **kwargs})
 
     async def connect_all(self) -> None:
-        """Connect to all configured MCP servers in parallel."""
+        """并行连接全部已配置服务。"""
         if not self._servers:
             return
         results = await asyncio.gather(
@@ -54,7 +54,7 @@ class McpClientPool:
         logger.info("MCP pool connected: %s", name)
 
     async def call(self, server_name: str, tool_name: str, params: dict | None = None) -> Any:
-        """Call a tool on a connected MCP server."""
+        """调用已连接服务上的指定工具。"""
         proc = self._clients.get(server_name)
         if proc is None:
             return None
@@ -78,3 +78,28 @@ class McpClientPool:
             except Exception:
                 pass
         self._clients.clear()
+
+
+class RegistryMcpPool:
+    """把统一 MCP 注册表适配为主动链路的异步连接池协议。"""
+
+    def __init__(self, registry) -> None:
+        self._registry = registry
+
+    async def connect_all(self) -> None:
+        """连接由宿主注册表统一维护，这里无需重复启动进程。"""
+
+    async def call(self, server_name: str, tool_name: str, params: dict | None = None):
+        # 注册表客户端按服务加锁，主动链路直接复用同一条常驻连接。
+        return self._registry.call_tool(
+            server_name,
+            tool_name,
+            params or {},
+        )
+
+    async def close_all(self) -> None:
+        """连接所有权属于宿主注册表，主动链路停止时不关闭。"""
+
+    @property
+    def connected_names(self) -> set[str]:
+        return set(self._registry.server_names)

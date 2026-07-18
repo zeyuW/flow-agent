@@ -1,13 +1,11 @@
-"""FlowAgent MCP 模块：Model Context Protocol 工具集成。
+"""FlowAgent MCP 模块：声明式外部工具集成。
 
-McpClient        — stdio 子进程 + JSON-RPC 通信（initialize/tools/list/tools/call）
-McpServerRegistry — 服务器生命周期管理（add/remove/list）+ 持久化 + 后台重连
-McpToolWrapper    — 将 MCP 远端工具适配为内部 Tool 协议
+McpServerSpec     — 工作区或插件提供的服务声明
+McpClient         — stdio 常驻子进程与 JSON-RPC 通信
+McpServerRegistry — 原子代际发布、热重载和生命周期管理
+McpToolWrapper    — 将远端工具适配为内部 Tool 协议
 
-管理工具：
-- mcp_add    — 添加并连接 MCP server
-- mcp_remove — 移除 server 并清理工具
-- mcp_list   — 列出已注册 servers
+工作区声明位于 .flow/mcp/servers/*.toml；插件通过 mcp_servers() 声明能力。
 
 兼容：
 - MCPClient（旧版） — 保留向后兼容的 in-process client（client.py）

@@ -39,3 +39,21 @@ def test_registry_execute_unknown_tool():
     assert result.ok is False
     assert "Unknown tool: not_exists" in result.content
 
+
+def test_registry_selects_matching_mcp_tool():
+    class SearchTool(EchoTool):
+        @property
+        def name(self) -> str:
+            return "mcp__web__search"
+
+        @property
+        def description(self) -> str:
+            return "搜索外部网页资料"
+
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    registry.register(SearchTool())
+
+    selected = registry.select_openai_tools("请搜索外部网页资料", max_tools=1)
+
+    assert selected[0]["function"]["name"] == "mcp__web__search"
