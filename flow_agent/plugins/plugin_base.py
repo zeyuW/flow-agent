@@ -63,7 +63,9 @@ class Plugin:
     def _inject_context(self, ctx: PluginContext, plugin_dir: Path) -> None:
         self.context = ctx
         self._plugin_dir = plugin_dir
+        data_dir = ctx.data_dir or plugin_dir
+        data_dir.mkdir(parents=True, exist_ok=True)
         if ctx.kv_store is None:
-            ctx.kv_store = PluginKVStore(plugin_dir / ".kv.json")
+            ctx.kv_store = PluginKVStore(data_dir / ".kv.json")
         if isinstance(ctx.config, PluginConfig) and not ctx.config._values:
             ctx.config = PluginConfig.load(plugin_dir)

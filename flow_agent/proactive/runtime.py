@@ -1,26 +1,43 @@
-"""主动运行时工厂：使用霍克斯过程构建 build_proactive_runtime。"""
+"""主动链路运行时组装入口。"""
 
+from collections.abc import Mapping
 from pathlib import Path
+from flow_agent.infra.trace import TraceRecorder
 
 from flow_agent.proactive.data_gateway import DataGateway
-from flow_agent.proactive.drift_store import DriftStateStore
 from flow_agent.proactive.drift_pipeline import DriftTurnPipeline
+from flow_agent.proactive.drift_store import DriftStateStore
+from flow_agent.proactive.events import ProactiveEventBridge
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore
 from flow_agent.proactive.judge_loop import JudgeLoop
-from flow_agent.proactive.mcp_pool import McpClientPool
 from flow_agent.proactive.mcp_polling import McpPollingModule
+from flow_agent.proactive.mcp_pool import McpClientPool
 from flow_agent.proactive.proactive_loop import HawkesConfig, ProactiveLoop
 from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
-from flow_agent.infra.paths import DATA_DIR
+
+
+def _flatten_sources(proactive_sources) -> list:
+    """兼容按插件分组和已扁平化的主动数据源输入。"""
+
+    if not proactive_sources:
+        return []
+    if isinstance(proactive_sources, Mapping):
+        flattened = []
+        for sources in proactive_sources.values():
+            flattened.extend(sources)
+        return flattened
+    return list(proactive_sources)
 
 
 def build_proactive_runtime(
     *,
+    enabled: bool = True,
     chat_id: str = "",
     llm_client=None,
     memory_engine=None,
     session_manager=None,
     outbound_port=None,
+    event_bus=None,
     mcp_servers: list[dict] | None = None,
     max_per_day: int = 5,
     min_interval: float = 60.0,
@@ -31,40 +48,43 @@ def build_proactive_runtime(
     drift_data_dir: str = "",
     drift_min_interval_hours: float = 1.0,
     drift_max_steps: int = 10,
-    # 霍克斯过程配置
     hawkes_enabled: bool = True,
     hawkes_base_intensity: float = 0.1,
     hawkes_excitation_alpha: float = 0.5,
     hawkes_decay_beta: float = 0.1,
     hawkes_time_constant: float = 60.0,
-    # 插件系统集成
-    proactive_sources: list = None,
-    # 通道配置
+    proactive_sources=None,
+    local_source_file: str | Path | None = None,
+    state_path=None,
+    trace_path=None,
+    local_sources=None,
     channel: str = "cli",
-) -> ProactiveLoop:
-    """构建完整主动链路运行时，支持霍克斯过程模型和插件系统。
+) -> ProactiveLoop | None:
+    """组装主动链路，并在启用时接入用户回合事件。"""
 
-    返回的 ProactiveLoop 可作为后台任务启动。
-    """
+    if not enabled:
+        return None
+
     pool = McpClientPool()
-    if mcp_servers:
-        for s in mcp_servers:
-            pool.add_server(**s)
+    for server in mcp_servers or []:
+        pool.add_server(**server)
 
-    state = ProactiveStateStore()
-    
-    # 扁平化所有插件的数据源
-    all_proactive_sources = []
-    if proactive_sources:
-        for sources_list in proactive_sources.values():
-            all_proactive_sources.extend(sources_list)
-    
-    gateway = DataGateway(pool, all_proactive_sources, local_source_file=Path(DATA_DIR) / "proactive" / "test_feed.txt")
+    sources = _flatten_sources(proactive_sources)
+    local_path = Path(local_source_file) if local_source_file else None
+    gateway = DataGateway(
+        pool,
+        sources,
+        local_source_file=local_path,
+        local_sources=local_sources,
+    )
+    state = ProactiveStateStore(state_path)
     judge = JudgeLoop(llm_client=llm_client, memory_engine=memory_engine)
-    # 简化的 Gate：仅保留每日最大次数限制，调度完全由霍克斯过程控制
-    any_action = AnyActionGate(max_per_day=max_per_day)
+    trace_recorder = TraceRecorder(Path(trace_path)) if trace_path else None
+    any_action = AnyActionGate(
+        max_per_day=max_per_day,
+        min_interval=cooldown,
+    )
 
-    # 漂移管道
     drift_pipeline = None
     if drift_enabled and drift_data_dir:
         drift_store = DriftStateStore(drift_data_dir)
@@ -89,33 +109,19 @@ def build_proactive_runtime(
         drift_enabled=drift_enabled,
         drift_min_interval_hours=drift_min_interval_hours,
         mcp_pool=pool,
-        proactive_sources=all_proactive_sources,
+        proactive_sources=sources,
         channel=channel,
     )
 
-    # 霍克斯过程配置
-    hawkes_config = None
-    if hawkes_enabled:
-        hawkes_config = HawkesConfig(
-            base_intensity=hawkes_base_intensity,
-            excitation_alpha=hawkes_excitation_alpha,
-            decay_beta=hawkes_decay_beta,
-            time_constant=hawkes_time_constant,
-            min_interval=min_interval,
-            max_interval=max_interval,
-        )
-
-    # MCP 轮询模块（如果有插件声明了数据源）
-    polling_module = None
-    all_proactive_sources = []  # 扁平化的 RegisteredProactiveSource 列表
-    if proactive_sources:
-        from flow_agent.proactive.specs import RegisteredProactiveSource
-        # 扁平化所有插件的数据源
-        for sources_list in proactive_sources.values():
-            all_proactive_sources.extend(sources_list)
-        if all_proactive_sources:
-            polling_module = McpPollingModule(pool, all_proactive_sources)
-
+    polling_module = McpPollingModule(pool, sources) if sources else None
+    hawkes_config = HawkesConfig(
+        base_intensity=hawkes_base_intensity,
+        excitation_alpha=hawkes_excitation_alpha,
+        decay_beta=hawkes_decay_beta,
+        time_constant=hawkes_time_constant,
+        min_interval=min_interval,
+        max_interval=max_interval,
+    )
     loop = ProactiveLoop(
         pipeline=pipeline,
         mcp_pool=pool,
@@ -124,7 +130,19 @@ def build_proactive_runtime(
         max_interval=max_interval,
         is_busy_fn=is_busy_fn,
         hawkes_config=hawkes_config,
+        hawkes_enabled=hawkes_enabled,
         polling_module=polling_module,
+        state_store=state,
+        trace_recorder=trace_recorder,
     )
+
+    if event_bus is not None:
+        bridge = ProactiveEventBridge(
+            loop=loop,
+            target_session_id=chat_id,
+            target_channel=channel,
+        )
+        event_bus.subscribe(bridge)
+        loop._event_bridge = bridge
 
     return loop

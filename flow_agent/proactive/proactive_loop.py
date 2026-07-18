@@ -1,164 +1,264 @@
-"""ProactiveLoop: 基于霍克斯过程模型的自适应间隔循环 (spec proactive)。"""
+"""基于霍克斯过程强度调度主动检查循环。"""
+
+from __future__ import annotations
 
 import asyncio
 import logging
 import math
+import threading
 import time
 from dataclasses import dataclass
-from typing import Callable
+from datetime import datetime, timezone
+from typing import Callable, Protocol
 
-from flow_agent.proactive.mcp_pool import McpClientPool
-from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
+from flow_agent.proactive.models import AgentTick
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+class _PipelineProtocol(Protocol):
+    async def run(
+        self,
+        *,
+        chat_id: str,
+        base_score: float,
+        is_busy: bool,
+    ) -> AgentTick: ...
+
+
+class _PoolProtocol(Protocol):
+    async def connect_all(self) -> None: ...
+
+    async def close_all(self) -> None: ...
+
+
+@dataclass(slots=True)
 class HawkesConfig:
-    """霍克斯过程配置参数。"""
-    # 基础心跳强度（例如深夜 μ 极低，白天较高）
+    """霍克斯过程及主动检查间隔配置。"""
+
     base_intensity: float = 0.1
-    # 自激强度（用户说一句话，激起 Agent 的兴奋度度量）
     excitation_alpha: float = 0.5
-    # 衰减速率
     decay_beta: float = 0.1
-    # 基准时间常数
-    time_constant: float = 60.0  # 秒
-    # 最小 tick 间隔（秒）
+    time_constant: float = 60.0
     min_interval: float = 60.0
-    # 最大 tick 间隔（秒）
     max_interval: float = 1800.0
+    event_retention_seconds: float = 86400.0
+    daytime_start_hour: int = 8
+    nighttime_start_hour: int = 22
+    daytime_multiplier: float = 1.5
+    nighttime_multiplier: float = 0.5
+
+    def __post_init__(self) -> None:
+        """尽早拒绝会导致无效强度或间隔的配置。"""
+
+        if self.base_intensity < 0:
+            raise ValueError("base_intensity 不能小于 0")
+        if self.excitation_alpha < 0:
+            raise ValueError("excitation_alpha 不能小于 0")
+        if self.decay_beta < 0:
+            raise ValueError("decay_beta 不能小于 0")
+        if self.time_constant <= 0:
+            raise ValueError("time_constant 必须大于 0")
+        if self.min_interval <= 0:
+            raise ValueError("min_interval 必须大于 0")
+        if self.max_interval < self.min_interval:
+            raise ValueError("max_interval 不能小于 min_interval")
+        if self.event_retention_seconds <= 0:
+            raise ValueError("event_retention_seconds 必须大于 0")
 
 
-@dataclass
+@dataclass(slots=True)
 class InteractionEvent:
-    """用户交互事件。"""
+    """会影响主动检查强度的真实互动事件。"""
+
     timestamp: float
-    event_type: str = "message"  # message, reaction, etc.
+    event_type: str = "user_message"
+    weight: float = 1.0
 
 
 class HawkesProcessModel:
-    """霍克斯过程模型：捕捉用户交互的"爆发性/群聚性"特征。
+    """根据真实互动事件计算自激强度和下一次检查间隔。
 
-    核心思想：每一次历史事件的发生，都会在短期内提高未来事件发生的概率，
-    然后该影响随时间指数衰减。
+    强度公式为：
+    λ(t) = μ(t) + Σ α × weight × exp(-β × Δt_minutes)
+
+    这里只用霍克斯强度驱动调度，不把主动检查或主动发送本身重新记为
+    自激事件，避免系统在没有新用户互动时形成发送风暴。
     """
 
-    def __init__(self, config: HawkesConfig) -> None:
+    def __init__(
+        self,
+        config: HawkesConfig,
+        *,
+        clock: Callable[[], float] = time.time,
+        local_hour_fn: Callable[[float], int] | None = None,
+        state_store=None,
+    ) -> None:
         self._config = config
+        self._clock = clock
+        self._local_hour_fn = local_hour_fn or self._local_hour
         self._events: list[InteractionEvent] = []
         self._last_tick_time: float = 0.0
+        self._lock = threading.RLock()
+        self._state_store = state_store
+        if state_store is not None:
+            cutoff = self._clock() - self._config.event_retention_seconds
+            for ts, kind, weight in state_store.load_interaction_events(cutoff):
+                self._events.append(
+                    InteractionEvent(timestamp=ts, event_type=kind, weight=weight)
+                )
 
-    def add_interaction(self, event_type: str = "message") -> None:
-        """记录用户交互事件。"""
-        event = InteractionEvent(timestamp=time.time(), event_type=event_type)
-        self._events.append(event)
-        logger.debug(f"添加交互事件: {event_type} at {event.timestamp}")
-        # 清理旧事件（保留最近 24 小时）
-        self._cleanup_old_events()
 
-    def _cleanup_old_events(self, max_age: float = 86400.0) -> None:
-        """清理过旧的事件记录。"""
-        current_time = time.time()
-        self._events = [
-            e for e in self._events
-            if current_time - e.timestamp < max_age
-        ]
+    @staticmethod
+    def _local_hour(timestamp: float) -> int:
+        """按运行机器的本地时区获取小时。"""
+
+        return datetime.fromtimestamp(timestamp).hour
+
+    def add_interaction(
+        self,
+        event_type: str = "user_message",
+        *,
+        timestamp: float | None = None,
+        weight: float = 1.0,
+    ) -> None:
+        """记录一条真实互动并清理超出保留窗口的旧事件。"""
+
+        if weight <= 0:
+            return
+        occurred_at = self._clock() if timestamp is None else float(timestamp)
+        with self._lock:
+            self._events.append(
+                InteractionEvent(
+                    timestamp=occurred_at,
+                    event_type=event_type,
+                    weight=float(weight),
+                )
+            )
+            self._cleanup_old_events_locked(occurred_at)
+        if self._state_store is not None:
+            self._state_store.append_interaction_event(
+                occurred_at, event_type, float(weight)
+            )
+        logger.debug(
+            "记录霍克斯互动事件: type=%s weight=%.3f timestamp=%.3f",
+            event_type,
+            weight,
+            occurred_at,
+        )
+
+    def _cleanup_old_events_locked(self, current_time: float) -> None:
+        """调用方持锁时移除超出保留窗口的事件。"""
+
+        cutoff = current_time - self._config.event_retention_seconds
+        self._events = [event for event in self._events if event.timestamp >= cutoff]
 
     def _compute_base_intensity(self, current_time: float) -> float:
-        """计算基础心跳强度 μ(t)。
+        """根据本地昼夜时段计算基础强度 μ(t)。"""
 
-        简化实现：根据时间段调整基础强度
-        - 白天 (8:00-22:00): 基础强度较高
-        - 深夜 (22:00-8:00): 基础强度较低
-        """
-        hour = (current_time % 86400) / 3600  # 转换为小时
-        if 8 <= hour < 22:
-            # 白天
-            return self._config.base_intensity * 1.5
-        else:
-            # 深夜
-            return self._config.base_intensity * 0.5
+        hour = self._local_hour_fn(current_time)
+        is_daytime = (
+            self._config.daytime_start_hour <= hour < self._config.nighttime_start_hour
+        )
+        multiplier = (
+            self._config.daytime_multiplier
+            if is_daytime
+            else self._config.nighttime_multiplier
+        )
+        return self._config.base_intensity * multiplier
 
     def _compute_intensity(self, current_time: float) -> float:
-        """计算当前时刻 t 的主动 Tick 强度 λ(t)。
+        """计算指定时刻的霍克斯强度。"""
 
-        λ(t) = μ(t) + Σ α × e^(-β × (t - ti))
-               ti < t
-        """
-        # 基础心跳强度
-        base_mu = self._compute_base_intensity(current_time)
+        with self._lock:
+            self._cleanup_old_events_locked(current_time)
+            events = tuple(self._events)
 
-        # 自激项：所有历史事件的贡献
         excitation_sum = 0.0
-        for event in self._events:
-            time_diff = current_time - event.timestamp
-            if time_diff > 0:
-                excitation = self._config.excitation_alpha * math.exp(
-                    -self._config.decay_beta * time_diff
-                )
-                excitation_sum += excitation
+        for event in events:
+            elapsed_seconds = current_time - event.timestamp
+            if elapsed_seconds < 0:
+                continue
+            elapsed_minutes = elapsed_seconds / 60.0
+            excitation_sum += (
+                self._config.excitation_alpha
+                * event.weight
+                * math.exp(-self._config.decay_beta * elapsed_minutes)
+            )
+        return max(0.0, self._compute_base_intensity(current_time) + excitation_sum)
 
-        total_intensity = base_mu + excitation_sum
-        return total_intensity
+    def compute_next_interval(self, current_time: float | None = None) -> float:
+        """把当前强度映射为受上下限约束的下一次检查间隔。"""
 
-    def compute_next_interval(self) -> float:
-        """计算下一个 Tick 的延迟。
-
-        Next_Tick = C / λ(t)
-        """
-        current_time = time.time()
-        intensity = self._compute_intensity(current_time)
-
-        # 计算下一个 tick 间隔
-        next_interval = self._config.time_constant / intensity
-
-        # 限制在最小和最大间隔之间
-        next_interval = max(
+        now = self._clock() if current_time is None else float(current_time)
+        intensity = self._compute_intensity(now)
+        if intensity <= 1e-12:
+            interval = self._config.max_interval
+        else:
+            interval = self._config.time_constant / intensity
+        interval = max(
             self._config.min_interval,
-            min(self._config.max_interval, next_interval)
+            min(self._config.max_interval, interval),
         )
+        with self._lock:
+            self._last_tick_time = now
+        return interval
 
-        self._last_tick_time = current_time
+    def get_current_intensity(self, current_time: float | None = None) -> float:
+        """返回当前霍克斯强度。"""
 
-        logger.debug(
-            f"强度: {intensity:.4f}, 下一个间隔: {next_interval:.2f}s"
-        )
-        return next_interval
+        now = self._clock() if current_time is None else float(current_time)
+        return self._compute_intensity(now)
 
-    def get_current_intensity(self) -> float:
-        """获取当前强度（用于调试）。"""
-        return self._compute_intensity(time.time())
+    def get_event_count(
+        self,
+        window_seconds: float = 3600.0,
+        *,
+        current_time: float | None = None,
+    ) -> int:
+        """返回指定时间窗口内的互动事件数。"""
 
-    def get_event_count(self, window_seconds: float = 3600.0) -> int:
-        """获取指定时间窗口内的事件数量。"""
-        current_time = time.time()
-        return sum(
-            1 for e in self._events
-            if current_time - e.timestamp < window_seconds
-        )
+        now = self._clock() if current_time is None else float(current_time)
+        with self._lock:
+            self._cleanup_old_events_locked(now)
+            return sum(
+                1
+                for event in self._events
+                if 0 <= now - event.timestamp < window_seconds
+            )
 
     def reset(self) -> None:
-        """重置模型状态。"""
-        self._events = []
-        self._last_tick_time = 0.0
+        """清空全部互动事件和最近计算时间。"""
+
+        with self._lock:
+            self._events.clear()
+            self._last_tick_time = 0.0
         logger.info("霍克斯过程模型已重置")
 
 
 class ProactiveLoop:
-    """主动循环：基于霍克斯过程模型的自适应间隔，MCP 连接池，Tick 分发 (spec proactive)。"""
+    """主动检查循环，负责资源生命周期、调度唤醒和五阶段管线执行。"""
+
+    _EVENT_WEIGHTS = {
+        "user_message": 1.0,
+        "reaction": 0.6,
+        "follow_up": 0.8,
+    }
 
     def __init__(
         self,
-        pipeline: ProactiveTurnPipeline,
-        mcp_pool: McpClientPool,
+        pipeline: _PipelineProtocol,
+        mcp_pool: _PoolProtocol,
         *,
         chat_id: str = "",
         min_interval: float = 60.0,
         max_interval: float = 1800.0,
-        is_busy_fn = None,
+        is_busy_fn: Callable[[], bool] | None = None,
         hawkes_config: HawkesConfig | None = None,
+        hawkes_enabled: bool = True,
         polling_module=None,
+        state_store=None,
+        trace_recorder=None,
     ) -> None:
         self._pipeline = pipeline
         self._pool = mcp_pool
@@ -166,102 +266,256 @@ class ProactiveLoop:
         self._min_interval = min_interval
         self._max_interval = max_interval
         self._is_busy_fn = is_busy_fn
+        self._hawkes_enabled = hawkes_enabled
         self._running = False
+        self._is_executing = False
         self._task: asyncio.Task | None = None
         self._polling_module = polling_module
+        self._trace_recorder = trace_recorder
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+        self._wake_event: asyncio.Event | None = None
+        self._last_started_at: datetime | None = None
+        self._last_finished_at: datetime | None = None
+        self._last_interval: float | None = None
+        self._last_tick = None
+        self._event_bridge: object | None = None
 
-        # 霍克斯过程模型
-        if hawkes_config is None:
-            hawkes_config = HawkesConfig(
-                min_interval=min_interval,
-                max_interval=max_interval,
-            )
-        self._hawkes = HawkesProcessModel(hawkes_config)
+        config = hawkes_config or HawkesConfig(
+            min_interval=min_interval,
+            max_interval=max_interval,
+        )
+        self._hawkes = HawkesProcessModel(config, state_store=state_store)
 
     async def run(self) -> None:
-        """启动主动循环，使用霍克斯过程模型。"""
-        self._running = True
+        """启动资源并持续运行主动检查，直到收到停止信号。"""
 
-        # 连接 MCP 连接池
+        if self._running:
+            return
+        self._running = True
+        self._event_loop = asyncio.get_running_loop()
+        self._wake_event = asyncio.Event()
+        logger.info("主动链路已启动: target=%s", self._chat_id)
+
+        try:
+            await self._connect_resources()
+            await self._run_loop()
+        finally:
+            self._running = False
+            self._is_executing = False
+            await self._close_resources()
+            self._event_loop = None
+            self._wake_event = None
+            logger.info("主动链路已停止: target=%s", self._chat_id)
+
+    async def _connect_resources(self) -> None:
+        """连接主动链路拥有的外部资源。"""
+
         try:
             await self._pool.connect_all()
         except Exception:
             logger.exception("MCP 连接池连接失败")
 
-        # 启动 MCP 轮询模块（如果有）
-        if self._polling_module:
+        if self._polling_module is not None:
             try:
                 await self._polling_module.start()
-                logger.info("MCP 轮询模块已启动")
             except Exception:
                 logger.exception("MCP 轮询模块启动失败")
 
-        # 主自适应循环，使用霍克斯过程
-        await self._run_loop()
+    async def _close_resources(self) -> None:
+        """逆序关闭主动链路拥有的外部资源。"""
 
-    async def _run_loop(self) -> None:
-        """主循环：使用霍克斯过程模型计算 tick 间隔。"""
-        logger.info("主动回复循环启动")
-        while self._running:
-            # 检查是否忙碌
-            is_busy = self._is_busy_fn() if self._is_busy_fn else False
-            logger.debug(f"主动回复 tick 开始: chat_id={self._chat_id}, is_busy={is_busy}")
-            
-            # 执行 tick
-            tick = await self._pipeline.run(
-                chat_id=self._chat_id,
-                base_score=-1.0,  # 霍克斯模型不需要 base_score，使用 -1 跳过概率检查
-                is_busy=is_busy,
-            )
-            
-            logger.info(f"主动回复 tick 完成: gate_passed={tick.gate_result.passed if tick.gate_result else False}, reason={tick.gate_result.reason if tick.gate_result else 'no_gate'}")
-
-            # 如果 tick 通过，记录为一次交互事件
-            if tick.gate_result and tick.gate_result.passed:
-                self._hawkes.add_interaction("proactive_tick")
-                logger.info("主动回复 tick 通过，记录交互事件")
-
-            # 使用霍克斯过程模型计算下一个 tick 间隔
-            next_interval = self._hawkes.compute_next_interval()
-            
-            logger.info(
-                f"霍克斯过程: 强度={self._hawkes.get_current_intensity():.4f}, "
-                f"下一个间隔={next_interval:.2f}s, "
-                f"最近1小时事件数={self._hawkes.get_event_count(3600)}"
-            )
-
-            await asyncio.sleep(next_interval)
-
-    async def stop(self) -> None:
-        """停止主动循环。"""
-        self._running = False
-        if self._task:
-            self._task.cancel()
-
-        # 停止 MCP 轮询模块（如果有）
-        if self._polling_module:
+        if self._polling_module is not None:
             try:
                 await self._polling_module.stop()
-                logger.info("MCP 轮询模块已停止")
             except Exception:
                 logger.exception("MCP 轮询模块停止失败")
+        try:
+            await self._pool.close_all()
+        except Exception:
+            logger.exception("MCP 连接池关闭失败")
 
-        await self._pool.close_all()
+    async def _run_loop(self) -> None:
+        """首次立即检查，后续按霍克斯强度或固定间隔调度。"""
+
+        next_interval = 0.0
+        while self._running:
+            if next_interval > 0:
+                due = await self._wait_until_due(next_interval)
+                if not due:
+                    return
+            if not self._running:
+                return
+            await self._run_single_tick()
+            next_interval = self._compute_next_interval()
+            self._last_interval = next_interval
+            logger.info(
+                "主动链路下次检查: interval=%.2fs intensity=%.4f events_1h=%d",
+                next_interval,
+                self.get_current_intensity(),
+                self._hawkes.get_event_count(3600.0),
+            )
+
+    async def _wait_until_due(self, interval: float) -> bool:
+        """等待截止时间；新互动只允许把已有截止时间提前。"""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + interval
+        while self._running:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return True
+            wake_event = self._wake_event
+            if wake_event is None:
+                await asyncio.sleep(remaining)
+                return self._running
+            try:
+                await asyncio.wait_for(wake_event.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return self._running
+            wake_event.clear()
+            if not self._running:
+                return False
+            refreshed_deadline = loop.time() + self._compute_next_interval()
+            deadline = min(deadline, refreshed_deadline)
+        return False
+
+    async def _run_single_tick(self) -> None:
+        """隔离单轮异常，避免一次失败终止整个主动循环。"""
+
+        self._is_executing = True
+        self._last_started_at = datetime.now(timezone.utc)
+        try:
+            is_busy = self._is_busy_fn() if self._is_busy_fn else False
+            base_score = self.get_current_intensity()
+            self._last_tick = await self._pipeline.run(
+                chat_id=self._chat_id,
+                base_score=base_score,
+                is_busy=is_busy,
+            )
+            gate = self._last_tick.gate_result
+            logger.info(
+                "主动链路检查完成: gate=%s reason=%s sent=%s",
+                bool(gate and gate.passed),
+                gate.reason if gate is not None else "no_gate",
+                bool(
+                    self._last_tick.deliver_result
+                    and self._last_tick.deliver_result.sent
+                ),
+            )
+            if self._trace_recorder is not None:
+                self._trace_recorder.record(self.status_snapshot())
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("主动链路单次检查失败")
+        finally:
+            self._last_finished_at = datetime.now(timezone.utc)
+            self._is_executing = False
+
+    def _compute_next_interval(self) -> float:
+        """根据配置选择霍克斯调度或保守固定调度。"""
+
+        if not self._hawkes_enabled:
+            return self._max_interval
+        return self._hawkes.compute_next_interval()
+
+    def request_stop(self) -> None:
+        """同步发出停止信号，供跨线程运行时管理器调用。"""
+
+        self._running = False
+        self._notify_schedule_changed()
+
+    async def stop(self) -> None:
+        """停止循环，并在同一事件循环中等待资源清理完成。"""
+
+        self.request_stop()
+        task = self._task
+        if task is None:
+            if not self._running:
+                await self._close_resources()
+            return
+        if task.done() or task is asyncio.current_task():
+            return
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if task.get_loop() is current_loop:
+            await task
 
     async def start_background(self) -> asyncio.Task:
-        """作为后台任务启动循环。"""
+        """在当前事件循环中创建唯一的后台主动任务。"""
+
+        if self._task is not None and not self._task.done():
+            return self._task
         self._task = asyncio.create_task(self.run(), name="proactive_loop")
         return self._task
 
-    def record_user_interaction(self, event_type: str = "message") -> None:
-        """记录用户交互事件（供外部调用）。"""
-        self._hawkes.add_interaction(event_type)
-        logger.debug(f"记录用户交互: {event_type}")
+    def record_user_interaction(
+        self,
+        event_type: str = "user_message",
+        *,
+        timestamp: float | None = None,
+        weight: float | None = None,
+    ) -> None:
+        """记录用户互动并唤醒调度器重新评估截止时间。"""
+
+        effective_weight = (
+            self._EVENT_WEIGHTS.get(event_type, 1.0) if weight is None else weight
+        )
+        self._hawkes.add_interaction(
+            event_type,
+            timestamp=timestamp,
+            weight=effective_weight,
+        )
+        self._notify_schedule_changed()
+
+    def _notify_schedule_changed(self) -> None:
+        """以线程安全方式唤醒主动循环。"""
+
+        loop = self._event_loop
+        wake_event = self._wake_event
+        if loop is None or wake_event is None or loop.is_closed():
+            return
+        loop.call_soon_threadsafe(wake_event.set)
 
     def get_current_intensity(self) -> float:
-        """获取当前强度（用于监控）。"""
+        """返回监控使用的当前强度。"""
+
+        if not self._hawkes_enabled:
+            return 0.0
         return self._hawkes.get_current_intensity()
 
     def get_next_interval(self) -> float:
-        """获取下一个 tick 间隔（用于监控）。"""
-        return self._hawkes.compute_next_interval()
+        """返回按当前状态估算的下一次检查间隔。"""
+
+        return self._compute_next_interval()
+
+    def status_snapshot(self) -> dict[str, object]:
+        """返回运行时服务可直接消费的主动链路状态。"""
+
+        tick = self._last_tick
+        gate = tick.gate_result if tick is not None else None
+        deliver = tick.deliver_result if tick is not None else None
+        return {
+            "event": "proactive_tick",
+            "gate_reason": gate.reason if gate is not None else None,
+            "phase_trace": list(tick.phase_trace) if tick is not None else [],
+            "sent": bool(deliver and deliver.sent),
+            "running": self._running,
+            "is_executing": self._is_executing,
+            "last_started_at": (
+                self._last_started_at.isoformat()
+                if self._last_started_at is not None
+                else None
+            ),
+            "last_finished_at": (
+                self._last_finished_at.isoformat()
+                if self._last_finished_at is not None
+                else None
+            ),
+            "last_interval": self._last_interval,
+            "hawkes_enabled": self._hawkes_enabled,
+            "current_intensity": self.get_current_intensity(),
+            "events_1h": self._hawkes.get_event_count(3600.0),
+        }

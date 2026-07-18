@@ -23,6 +23,7 @@ from flow_agent.config.settings import (
 )
 from flow_agent.config.source_values import ConfigValues
 from flow_agent.llm.config import build_llm_model_settings, build_llm_provider_settings
+from flow_agent.runtime.workspace import build_layout
 
 _SETTINGS_CACHE: Settings | None = None
 
@@ -47,7 +48,9 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 import tomli as _toml
             except ModuleNotFoundError:
                 try:
-                    import tomllib as _toml
+                    from importlib import import_module
+
+                    _toml = import_module("tomllib")
                 except ModuleNotFoundError:
                     return {}
             raw = _toml.loads(path.read_text(encoding="utf-8"))
@@ -62,6 +65,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         return {}
 
     project_root = Path(__file__).resolve().parents[2]
+    layout = build_layout(project_root)
     
     # 默认从项目根目录的 config.toml 读取
     config_path = project_root / "config.toml"
@@ -81,7 +85,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
         storage=StorageSettings(
             memory_db_path=values.get_str(
                 ("storage", "memory_db_path"),
-                str(project_root / ".flow" / "memory.db"),
+                str(layout.memory_db),
             ),
         ),
         logging=LoggingSettings(
@@ -143,7 +147,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             enabled=values.get_bool(("observe", "enabled"), True),
             trace_path=values.get_str(
                 ("observe", "trace_path"),
-                str(project_root / ".flow" / "trace.jsonl"),
+                str(layout.trace_file),
             ),
         ),
         memory_policy=MemoryPolicySettings(
@@ -215,12 +219,20 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 ("proactive", "telegram_target_user_id"),
                 "",
             ),
+            state_path=values.get_str(
+                ("proactive", "state_path"),
+                str(layout.proactive_state_db),
+            ),
+            trace_path=values.get_str(
+                ("proactive", "trace_path"),
+                str(layout.proactive_trace_file),
+            ),
         ),
         drift=DriftSettings(
             enabled=values.get_bool(("drift", "enabled"), False),
             data_dir=values.get_str(
                 ("drift", "data_dir"),
-                str(project_root / ".flow" / "drift"),
+                str(layout.drift_dir),
             ),
             min_interval_hours=values.get_float(
                 ("drift", "min_interval_hours"),
@@ -256,7 +268,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
             tasks_file=values.get_str(
                 ("subagent", "tasks_file"),
-                str(project_root / ".flow" / "subagent_tasks.jsonl"),
+                str(layout.subagent_tasks_file),
             ),
         ),
         persona=PersonaSettings(

@@ -98,6 +98,35 @@ class LocalTodoSource:
         return records
 
 
+class LocalTaskSource:
+    def __init__(self, tasks_file: Path) -> None:
+        self.tasks_file = tasks_file
+
+    @property
+    def name(self) -> str:
+        return "local_task"
+
+    def fetch_records(self) -> list[SourceRecord]:
+        if not self.tasks_file.exists():
+            return []
+        records: list[SourceRecord] = []
+        for line in self.tasks_file.read_text(encoding="utf-8").splitlines():
+            content = line.strip()
+            if not content or content.startswith("#"):
+                continue
+            records.append(
+                SourceRecord(
+                    source=self.name,
+                    title=content[:48] if len(content) > 48 else content,
+                    content=f"[任务] {content}",
+                    summary=content[:120],
+                    dedup_key=f"task:{content.lower()}",
+                    priority_hint=0.8,
+                )
+            )
+        return records
+
+
 class MemoryFollowUpSource:
     '''从最近的用户问题中构建跟进记录'''
 

@@ -3,13 +3,14 @@
 import hashlib
 from pathlib import Path
 from typing import Dict
+from flow_agent.infra.paths import WORKSPACE_LAYOUT
 
 
 class AttachmentStore:
     """附件存储：统一的文件存储管理"""
 
-    def __init__(self, base_path: str = ".flow/attachments"):
-        self.base_path = Path(base_path)
+    def __init__(self, base_path: str | None = None):
+        self.base_path = Path(base_path) if base_path else WORKSPACE_LAYOUT.inbound_attachments_dir
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     async def store(self, file_data: bytes, filename: str, channel: str) -> str:

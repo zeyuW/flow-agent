@@ -1,18 +1,28 @@
+"""应用入口：初始化工作区或启动服务。"""
+
+from __future__ import annotations
+
+import argparse
 import logging
+from pathlib import Path
+from typing import Sequence
 
 from flow_agent.app.bootstrap import create_app_runtime
 from flow_agent.config.settings import settings
 from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.http import HTTPChannel
+from flow_agent.infra.paths import WORKSPACE_LAYOUT
+from flow_agent.runtime.workspace import init_workspace
 from flow_agent.channels.telegram import TelegramChannel
 from flow_agent.tools.message_push import MessagePushTool
 
 
 logger = logging.getLogger(__name__)
 
-def main() -> None:
+
+def run_service() -> None:
     cfg = settings.get()
-    configure_logging("INFO")
+    configure_logging(cfg.logging.level, WORKSPACE_LAYOUT.app_log_file)
     print(
         "Config summary: "
         f"http_enabled={cfg.channels.http_enabled}, "
@@ -107,15 +117,20 @@ def main() -> None:
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
-    # 启动主动回复循环（后台任务）
+    # 启动主动回复循环（后台线程）
+    proactive_thread = None
     if proactive_runtime:
         import asyncio
         import threading
+
         def run_proactive():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(proactive_runtime.start_background())
-            loop.run_forever()
+            try:
+                loop.run_until_complete(proactive_runtime.run())
+            finally:
+                loop.close()
+
         proactive_thread = threading.Thread(target=run_proactive, daemon=True)
         proactive_thread.start()
         print("proactive loop started")
@@ -144,6 +159,10 @@ def main() -> None:
             time.sleep(1)
     except KeyboardInterrupt:
         print("\nShutting down...")
+        if proactive_runtime:
+            proactive_runtime.request_stop()
+        if proactive_thread is not None:
+            proactive_thread.join(timeout=5.0)
         if telegram:
             import asyncio
             loop = asyncio.new_event_loop()
@@ -152,5 +171,30 @@ def main() -> None:
         print("Shutdown complete.")
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    """构建命令行参数解析器。"""
+
+    parser = argparse.ArgumentParser(prog="flow-agent")
+    commands = parser.add_subparsers(dest="command")
+    init_parser = commands.add_parser("init", help="初始化 .flow 运行时工作区")
+    init_parser.add_argument("--workspace", default=".", help="项目根目录")
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """执行命令；无子命令时直接启动服务。"""
+
+    parser = _build_parser()
+    args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.command == "init":
+        workspace = Path(args.workspace).expanduser().resolve()
+        layout = init_workspace(workspace)
+        print(f"工作区已初始化：{layout.flow_dir}")
+        return 0
+
+    run_service()
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

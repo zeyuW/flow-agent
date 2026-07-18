@@ -1,5 +1,6 @@
-"""Deliver: 持久化会话并分发出站消息。"""
+"""主动消息的会话持久化和出站投递。"""
 
+import asyncio
 import logging
 
 from flow_agent.proactive.models import DeliverResult, ResolveResult
@@ -15,52 +16,69 @@ async def deliver_message(
     outbound_port=None,
     channel: str = "cli",
 ) -> DeliverResult:
-    """持久化主动会话并分发到出站。"""
-    if resolve.decision != "send" or not resolve.message:
-        return DeliverResult(sent=False, message="no message to send", chat_id=chat_id)
+    """先完成会话和出站投递，成功后再提交副作用。"""
 
-    # 持久化到会话
-    if session_manager:
+    if resolve.decision != "send" or not resolve.message:
+        return DeliverResult(
+            sent=False,
+            message="no message to send",
+            chat_id=chat_id,
+        )
+
+    if session_manager is not None:
         try:
             session = session_manager.get_or_create(chat_id)
-            import asyncio
-            await session_manager.append_messages(session, [{
-                "role": "assistant",
-                "content": resolve.message,
-                "proactive": True,
-                "evidence": resolve.cited_item_ids,
-            }])
+            await session_manager.append_messages(
+                session,
+                [
+                    {
+                        "role": "assistant",
+                        "content": resolve.message,
+                        "proactive": True,
+                        "evidence": resolve.cited_item_ids,
+                    }
+                ],
+            )
         except Exception:
-            logger.exception("failed to persist proactive session")
+            logger.exception("主动消息会话持久化失败")
 
-    # 分发到出站
-    if outbound_port:
+    if outbound_port is not None:
         try:
             from flow_agent.messaging.message_bus import OutboundDispatch
-            metadata = {"proactive": True, "cited": resolve.cited_item_ids}
-            # 为 Telegram 添加 telegram_chat_id
+
+            metadata = {
+                "proactive": True,
+                "cited": resolve.cited_item_ids,
+            }
             if channel == "telegram" and chat_id:
                 metadata["telegram_chat_id"] = chat_id
-            outbound_port.send(OutboundDispatch(
-                channel=channel,
-                session_id=chat_id,
-                text=resolve.message,
-                metadata=metadata,
-            ))
-            logger.info("proactive message dispatched to %s via %s", chat_id, channel)
+            outbound_port.send(
+                OutboundDispatch(
+                    channel=channel,
+                    session_id=chat_id,
+                    text=resolve.message,
+                    metadata=metadata,
+                )
+            )
         except Exception:
-            logger.exception("proactive dispatch failed")
-            return DeliverResult(sent=False, message=resolve.message, chat_id=chat_id, error="dispatch failed")
+            logger.exception("主动消息出站投递失败")
+            return DeliverResult(
+                sent=False,
+                message=resolve.message,
+                chat_id=chat_id,
+                error="dispatch failed",
+            )
 
-    # 运行副作用（包括异步 ACK）
     for effect in resolve.side_effects:
         try:
-            import asyncio
-            result = effect()
-            if asyncio.iscoroutine(result):
-                # 异步 side effect（如 ACK），在后台执行
-                asyncio.create_task(result)
+            effect_result = effect()
+            if asyncio.iscoroutine(effect_result):
+                await effect_result
         except Exception:
-            logger.exception("side effect failed")
+            logger.exception("主动消息投递后副作用失败")
 
-    return DeliverResult(sent=True, message=resolve.message, chat_id=chat_id)
+    return DeliverResult(
+        sent=True,
+        message=resolve.message,
+        chat_id=chat_id,
+    )

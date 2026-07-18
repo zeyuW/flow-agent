@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "flow-agent"
 version = "0.1.0"
@@ -11,6 +15,8 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
     "websockets>=15.0",
+    "sqlite-vec>=0.1.0",
+    "numpy>=1.24.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -18,7 +24,7 @@ include = ["flow_agent*"]
 exclude = ["docker*"]
 
 [project.scripts]
-flow-agent = "flow_agent.cli:main"
+flow-agent = "flow_agent.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

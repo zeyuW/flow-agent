@@ -16,7 +16,7 @@ class PluginConfig:
         return self._values.get(key, default)
 
     @classmethod
-    def load(cls, plugin_dir: Path) -> "PluginConfig":
+    def load(cls, plugin_dir: Path, data_dir: Path | None = None) -> "PluginConfig":
         values: dict[str, Any] = {}
         schema = _read_json(plugin_dir / "_conf_schema.json")
         if schema:
@@ -25,7 +25,8 @@ class PluginConfig:
                     values[k] = v.get("default")
                 else:
                     values[k] = v
-        user = _read_json(plugin_dir / "plugin_config.json")
+        user_root = data_dir or plugin_dir
+        user = _read_json(user_root / "plugin_config.json")
         if user:
             values.update(user)
         return cls(_values=values)
@@ -69,6 +70,7 @@ class PluginContext:
     kv_store: PluginKVStore | None = None
     config: PluginConfig = field(default_factory=PluginConfig)
     workspace: Path | None = None
+    data_dir: Path | None = None
 
 
 def _read_json(path: Path) -> dict | None:

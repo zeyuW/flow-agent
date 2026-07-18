@@ -36,16 +36,24 @@ class McpClientPool:
         cmd = server.get("command", [])
         if not cmd:
             return
+        process_env = None
+        if server.get("env"):
+            import os
+
+            process_env = os.environ.copy()
+            process_env.update(server["env"])
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=process_env,
+            cwd=server.get("cwd"),
         )
         self._clients[name] = proc
         logger.info("MCP pool connected: %s", name)
 
-    async def call(self, server_name: str, tool_name: str, params: dict = None) -> Any:
+    async def call(self, server_name: str, tool_name: str, params: dict | None = None) -> Any:
         """Call a tool on a connected MCP server."""
         proc = self._clients.get(server_name)
         if proc is None:

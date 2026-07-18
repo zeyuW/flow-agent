@@ -1,7 +1,8 @@
 import json
+import sqlite3
 from pathlib import Path
 
-from flow_agent.cli import main as cli_main
+from flow_agent.main import main as cli_main
 from flow_agent.plugins.manager import PluginManager
 from flow_agent.runtime.workspace import detect_workspace, init_workspace, persist_workspace_profile
 from flow_agent.skills.manager import SkillManager
@@ -10,10 +11,36 @@ from flow_agent.skills.manager import SkillManager
 def test_workspace_init_and_detect(tmp_path: Path):
     layout = init_workspace(tmp_path)
     assert layout.marker_file.exists()
+    assert layout.memory_dir.is_dir()
+    assert layout.drift_skills_dir.is_dir()
+    assert layout.plugin_data_dir.is_dir()
+    assert layout.rss_sources_dir.is_dir()
+    assert layout.snapshot_sources_dir.is_dir()
+    assert layout.inbound_attachments_dir.is_dir()
+    assert layout.outbound_attachments_dir.is_dir()
+    assert layout.mcp_servers_file.exists()
+    assert layout.proactive_trace_file.exists()
     detected = detect_workspace(tmp_path / "skills")
     assert detected is not None
     assert detected.root == tmp_path.resolve()
 
+
+def test_workspace_migrates_legacy_sqlite_database(tmp_path: Path):
+    legacy_flow = tmp_path / ".flow"
+    legacy_flow.mkdir()
+    legacy_db = legacy_flow / "memory.db"
+    with sqlite3.connect(legacy_db) as connection:
+        connection.execute("CREATE TABLE sample (value TEXT)")
+        connection.execute("INSERT INTO sample VALUES (\"保留数据\")")
+    (legacy_flow / ".workspace").write_text(
+        "flow-agent-workspace-v1\n",
+        encoding="utf-8",
+    )
+
+    layout = init_workspace(tmp_path)
+    with sqlite3.connect(layout.memory_db) as connection:
+        value = connection.execute("SELECT value FROM sample").fetchone()[0]
+    assert value == "保留数据"
 
 def test_skill_manager_install_enable_disable(tmp_path: Path):
     layout = init_workspace(tmp_path)
@@ -73,9 +100,16 @@ def test_cli_init_command(tmp_path: Path):
     assert (tmp_path / ".flow" / ".workspace").exists()
 
 
-def test_persist_workspace_profile_updates_config(tmp_path: Path):
+def test_cli_without_subcommand_starts_service(monkeypatch):
+    calls = []
+    monkeypatch.setattr("flow_agent.main.run_service", lambda: calls.append(True))
+
+    assert cli_main([]) == 0
+    assert calls == [True]
+
+
+def test_persist_workspace_profile_is_noop(tmp_path: Path):
     layout = init_workspace(tmp_path)
+    marker_before = layout.marker_file.read_text(encoding="utf-8")
     persist_workspace_profile(layout, "prod")
-    text = layout.config_file.read_text(encoding="utf-8")
-    assert "[governance]" in text
-    assert 'profile = "prod"' in text
+    assert layout.marker_file.read_text(encoding="utf-8") == marker_before

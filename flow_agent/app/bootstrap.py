@@ -32,10 +32,11 @@ from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.consolidation_worker import ConsolidationWorker
-from flow_agent.infra.paths import DATA_DIR
+from flow_agent.infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
 from flow_agent.infra.persistence import PersistenceManager
 from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
+from flow_agent.runtime.workspace import init_workspace
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import build_proactive_runtime
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
@@ -46,7 +47,7 @@ from flow_agent.tools.spawn import SpawnTool
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.plugins.plugin_loader import PluginManager
-from flow_agent.proactive.sources import LocalFileSource
+from flow_agent.proactive.sources import LocalFileSource, LocalTaskSource, LocalTodoSource, RSSFeedSource, WebSnapshotSource
 
 
 """新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
@@ -62,6 +63,7 @@ def create_core_components():
 
     返回组装好的组件字典，供 create_app_runtime 使用。
     """
+    init_workspace(PROJECT_ROOT)
     cfg = settings.get()
     PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
 
@@ -144,13 +146,15 @@ def create_core_components():
         tool_registry.register(spawn_tool)
         undo_tool = UndoTool()
         undo_tool.session_manager = session_manager
-        undo_tool.memory_store = None  # set after memory runtime creation
+        undo_tool.memory_store = None  # 记忆运行时创建后再注入
         tool_registry.register(undo_tool)
 
     # MCP
-    mcp_registry = _build_mcp_registry(cfg, Path(DATA_DIR))
-    mcp_servers = []  # 暂时使用空列表，后续可从配置加载
-    # _register_mcp_tools_from_config(tool_registry, mcp_registry, cfg)  # 暂时禁用，使用新的 mcp_servers 配置
+    mcp_registry = _build_mcp_registry(cfg, WORKSPACE_LAYOUT.mcp_servers_file)
+    if cfg.tooling.enabled:
+        tool_registry.register(McpAddTool(mcp_registry))
+        tool_registry.register(McpRemoveTool(mcp_registry))
+        tool_registry.register(McpListTool(mcp_registry))
 
     # Agent
     agent = Agent(
@@ -260,7 +264,7 @@ def create_app_runtime():
     cfg = settings.get()
     
     # MCP 服务器配置
-    mcp_servers = []  # 暂时使用空列表，后续可从配置加载
+    mcp_servers = []  # 主动数据源仅连接已显式组装的 MCP
     
     components = create_core_components()
     agent = components["agent"]
@@ -280,8 +284,13 @@ def create_app_runtime():
     # 创建记忆运行时（双层记忆架构）
     memory_runtime = build_memory_runtime(
         data_dir=Path(DATA_DIR),
+        memory_dir=WORKSPACE_LAYOUT.memory_dir,
+        vector_db_path=WORKSPACE_LAYOUT.memory_vectors_db,
+        embedding_cache_path=WORKSPACE_LAYOUT.embedding_cache_file,
         api_key=cfg.api_key,
         base_url=cfg.base_url,
+        llm_client=llm_client,
+        llm_model=cfg.model.model,
     )
     # 绑定记忆事件（TurnCommitted 后自动触发记忆处理）
     wire_memory_events(memory_runtime, event_bus)
@@ -328,34 +337,50 @@ def create_app_runtime():
     # 插件系统暂时禁用，避免异步问题
     proactive_sources = None
 
-    # 使用配置的 telegram_target_user_id，必须配置
-    print(f"Checking proactive config: telegram_target_user_id = {cfg.proactive.telegram_target_user_id}")
-    if not cfg.proactive.telegram_target_user_id:
-        raise ValueError("telegram_target_user_id not configured in config.toml")
-
-    proactive_loop = build_proactive_runtime(
-        chat_id=cfg.proactive.telegram_target_user_id,
-        llm_client=OpenAILLMClient(
-            cfg,
-            model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
-            api_key_override=cfg.provider.fast_api_key,
-            base_url_override=cfg.provider.fast_base_url,
-        ),
-        memory_engine=memory_runtime.engine,
-        session_manager=session_manager,
-        outbound_port=message_bus.outbound_port,
-        mcp_servers=mcp_servers,
-        max_per_day=cfg.proactive.max_per_day,
-        min_interval=cfg.proactive.min_interval,
-        max_interval=cfg.proactive.max_interval,
-        cooldown=cfg.proactive.cooldown,
-        drift_enabled=cfg.drift.enabled,
-        drift_data_dir=cfg.drift.data_dir,
-        drift_min_interval_hours=cfg.drift.min_interval_hours,
-        drift_max_steps=cfg.drift.max_steps,
-        proactive_sources=proactive_sources,
-        channel="telegram" if cfg.channels.telegram_enabled else "cli",
-    )
+    local_sources = [
+        LocalFileSource(WORKSPACE_LAYOUT.proactive_source_file),
+        LocalTodoSource(WORKSPACE_LAYOUT.proactive_todo_file),
+        LocalTaskSource(WORKSPACE_LAYOUT.proactive_tasks_file),
+        RSSFeedSource(sorted(WORKSPACE_LAYOUT.rss_sources_dir.glob("*.xml"))),
+        WebSnapshotSource(sorted(WORKSPACE_LAYOUT.snapshot_sources_dir.glob("*.txt"))),
+    ]
+    # 主动链路关闭时不创建资源，也不要求配置目标用户。
+    proactive_loop = None
+    if cfg.proactive.enabled:
+        proactive_channel = "telegram" if cfg.channels.telegram_enabled else "cli"
+        proactive_loop = build_proactive_runtime(
+            enabled=True,
+            chat_id=cfg.proactive.telegram_target_user_id or "",
+            llm_client=OpenAILLMClient(
+                cfg,
+                model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
+                api_key_override=cfg.provider.fast_api_key,
+                base_url_override=cfg.provider.fast_base_url,
+            ),
+            memory_engine=memory_runtime.engine,
+            session_manager=session_manager,
+            outbound_port=message_bus.outbound_port,
+            event_bus=event_bus,
+            mcp_servers=mcp_servers,
+            max_per_day=cfg.proactive.max_per_day,
+            min_interval=cfg.proactive.min_interval,
+            max_interval=cfg.proactive.max_interval,
+            cooldown=cfg.proactive.cooldown,
+            drift_enabled=cfg.drift.enabled,
+            drift_data_dir=cfg.drift.data_dir,
+            drift_min_interval_hours=cfg.drift.min_interval_hours,
+            drift_max_steps=cfg.drift.max_steps,
+            hawkes_enabled=cfg.proactive.hawkes_enabled,
+            hawkes_base_intensity=cfg.proactive.hawkes_base_intensity,
+            hawkes_excitation_alpha=cfg.proactive.hawkes_excitation_alpha,
+            hawkes_decay_beta=cfg.proactive.hawkes_decay_beta,
+            hawkes_time_constant=cfg.proactive.hawkes_time_constant,
+            proactive_sources=proactive_sources,
+            local_sources=local_sources,
+            state_path=cfg.proactive.state_path,
+            trace_path=cfg.proactive.trace_path,
+            channel=proactive_channel,
+        )
 
     runtime_service = create_runtime_service(
         proactive_loop=proactive_loop,
@@ -405,7 +430,6 @@ def create_runtime_service(
 ) -> RuntimeService:
     """创建 RuntimeService（保持原有逻辑）。"""
 
-    cfg = settings.get()
     runtime_service = RuntimeService()
 
     runtime_service.register(
@@ -416,36 +440,44 @@ def create_runtime_service(
         )
     )
 
+    def _proactive_health() -> RuntimeHealth:
+        if proactive_loop is None:
+            return RuntimeHealth(name="proactive", ok=True, detail="disabled")
+        snapshot = proactive_loop.status_snapshot()
+        return RuntimeHealth(
+            name="proactive",
+            ok=True,
+            detail=(
+                f"running={snapshot['running']} "
+                f"executing={snapshot['is_executing']}"
+            ),
+        )
+
     def _proactive_snapshot() -> RuntimeUnitSnapshot:
-        status = proactive_loop
+        if proactive_loop is None:
+            return RuntimeUnitSnapshot(
+                name="proactive",
+                running=False,
+                details={"enabled": False},
+                health="stopped",
+            )
+        details = proactive_loop.status_snapshot()
         return RuntimeUnitSnapshot(
             name="proactive",
-            running=proactive_loop._running,
-            details={
-                "is_executing": proactive_loop._running,
-                "last_started_at": (
-                    None.isoformat()
-                    if None is not None
-                    else None
-                ),
-                "last_finished_at": (
-                    None.isoformat()
-                    if None is not None
-                    else None
-                ),
-            },
+            running=bool(details["running"]),
+            details=details,
+            health="healthy" if details["running"] else "stopped",
         )
 
     runtime_service.register(
         RuntimeUnit(
             name="proactive",
-            start_fn=lambda: None,
-            stop_fn=proactive_loop.stop,
-            health_fn=lambda: RuntimeHealth(
-                name="proactive",
-                ok=True,
-                detail=f"running={proactive_loop._running}",
+            stop_fn=(
+                proactive_loop.request_stop
+                if proactive_loop is not None
+                else None
             ),
+            health_fn=_proactive_health,
             snapshot_fn=_proactive_snapshot,
         )
     )
@@ -474,9 +506,9 @@ def create_runtime_service(
     return runtime_service
 
 
-def _build_mcp_registry(settings, data_dir) -> McpServerRegistry:
+def _build_mcp_registry(settings, config_path) -> McpServerRegistry:
     mcp_registry = McpServerRegistry(
-        config_path=data_dir / "mcp_servers.json",
+        config_path=config_path,
         tool_registry=None,
     )
     return mcp_registry

@@ -1,138 +1,196 @@
-"""DataGateway: 从 MCP 数据源并行获取。"""
+"""主动数据网关，负责隔离并标准化外部数据源。"""
 
 import asyncio
+import json
 import logging
 from pathlib import Path
+from typing import Any
 
-from flow_agent.proactive.models import DataItem, GatewayResult
 from flow_agent.proactive.mcp_pool import McpClientPool
-from flow_agent.proactive.sources import LocalFileSource
+from flow_agent.proactive.models import DataItem, GatewayResult
+from flow_agent.proactive.sources import LocalFileSource, ProactiveSource
 
 logger = logging.getLogger(__name__)
 
 
 class DataGateway:
-    """从 MCP 告警/内容/上下文数据源并行获取数据。"""
+    """每轮只调用一次已注册数据源，并按声明通道分发结果。"""
 
-    def __init__(self, pool: McpClientPool, proactive_sources: list = None, local_source_file: Path = None) -> None:
+    def __init__(
+        self,
+        pool: McpClientPool,
+        proactive_sources: list | None = None,
+        local_source_file: Path | None = None,
+        local_sources: list[ProactiveSource] | None = None,
+    ) -> None:
         self._pool = pool
         self._content_store: dict[str, str] = {}
-        self._proactive_sources = proactive_sources or []
+        self._proactive_sources = list(proactive_sources or [])
+        self._local_sources = list(local_sources or [])
         self._local_source_file = local_source_file
+        if local_source_file is not None:
+            self._local_sources.append(LocalFileSource(local_source_file))
 
-        # 构建通道到 server 的映射
         self._channel_servers: dict[str, list[str]] = {
             "alert": [],
             "content": [],
             "context": [],
         }
-        for source in proactive_sources:
+        for source in self._proactive_sources:
             for channel in source.spec.channels:
                 if channel in self._channel_servers:
                     self._channel_servers[channel].append(source.spec.server)
 
     async def run(self) -> GatewayResult:
-        """并行获取三个数据流。"""
-        alerts, content, context = await asyncio.gather(
-            self._fetch_alerts(),
-            self._fetch_content(),
-            self._fetch_context(),
-            return_exceptions=True,
-        )
-        return GatewayResult(
-            alerts=alerts if isinstance(alerts, list) else [],
-            content=content if isinstance(content, list) else [],
-            context=context if isinstance(context, list) else [],
-        )
+        """并行采集已注册数据源，并隔离单个数据源失败。"""
 
-    async def _fetch_alerts(self) -> list[DataItem]:
-        """从所有声明了 alert 通道的 server 获取数据"""
-        all_items = []
-        for server in self._channel_servers["alert"]:
-            items = await self._call_source(server, "get_proactive_alerts")
-            all_items.extend(self._normalize(items, "alert"))
-        return all_items
+        result = GatewayResult()
+        if self._proactive_sources:
+            fetched = await asyncio.gather(
+                *[
+                    self._call_source(
+                        source.spec.server,
+                        source.spec.fetch_tool,
+                    )
+                    for source in self._proactive_sources
+                ],
+                return_exceptions=True,
+            )
+            for source, raw_items in zip(self._proactive_sources, fetched):
+                if isinstance(raw_items, BaseException):
+                    logger.warning(
+                        "主动数据源采集失败: source=%s error=%s",
+                        source.source_key,
+                        raw_items,
+                    )
+                    continue
+                items = self._normalize(raw_items, source.source_key)
+                for channel in source.spec.channels:
+                    target = getattr(result, channel, None)
+                    if isinstance(target, list):
+                        target.extend(items)
 
-    async def _fetch_content(self) -> list[DataItem]:
-        """从所有声明了 content 通道的 server 获取数据"""
-        all_items = []
-        for server in self._channel_servers["content"]:
-            items = await self._call_source(server, "get_proactive_events")
-            all_items.extend(self._normalize(items, "content"))
-        
-        # 从本地文件源获取数据（用于快速测试）
-        if self._local_source_file and self._local_source_file.exists():
-            local_source = LocalFileSource(self._local_source_file)
-            records = local_source.fetch_records()
-            for record in records:
-                item = DataItem(
-                    source=record.source,
-                    item_id=record.dedup_key,
-                    title=record.title,
-                    summary=record.summary,
-                    content=record.content,
-                    priority_hint=record.priority_hint,
-                )
-                all_items.append(item)
-            logger.info(f"从本地文件加载了 {len(records)} 条数据")
-        
-        return all_items
+        result.content.extend(self._fetch_all_local_content())
+        return result
 
-    async def _fetch_context(self) -> list[DataItem]:
-        """从所有声明了 context 通道的 server 获取数据"""
-        all_items = []
-        for server in self._channel_servers["context"]:
-            items = await self._call_source(server, "get_proactive_context")
-            all_items.extend(self._normalize(items, "context"))
-        return all_items
+    def _fetch_local_content(self) -> list[DataItem]:
+        """读取显式配置的本地数据文件。"""
 
-    async def _call_source(self, server: str, tool: str) -> list:
-        try:
-            result = await self._pool.call(server, tool)
-            logger.debug("MCP call result from %s/%s: %s", server, tool, result)
-            
-            if result and isinstance(result, dict):
-                r = result.get("result", {})
-                content = r.get("content", [])
-                if isinstance(content, list):
-                    texts = [c.get("text", "{}") for c in content if isinstance(c, dict)]
-                    logger.debug("Extracted %d text items from %s/%s", len(texts), server, tool)
-                    return texts
+        if self._local_source_file is None or not self._local_source_file.exists():
             return []
-        except Exception as e:
-            logger.debug("MCP call failed: %s/%s: %s", server, tool, e)
-            return []
+        records = LocalFileSource(self._local_source_file).fetch_records()
+        return [
+            DataItem(
+                source=record.source,
+                item_id=record.dedup_key,
+                title=record.title,
+                summary=record.summary,
+                content=record.content,
+                priority_hint=record.priority_hint,
+            )
+            for record in records
+        ]
 
-    def _normalize(self, raw_items: list, source: str) -> list[DataItem]:
-        items = []
-        for raw in raw_items:
-            import json
+    def _fetch_all_local_content(self) -> list[DataItem]:
+        """读取全部本地数据源，并隔离单个来源失败。"""
+
+        records = []
+        for source in self._local_sources:
             try:
-                d = json.loads(raw) if isinstance(raw, str) else raw
-            except json.JSONDecodeError:
+                records.extend(source.fetch_records())
+            except Exception:
+                logger.exception("本地主动数据源采集失败: source=%s", source.name)
+        return [
+            DataItem(
+                source=record.source,
+                item_id=record.dedup_key,
+                title=record.title,
+                summary=record.summary,
+                content=record.content,
+                priority_hint=record.priority_hint,
+            )
+            for record in records
+        ]
+    async def _call_source(self, server: str, tool: str) -> list[Any]:
+        """调用单个数据源并提取 MCP 内容块。"""
+
+        try:
+            response = await self._pool.call(server, tool)
+        except Exception:
+            logger.exception("主动数据源调用失败: server=%s tool=%s", server, tool)
+            return []
+        if response is None:
+            return []
+        if isinstance(response, list):
+            return response
+        if isinstance(response, str):
+            return [response]
+        if not isinstance(response, dict):
+            return []
+        result = response.get("result", response)
+        if isinstance(result, dict):
+            content = result.get("content", [])
+            if isinstance(content, list):
+                return [
+                    block.get("text", block) if isinstance(block, dict) else block
+                    for block in content
+                ]
+        return [result]
+
+    def _normalize(self, raw_items: list[Any], source: str) -> list[DataItem]:
+        """把字符串、对象或对象数组统一转换为 DataItem。"""
+
+        decoded: list[dict[str, Any]] = []
+        for raw in raw_items:
+            value: Any = raw
+            if isinstance(raw, str):
+                try:
+                    value = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+            if isinstance(value, list):
+                decoded.extend(item for item in value if isinstance(item, dict))
+            elif isinstance(value, dict):
+                decoded.append(value)
+
+        items: list[DataItem] = []
+        for value in decoded:
+            item_id = str(value.get("event_id") or value.get("id") or "").strip()
+            title = str(value.get("title") or "").strip()
+            content = str(value.get("content") or value.get("body") or "").strip()
+            summary = str(value.get("summary") or "").strip()
+            if not item_id and not title and not content and not summary:
                 continue
-            if not isinstance(d, dict):
-                continue
-            items.append(DataItem(
-                source=source,
-                item_id=str(d.get("id", "")),
-                title=str(d.get("title", "")),
-                summary=str(d.get("summary", "")),
-                content=str(d.get("content", "")),
-                ack_server=str(d.get("ack_server", "")),
-                priority_hint=float(d.get("priority", 0.0)),
-            ))
+            items.append(
+                DataItem(
+                    source=source,
+                    item_id=item_id,
+                    title=title,
+                    summary=summary,
+                    content=content,
+                    ack_server=str(value.get("ack_server") or ""),
+                    priority_hint=float(value.get("priority") or 0.0),
+                )
+            )
         return items
 
     async def _fetch_body(self, item: DataItem) -> str:
-        """获取完整内容主体。"""
-        # 如果已经有 content，直接返回
+        """按需获取条目正文，并缓存成功结果。"""
+
         if item.content:
-            logger.debug(f"Item {item.key} 已有 content，跳过获取")
             return item.content
-        # 否则尝试从 MCP 获取
+        if item.item_id in self._content_store:
+            return self._content_store[item.item_id]
         try:
-            return await self._pool.call("content_source", "web_fetch", {"url": item.summary})
+            body = await self._pool.call(
+                "content_source",
+                "web_fetch",
+                {"url": item.summary},
+            )
         except Exception:
-            logger.debug(f"获取 body 失败，返回空字符串")
+            logger.exception("主动条目正文获取失败: item_id=%s", item.item_id)
             return ""
+        text = body if isinstance(body, str) else ""
+        if text:
+            self._content_store[item.item_id] = text
+        return text

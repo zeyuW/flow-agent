@@ -30,11 +30,15 @@ class PluginManager:
         event_bus=None,
         tool_registry=None,
         workspace: Path | None = None,
+        plugin_data_dir: Path | None = None,
     ) -> None:
         self._dir = plugins_dir
         self._event_bus = event_bus
         self._tool_registry = tool_registry
         self._workspace = workspace
+        self._plugin_data_dir = plugin_data_dir or (
+            workspace / "plugin-data" if workspace is not None else None
+        )
         self._loaded: dict[str, Plugin] = {}
         self._tool_names: dict[str, list[str]] = {}  # module_path -> tool names
         self._tool_hook_executor = ToolHookExecutor()
@@ -101,6 +105,7 @@ class PluginManager:
                 event_bus=self._event_bus,
                 tool_registry=self._tool_registry,
                 workspace=self._workspace,
+                data_dir=(self._plugin_data_dir / name) if self._plugin_data_dir else None,
             ),
             pdir,
         )

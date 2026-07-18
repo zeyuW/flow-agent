@@ -1,4 +1,4 @@
-"""ProactiveTurnPipeline: 五阶段管道 + 漂移回退。"""
+"""主动检查的五阶段管道和漂移回退。"""
 
 import logging
 import time
@@ -7,14 +7,14 @@ from flow_agent.proactive.data_gateway import DataGateway
 from flow_agent.proactive.deliver import deliver_message
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore, check_gate
 from flow_agent.proactive.judge_loop import JudgeLoop
-from flow_agent.proactive.models import AgentTick
+from flow_agent.proactive.models import AgentTick, JudgeResult
 from flow_agent.proactive.resolve import resolve_decision
 
 logger = logging.getLogger(__name__)
 
 
 class ProactiveTurnPipeline:
-    """单次主动 tick 的五阶段管道 + 漂移回退。"""
+    """按准入、采集、评估、解析、投递顺序执行单次主动检查。"""
 
     def __init__(
         self,
@@ -30,7 +30,7 @@ class ProactiveTurnPipeline:
         drift_enabled: bool = False,
         drift_min_interval_hours: float = 1.0,
         mcp_pool=None,
-        proactive_sources: list = None,
+        proactive_sources: list | None = None,
         channel: str = "cli",
     ) -> None:
         self._state = state_store
@@ -42,87 +42,97 @@ class ProactiveTurnPipeline:
         self._outbound_port = outbound_port
         self._drift = drift_pipeline
         self._drift_enabled = drift_enabled
-        self._drift_min_interval = drift_min_interval_hours * 3600
+        self._drift_min_interval = drift_min_interval_hours * 3600.0
         self._mcp_pool = mcp_pool
         self._proactive_sources = proactive_sources or []
         self._channel = channel
-        logger.info(f"ProactiveTurnPipeline initialized with channel={channel}")
 
-    async def run(self, *, chat_id: str = "", base_score: float = 0.0, is_busy: bool = False) -> AgentTick:
-        """执行一次完整 tick：Gate → Fetch → Judge → Resolve → Deliver，无数据时尝试漂移。"""
+    async def run(
+        self,
+        *,
+        chat_id: str = "",
+        base_score: float = 0.0,
+        is_busy: bool = False,
+    ) -> AgentTick:
+        """执行完整主动检查，并在所有退出路径记录完成时间。"""
+
         tick = AgentTick(chat_id=chat_id, base_score=base_score)
+        try:
+            tick.phase_trace.append("gate")
+            tick.gate_result = check_gate(
+                chat_id=chat_id,
+                is_busy=is_busy,
+                state_store=self._state,
+                any_action=self._any_action,
+                cooldown=self._cooldown,
+                base_score=base_score,
+            )
+            if not tick.gate_result.passed:
+                logger.debug("主动准入阻止本轮检查: %s", tick.gate_result.reason)
+                return tick
 
-        # 阶段 1: Gate
-        tick.gate_result = check_gate(
-            chat_id=chat_id,
-            is_busy=is_busy,
-            state_store=self._state,
-            any_action=self._any_action,
-            cooldown=self._cooldown,
-            base_score=base_score,
-        )
-        if not tick.gate_result.passed:
-            logger.debug("gate blocked: %s", tick.gate_result.reason)
-            return tick
+            tick.phase_trace.append("fetch")
+            tick.gateway_result = await self._gateway.run()
 
-        # 阶段 2: Fetch
-        tick.gateway_result = await self._gateway.run()
-
-        # ── 漂移回退：无数据时尝试漂移 ──
-        if self._should_enter_drift(tick.gateway_result):
-            drift_tick = await self._drift.run(connected_mcp=set())
-            tick.drift_tick = drift_tick
-            # 标记 drift 运行时间
-            self._state.mark_drift_run()
-            logger.info("drift executed: runs=%d msg=%s", len(drift_tick.runs), bool(drift_tick.message))
-            # 如果 drift 产生了消息，走发送链路
-            if drift_tick.message:
-                from flow_agent.proactive.models import JudgeResult
-                tick.judge_result = JudgeResult(decision="reply", message=drift_tick.message)
-                tick.resolve_result = resolve_decision(tick.judge_result, state_store=self._state, chat_id=chat_id)
-                if tick.resolve_result.decision == "send":
-                    tick.deliver_result = await deliver_message(
-                        tick.resolve_result,
-                        chat_id=chat_id,
-                        session_manager=self._session_manager,
-                        outbound_port=self._outbound_port,
+            drift_pipeline = self._drift
+            if (
+                self._should_enter_drift(tick.gateway_result)
+                and drift_pipeline is not None
+            ):
+                tick.phase_trace.append("drift")
+                drift_tick = await drift_pipeline.run(connected_mcp=set())
+                tick.drift_tick = drift_tick
+                self._state.mark_drift_run()
+                if drift_tick.message:
+                    tick.judge_result = JudgeResult(
+                        decision="reply",
+                        message=drift_tick.message,
                     )
+                    await self._resolve_and_deliver(tick)
+                return tick
+
+            tick.phase_trace.append("judge")
+            tick.judge_result = await self._judge.evaluate(
+                tick.gateway_result,
+                chat_id,
+            )
+            await self._resolve_and_deliver(tick)
             return tick
+        finally:
+            tick.finished_at = time.time()
 
-        # 阶段 3: Judge
-        tick.judge_result = await self._judge.evaluate(tick.gateway_result, chat_id)
+    async def _resolve_and_deliver(self, tick: AgentTick) -> None:
+        """执行发送前解析，并在允许时完成出站投递。"""
 
-        # 阶段 4: Resolve
+        if tick.judge_result is None:
+            return
+        tick.phase_trace.append("resolve")
         tick.resolve_result = resolve_decision(
             tick.judge_result,
             state_store=self._state,
-            chat_id=chat_id,
+            chat_id=tick.chat_id,
             mcp_pool=self._mcp_pool,
             sources=self._proactive_sources,
         )
-
-        # 阶段 5: Deliver
-        if tick.resolve_result.decision == "send":
-            tick.deliver_result = await deliver_message(
-                tick.resolve_result,
-                chat_id=chat_id,
-                session_manager=self._session_manager,
-                outbound_port=self._outbound_port,
-                channel=self._channel if hasattr(self, '_channel') else "cli",
-            )
-
-        return tick
+        if tick.resolve_result.decision != "send":
+            return
+        tick.phase_trace.append("deliver")
+        tick.deliver_result = await deliver_message(
+            tick.resolve_result,
+            chat_id=tick.chat_id,
+            session_manager=self._session_manager,
+            outbound_port=self._outbound_port,
+            channel=self._channel,
+        )
 
     def _should_enter_drift(self, gateway_result) -> bool:
-        # 无 alert 且无 content
-        if not self._drift or not self._drift_enabled:
+        """仅在无告警和无内容且满足间隔时进入漂移。"""
+
+        if self._drift is None or not self._drift_enabled:
             return False
         if gateway_result.alerts or gateway_result.content:
             return False
-
-        # 检查最小间隔
-        last = self._state.get_drift_last_at()
-        if last > 0 and (time.time() - last) < self._drift_min_interval:
+        last_run = self._state.get_drift_last_at()
+        if last_run > 0 and (time.time() - last_run) < self._drift_min_interval:
             return False
-
         return True

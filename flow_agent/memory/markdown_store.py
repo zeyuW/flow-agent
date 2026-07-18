@@ -66,15 +66,29 @@ RECENT_CONTEXT_TEMPLATE = """# 近期上下文
 
 """
 
+PENDING_TEMPLATE = '''# 待跟进事项
+
+> 本文件记录尚未完成的承诺、任务和需要后续确认的问题。
+> 最后更新：{updated_at}
+
+---
+
+## 待处理
+
+*暂无待跟进事项。*
+
+'''
+
 
 @dataclass(slots=True)
 class MarkdownStore:
     """Markdown 记忆文件管理层。
 
-    管理三个核心文件：
+    管理四个核心文件：
     - MEMORY.md: 用户长期档案（身份、偏好、目标、约束）
     - HISTORY.md: 重要事件的时间线记录
     - RECENT_CONTEXT.md: 最近对话的压缩摘要
+    - PENDING.md: 尚未完成的承诺、任务和待确认问题
     """
 
     root: Path
@@ -91,6 +105,10 @@ class MarkdownStore:
     def recent_context_file(self) -> Path:
         return self.root / "RECENT_CONTEXT.md"
 
+    @property
+    def pending_file(self) -> Path:
+        return self.root / 'PENDING.md'
+
     def initialize(self) -> None:
         """初始化所有 Markdown 文件（spec 1b）。"""
         self.root.mkdir(parents=True, exist_ok=True)
@@ -100,6 +118,7 @@ class MarkdownStore:
             (self.memory_file, MEMORY_TEMPLATE),
             (self.history_file, HISTORY_TEMPLATE),
             (self.recent_context_file, RECENT_CONTEXT_TEMPLATE),
+            (self.pending_file, PENDING_TEMPLATE),
         ]:
             if not path.exists():
                 path.write_text(
@@ -125,6 +144,12 @@ class MarkdownStore:
         if self.recent_context_file.exists():
             return self.recent_context_file.read_text(encoding="utf-8")
         return ""
+    def read_pending(self) -> str:
+        '''读取 PENDING.md 完整内容。'''
+        if self.pending_file.exists():
+            return self.pending_file.read_text(encoding='utf-8')
+        return ''
+
 
     def append_event(self, event: str, timestamp: str | None = None) -> None:
         """向 HISTORY.md 追加一条事件记录。

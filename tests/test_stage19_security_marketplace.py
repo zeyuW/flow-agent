@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from flow_agent.cli import main as cli_main
+from flow_agent.main import main as cli_main
 from flow_agent.marketplace.index import MarketplaceIndex
 from flow_agent.marketplace.installer import MarketplaceInstaller
 from flow_agent.plugins.manager import PluginManager

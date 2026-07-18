@@ -1,16 +1,9 @@
-"""记忆运行时：统一构建双层记忆架构并绑定事件总线。
-
-实现 spec 1a-1e：
-- 1a: build_memory_runtime() 统一构建入口
-- 1b: Markdown 记忆层初始化
-- 1c: 插件引擎层加载（通过工具系统）
-- 1d: 向量存储和检索组件初始化
-- 1e: 绑定 TurnCommitted 等事件
-"""
+"""记忆运行时：统一双层记忆架构并绑定事件总线。"""
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from flow_agent.memory.embedder import OpenAIEmbedder
 from flow_agent.memory.markdown_store import MarkdownStore
@@ -20,13 +13,15 @@ from flow_agent.memory.memorizer import Memorizer
 from flow_agent.memory.post_response import PostResponseMemoryWorker
 from flow_agent.memory.supersede import SupersedeDetector
 from flow_agent.memory.vector_store import MemoryStore
+from flow_agent.memory.query_rewriter import QueryRewriter
+from flow_agent.memory.dedup_decider import DedupDecider
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
 class MemoryRuntime:
-    """记忆运行时：包含双层记忆的所有核心组件。
+    """记忆运行时，包含双层记忆架构。
 
     两层架构：
     - Markdown 层：人类可读的 MEMORY.md / HISTORY.md / RECENT_CONTEXT.md
@@ -41,45 +36,55 @@ class MemoryRuntime:
     engine: MemoryEngine
     supersede_detector: SupersedeDetector
     post_response_worker: PostResponseMemoryWorker
+    query_rewriter: QueryRewriter | None = None
+    dedup_decider: DedupDecider | None = None
 
 
 def build_memory_runtime(
     data_dir: Path,
     *,
+    memory_dir: Path | None = None,
+    vector_db_path: Path | None = None,
+    embedding_cache_path: Path | None = None,
     api_key: str = "",
     base_url: str | None = None,
     embedding_model: str = "text-embedding-3-small",
+    llm_client: Any = None,
+    llm_model: str = "",
 ) -> MemoryRuntime:
-    """构建记忆运行时（spec 1a）。
-
-    统一构建 Markdown 层和向量引擎层的所有组件。
+    """构建包含所有组件的记忆运行时。
 
     Args:
         data_dir: 数据目录（如 .flow/data/）。
+        memory_dir: Markdown 记忆目录。
+        vector_db_path: 向量记忆数据库路径。
+        embedding_cache_path: 向量化缓存路径。
         api_key: OpenAI API key。
         base_url: OpenAI API base URL。
-        embedding_model: embedding 模型名称。
+        embedding_model: Embedding 模型名称。
+        llm_client: 用于 QueryRewriter 和 DedupDecider 的可选 LLM 客户端。
+        llm_model: QueryRewriter 和 DedupDecider 的 LLM 模型名称。
 
     Returns:
-        MemoryRuntime 实例，包含所有记忆组件。
+        包含所有记忆组件的 MemoryRuntime 实例。
     """
-    # spec 1b: 构建 Markdown 记忆层
-    memory_dir = data_dir / "memory"
-    markdown_store = MarkdownStore(root=memory_dir)
+    # 构建 Markdown 记忆层
+    resolved_memory_dir = memory_dir or (data_dir / "memory")
+    markdown_store = MarkdownStore(root=resolved_memory_dir)
     markdown_store.initialize()
-    logger.info("markdown memory layer initialized at %s", memory_dir)
+    logger.info("markdown memory layer initialized at %s", resolved_memory_dir)
 
-    # spec 1d: 初始化向量存储和检索组件
-    vector_db_path = data_dir / "memory_vectors.db"
-    vector_store = MemoryStore(db_path=vector_db_path)
-    logger.info("vector store initialized at %s", vector_db_path)
+    # 初始化向量存储和检索组件
+    resolved_vector_db = vector_db_path or (data_dir / "memory_vectors.db")
+    vector_store = MemoryStore(db_path=resolved_vector_db)
+    logger.info("vector store initialized at %s", resolved_vector_db)
 
     # Embedder
     embedder = OpenAIEmbedder(
         api_key=api_key,
         base_url=base_url,
         model=embedding_model,
-        cache_path=data_dir / "embedding_cache.json",
+        cache_path=embedding_cache_path or (data_dir / "embedding_cache.json"),
     )
 
     # Memorizer
@@ -105,6 +110,25 @@ def build_memory_runtime(
         supersede_detector=supersede_detector,
     )
 
+    # 可选的高级组件
+    query_rewriter = None
+    dedup_decider = None
+
+    if llm_client:
+        query_rewriter = QueryRewriter(
+            llm_client=llm_client,
+            model=llm_model,
+        )
+        logger.info("query rewriter initialized with model: %s", llm_model)
+
+        dedup_decider = DedupDecider(
+            store=vector_store,
+            embedder=embedder,
+            llm_client=llm_client,
+            model=llm_model,
+        )
+        logger.info("dedup decider initialized with model: %s", llm_model)
+
     runtime = MemoryRuntime(
         markdown_store=markdown_store,
         vector_store=vector_store,
@@ -114,6 +138,8 @@ def build_memory_runtime(
         engine=engine,
         supersede_detector=supersede_detector,
         post_response_worker=post_response_worker,
+        query_rewriter=query_rewriter,
+        dedup_decider=dedup_decider,
     )
 
     active_count = vector_store.count_active()

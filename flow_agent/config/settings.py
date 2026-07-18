@@ -25,7 +25,7 @@ class ProviderSettings(BaseModel):
 # ── 存储 ──
 
 class StorageSettings(BaseModel):
-    memory_db_path: str = ".flow/memory.db"
+    memory_db_path: str = ".flow/data/memory.db"
 
 
 # ── 日志 ──
@@ -64,7 +64,7 @@ class RetrievalSettings(BaseModel):
 
 class ObserveSettings(BaseModel):
     enabled: bool = True
-    trace_path: str = ".flow/trace.jsonl"
+    trace_path: str = ".flow/logs/trace.jsonl"
 
 
 # ── 记忆策略 ──
@@ -92,6 +92,8 @@ class ProactiveSettings(BaseModel):
     hawkes_decay_beta: float = 0.1
     hawkes_time_constant: float = 60.0
     telegram_target_user_id: str | None = None
+    state_path: str = ".flow/data/proactive.db"
+    trace_path: str = ".flow/logs/proactive.jsonl"
 
 
 # ── 漂移模式 ──
@@ -129,7 +131,7 @@ class JobsSettings(BaseModel):
 
 class SubagentSettings(BaseModel):
     max_concurrency: int = 2
-    tasks_file: str = ".flow/subagent_tasks.jsonl"
+    tasks_file: str = ".flow/sessions/subagent_tasks.jsonl"
 
 
 # ── 人设 ──
@@ -184,7 +186,7 @@ class Settings(BaseModel):
 
     @property
     def api_key(self) -> str:
-        return self.model.api_key
+        return self.model.api_key or ""
 
     @property
     def base_url(self) -> str | None:
