@@ -23,7 +23,11 @@ from flow_agent.config.settings import (
     ToolingSettings,
 )
 from flow_agent.config.source_values import ConfigValues
-from flow_agent.llm.config import build_llm_model_settings, build_llm_provider_settings
+from flow_agent.llm.config import (
+    build_embedding_settings,
+    build_llm_model_settings,
+    build_llm_provider_settings,
+)
 from flow_agent.runtime.workspace import build_layout
 
 _SETTINGS_CACHE: Settings | None = None
@@ -80,9 +84,9 @@ def load_settings(*, force_reload: bool = False) -> Settings:
 
     # 验证必要配置
     _validate_required_config(values)
-
     settings = Settings(
         model=build_llm_model_settings(values),
+        embedding=build_embedding_settings(values),
         storage=StorageSettings(
             memory_db_path=values.get_str(
                 ("storage", "memory_db_path"),
@@ -134,7 +138,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             enabled=values.get_bool(("retrieval", "enabled"), True),
             max_items=values.get_int(
                 ("retrieval", "max_items"),
-                6,
+                5,
                 minimum=1,
             ),
             min_score=values.get_float(
@@ -158,7 +162,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
             max_messages=values.get_int(
                 ("memory_policy", "max_messages"),
-                200,
+                100,
                 minimum=1,
             ),
             dedupe=values.get_bool(
@@ -166,33 +170,13 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 True,
             ),
         ),
-        memory=MemoryMaintenanceSettings(
-            enabled=values.get_bool(("memory", "enabled"), True),
-            consolidation_min_new_messages=values.get_int(
-                ("memory", "consolidation_min_new_messages"),
-                5,
-                minimum=1,
-            ),
-            recent_turns_limit=values.get_int(
-                ("memory", "recent_turns_limit"),
-                8,
-                minimum=2,
-            ),
-            optimizer_enabled=values.get_bool(
-                ("memory", "optimizer_enabled"),
-                True,
-            ),
-            optimizer_interval_seconds=values.get_int(
-                ("memory", "optimizer_interval_seconds"),
-                64800,
-                minimum=60,
-            ),
-        ),
+        # 记忆维护属于内部运行策略，固定使用代码默认值，避免配置文件承载实现细节。
+        memory=MemoryMaintenanceSettings(),
         proactive=ProactiveSettings(
             enabled=values.get_bool(("proactive", "enabled"), False),
             max_per_day=values.get_int(
                 ("proactive", "max_per_day"),
-                5,
+                10,
                 minimum=1,
             ),
             min_interval=values.get_float(
@@ -202,12 +186,12 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
             max_interval=values.get_float(
                 ("proactive", "max_interval"),
-                1800.0,
+                600.0,
                 minimum=1.0,
             ),
             cooldown=values.get_float(
                 ("proactive", "cooldown"),
-                120.0,
+                60.0,
                 minimum=0.0,
             ),
             judge_model=values.prefixed_str(
@@ -220,7 +204,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
             hawkes_base_intensity=values.get_float(
                 ("proactive", "hawkes_base_intensity"),
-                0.1,
+                2.0,
                 minimum=0.0,
             ),
             hawkes_excitation_alpha=values.get_float(
@@ -235,7 +219,7 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
             hawkes_time_constant=values.get_float(
                 ("proactive", "hawkes_time_constant"),
-                60.0,
+                30.0,
                 minimum=1.0,
             ),
             telegram_target_user_id=values.get_str(
@@ -252,21 +236,25 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             ),
         ),
         drift=DriftSettings(
-            enabled=values.get_bool(("drift", "enabled"), False),
+            enabled=values.get_bool(("drift", "enabled"), True),
             data_dir=values.get_str(
                 ("drift", "data_dir"),
                 str(layout.drift_dir),
             ),
             min_interval_hours=values.get_float(
                 ("drift", "min_interval_hours"),
-                1.0,
+                24.0,
                 minimum=0.1,
             ),
             max_steps=values.get_int(
-                ("drift", "max_steps"), 10, minimum=1
+                ("drift", "max_steps"), 50, minimum=1
             ),
         ),
         channels=ChannelsSettings(
+            # Web 控制台
+            dashboard_enabled=values.get_bool(("channels", "dashboard_enabled"), False),
+            dashboard_host=values.get_str(("channels", "dashboard_host"), "127.0.0.1"),
+            dashboard_port=values.get_int(("channels", "dashboard_port"), 9901),
             # HTTP API（Web 页面后端）
             http_enabled=values.get_bool(("channels", "http_enabled"), False),
             http_host=values.get_str(("channels", "http_host"), "127.0.0.1"),
@@ -344,14 +332,14 @@ def _validate_required_config(values: ConfigValues) -> None:
     if telegram_enabled:
         bot_token = values.get_str(("channels", "telegram_bot_token"), "")
         if not bot_token:
-            raise ValueError("channels.telegram_bot_token is required when telegram_enabled is true")
+            raise ValueError("启用 Telegram 时必须配置机器人令牌")
         allowed_users = values.get_str(("channels", "telegram_allowed_users"), "")
         if not allowed_users:
-            raise ValueError("channels.telegram_allowed_users is required when telegram_enabled is true")
-    
+            raise ValueError("设置 Telegram 令牌时必须同时配置允许访问的用户")
+
     # 主动推送配置（如果启用）
     proactive_enabled = values.get_bool(("proactive", "enabled"), False)
     if proactive_enabled:
         target_id = values.get_str(("proactive", "telegram_target_user_id"), "")
         if not target_id:
-            raise ValueError("proactive.telegram_target_user_id is required when proactive.enabled is true")
+            raise ValueError("启用主动推送时必须配置目标用户")

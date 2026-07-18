@@ -12,7 +12,7 @@ class ModelSettings(BaseModel):
     api_key: str | None = None
     base_url: str | None = None
     system_prompt: str = "You are a helpful AI assistant."
-    enable_thinking: bool = False
+    enable_thinking: bool = True
 
 
 class ProviderSettings(BaseModel):
@@ -20,6 +20,15 @@ class ProviderSettings(BaseModel):
     fast_api_key: str | None = None
     fast_base_url: str | None = None
     provider_fallback_enabled: bool = True
+
+
+class EmbeddingSettings(BaseModel):
+    """嵌入模型的外部服务连接信息。"""
+
+    provider: str = "qwen"
+    model: str = "text-embedding-v3"
+    api_key: str | None = None
+    base_url: str | None = None
 
 
 # ── 存储 ──
@@ -48,7 +57,7 @@ class SessionSettings(BaseModel):
 
 class ToolingSettings(BaseModel):
     enabled: bool = True
-    max_tool_steps: int = 5
+    max_tool_steps: int = 10
     tool_selection_max: int = 8
 
 
@@ -56,7 +65,7 @@ class ToolingSettings(BaseModel):
 
 class RetrievalSettings(BaseModel):
     enabled: bool = True
-    max_items: int = 6
+    max_items: int = 5
     min_score: float = 0.18
 
 
@@ -71,7 +80,7 @@ class ObserveSettings(BaseModel):
 
 class MemoryPolicySettings(BaseModel):
     enabled: bool = True
-    max_messages: int = 200
+    max_messages: int = 100
     dedupe: bool = True
 
 
@@ -90,17 +99,17 @@ class MemoryMaintenanceSettings(BaseModel):
 class ProactiveSettings(BaseModel):
     """主动消息推送配置 (spec proactive 1-6)。"""
     enabled: bool = False
-    max_per_day: int = 5
+    max_per_day: int = 10
     min_interval: float = 60.0
-    max_interval: float = 1800.0
-    cooldown: float = 120.0
+    max_interval: float = 600.0
+    cooldown: float = 60.0
     judge_model: str | None = None
     # 霍克斯过程配置
     hawkes_enabled: bool = True
-    hawkes_base_intensity: float = 0.1
+    hawkes_base_intensity: float = 2.0
     hawkes_excitation_alpha: float = 0.5
     hawkes_decay_beta: float = 0.1
-    hawkes_time_constant: float = 60.0
+    hawkes_time_constant: float = 30.0
     telegram_target_user_id: str | None = None
     state_path: str = ".flow/data/proactive.db"
     trace_path: str = ".flow/logs/proactive.jsonl"
@@ -110,15 +119,19 @@ class ProactiveSettings(BaseModel):
 
 class DriftSettings(BaseModel):
     """漂移模式配置 (spec drift 1-5)。"""
-    enabled: bool = False
+    enabled: bool = True
     data_dir: str = ".flow/drift"
-    min_interval_hours: float = 1.0
-    max_steps: int = 10
+    min_interval_hours: float = 24.0
+    max_steps: int = 50
 
 
 # ── 通道 ──
 
 class ChannelsSettings(BaseModel):
+    # Web 控制台
+    dashboard_enabled: bool = False
+    dashboard_host: str = "127.0.0.1"
+    dashboard_port: int = 9901
     # HTTP API（Web 页面后端）
     http_enabled: bool = False
     http_host: str = "127.0.0.1"
@@ -133,14 +146,14 @@ class ChannelsSettings(BaseModel):
 # ── 后台任务 ──
 
 class JobsSettings(BaseModel):
-    max_async_queue: int = 64
+    max_async_queue: int = 10
     timeout_seconds: float = 30.0
 
 
 # ── 子代理 ──
 
 class SubagentSettings(BaseModel):
-    max_concurrency: int = 2
+    max_concurrency: int = 3
     tasks_file: str = ".flow/sessions/subagent_tasks.jsonl"
 
 
@@ -188,6 +201,7 @@ class Settings(BaseModel):
     subagent: SubagentSettings = Field(default_factory=SubagentSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     prompt_budget: PromptBudgetSettings = Field(default_factory=PromptBudgetSettings)
     delegation_policy: DelegationPolicySettings = Field(default_factory=DelegationPolicySettings)
 

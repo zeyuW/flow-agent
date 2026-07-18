@@ -35,6 +35,7 @@ def build_proactive_runtime(
     chat_id: str = "",
     llm_client=None,
     memory_engine=None,
+    markdown_store=None,
     session_manager=None,
     outbound_port=None,
     event_bus=None,
@@ -78,7 +79,11 @@ def build_proactive_runtime(
         local_sources=local_sources,
     )
     state = ProactiveStateStore(state_path)
-    judge = JudgeLoop(llm_client=llm_client, memory_engine=memory_engine)
+    judge = JudgeLoop(
+        llm_client=llm_client,
+        memory_engine=memory_engine,
+        markdown_store=markdown_store,
+    )
     trace_recorder = TraceRecorder(Path(trace_path)) if trace_path else None
     any_action = AnyActionGate(
         max_per_day=max_per_day,

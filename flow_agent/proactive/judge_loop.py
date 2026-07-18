@@ -2,7 +2,9 @@
 
 import json
 import logging
+from typing import Any
 
+from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.proactive.models import DataItem, GatewayResult, JudgeResult
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,7 @@ _JUDGE_SYSTEM = """你是一个主动内容评估器。你接收候选项目并�
 
 规则:
 - 根据用户偏好和最近上下文评估每个项目。
+- 稳定用户画像和近期上下文只用于筛选、排序和判断打扰时机，不得据此编造候选内容之外的事实。
 - 保持主动性：如果项目包含重要信息、紧急警报、安全警告或时间敏感更新，将其标记为有趣。
 - 安全警报、紧急系统消息和关键更新应始终标记为有趣。
 - 如果有任何有趣的项目，调用 message_push 然后 finish_turn("reply")。
@@ -39,9 +42,16 @@ TOOL_SCHEMAS = [
 class JudgeLoop:
     """LLM 工具调用循环，用于主动内容评估。"""
 
-    def __init__(self, llm_client, memory_engine=None, max_steps: int = 12) -> None:
+    def __init__(
+        self,
+        llm_client,
+        memory_engine=None,
+        markdown_store: MarkdownStore | None = None,
+        max_steps: int = 12,
+    ) -> None:
         self._llm = llm_client
         self._memory = memory_engine
+        self._markdown = markdown_store
         self._max_steps = max_steps
 
     async def evaluate(self, gateway: GatewayResult, chat_id: str = "") -> JudgeResult:
@@ -50,7 +60,7 @@ class JudgeLoop:
         if not items:
             return JudgeResult(decision="skip")
 
-        # Build context
+        # 候选条目保持精简，正文按需通过工具获取。
         item_list = "\n".join(
             f"- [{i}][{it.source}] {it.title}: {it.summary[:120]}"
             for i, it in enumerate(items)
@@ -59,13 +69,27 @@ class JudgeLoop:
         
         messages = [
             {"role": "system", "content": _JUDGE_SYSTEM},
-            {"role": "user", "content": f"Evaluate these items:\n\n{item_list}"},
         ]
+        memory_context = self._build_memory_context()
+        if memory_context:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "以下是主动与被动链路共享的用户记忆上下文。"
+                    "仅用于判断兴趣、禁忌、规则和是否适合打扰：\n\n"
+                    f"{memory_context}"
+                ),
+            })
+        messages.append({
+            "role": "user",
+            "content": f"Evaluate these items:\n\n{item_list}",
+        })
 
         interesting: list[str] = []
         discarded: list[str] = []
         draft_message = ""
-        decision = "skip"
+        decision = ""
+        finished = False
 
         for step in range(self._max_steps):
             logger.info(f"Judge step {step+1}/{self._max_steps}")
@@ -85,40 +109,41 @@ class JudgeLoop:
                 decision = "skip"
                 break
 
+            tool_results: list[tuple[Any, str]] = []
+            requested_decision = ""
             for tc in response.tool_calls:
                 logger.info(f"Tool call: {tc.name}, args: {tc.arguments}")
                 result_text = self._dispatch_tool(tc, items, interesting, discarded, draft_message)
+                tool_results.append((tc, result_text))
                 if tc.name == "message_push":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
                     draft_message = args.get("text", "")
                     logger.info(f"Draft message staged: {draft_message[:100]}...")
-                    # 如果调用了 message_push，强制决策为 reply（优先级最高）
-                    decision = "reply"
                 elif tc.name == "finish_turn":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
-                    # 只有在还没有草稿消息时才使用 finish_turn 的决策
-                    if not draft_message:
-                        decision = args.get("decision", "skip")
-                    else:
-                        # 如果已经有草稿消息，强制为 reply
-                        decision = "reply"
-                    logger.info(f"Judge decision: {decision}")
-                    break
+                    requested_decision = args.get("decision", "skip")
 
             messages.append({"role": "assistant", "content": response.content, "tool_calls": [
                 {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments if isinstance(tc.arguments, dict) else {})}}
                 for tc in response.tool_calls
             ]})
-            for tc in response.tool_calls:
-                messages.append({"role": "tool", "tool_call_id": tc.id, "content": str(tc.name)})
+            for tc, result_text in tool_results:
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result_text,
+                })
 
-            # 如果有有趣项目但没有草稿消息，继续循环
-            if interesting and not draft_message and decision != "reply":
-                logger.info("Items marked interesting but no draft message yet, continuing loop")
-                continue
-                
-            if decision in ("reply", "skip"):
+            if requested_decision:
+                decision = "reply" if draft_message else requested_decision
+                finished = True
+                logger.info(f"Judge decision: {decision}")
+
+            if finished:
                 break
+
+        if not decision:
+            decision = "reply" if draft_message else "skip"
 
         # 强制分类未分类的项目
         classified = set(interesting) | set(discarded)
@@ -126,7 +151,8 @@ class JudgeLoop:
         for it in unclassified:
             discarded.append(it.item_id)
 
-        cited = [items[int(i)].item_id for i in interesting if i.isdigit() and int(i) < len(items)]
+        cited = _resolve_item_ids(interesting, items)
+        discarded_ids = _resolve_item_ids(discarded, items)
 
         logger.info(f"Judge final decision: {decision}, message: {draft_message[:100] if draft_message else 'none'}")
         
@@ -134,8 +160,18 @@ class JudgeLoop:
             decision=decision,
             message=draft_message,
             cited_item_ids=cited,
-            discarded_ids=discarded,
+            discarded_ids=discarded_ids,
         )
+
+    def _build_memory_context(self) -> str:
+        """读取与被动链路相同的稳定档案和近期压缩上下文。"""
+        if self._markdown is None:
+            return ""
+        try:
+            return self._markdown.render_prompt_memory()
+        except Exception:
+            logger.exception("主动评估记忆上下文构建失败")
+            return ""
 
     def _dispatch_tool(self, tc, items, interesting, discarded, draft) -> str:
         args = tc.arguments if isinstance(tc.arguments, dict) else {}
@@ -158,3 +194,18 @@ class JudgeLoop:
         elif tc.name == "finish_turn":
             return "done"
         return ""
+
+
+def _resolve_item_ids(references: list[str], items: list[DataItem]) -> list[str]:
+    """把模型使用的索引或真实标识统一转换为数据源条目标识。"""
+    known_ids = {item.item_id for item in items}
+    resolved: list[str] = []
+    for reference in references:
+        item_id = ""
+        if reference in known_ids:
+            item_id = reference
+        elif reference.isdigit() and int(reference) < len(items):
+            item_id = items[int(reference)].item_id
+        if item_id and item_id not in resolved:
+            resolved.append(item_id)
+    return resolved

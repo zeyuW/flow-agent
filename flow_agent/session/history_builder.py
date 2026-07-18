@@ -1,12 +1,6 @@
-"""History rebuild: convert internal message format to OpenAI-compatible messages (spec 3).
+"""历史重建：把内部消息转换为 OpenAI 兼容格式（规范 3）。
 
-Implements:
-- 3a: get_history() with start_index / max_messages
-- 3b: Boundary alignment to user/proactive messages
-- 3c: Inline base64 images, file path references
-- 3d: Tool chain expansion (assistant tool_calls + tool messages)
-- 3e: Proactive message formatting as [active push]
-- 3f: Tool result truncation at 10000 chars
+包含游标窗口、边界对齐、媒体重建、工具链展开、主动消息格式化和结果截断。
 """
 
 import base64
@@ -54,7 +48,10 @@ def get_history(
     else:
         start = max(0, total - max_messages)
 
-    # spec 3b: Boundary alignment — back up to nearest user or proactive assistant
+    if start >= total:
+        return []
+
+    # 从窗口起点向前对齐到最近的用户消息或主动助手消息。
     if start > 0:
         original_start = start
         while (

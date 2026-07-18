@@ -171,7 +171,7 @@ class OpenAILLMClient:
             return LLMResult(content="发生未知错误，请稍后重试。")
 
         full_content = ""
-        raw_tool_calls: list[Any] = []
+        tool_call_parts: dict[int, dict[str, str]] = {}
         
         try:
             for chunk in response:
@@ -181,21 +181,51 @@ class OpenAILLMClient:
                     if on_delta:
                         on_delta(delta)
                 
-                # 处理工具调用（流式模式下工具调用比较复杂，暂时简化处理）
+                # 工具参数会被拆成多个增量片段，需要按 index 重新组装。
                 if chunk.choices and chunk.choices[0].delta.tool_calls:
-                    # 流式模式下工具调用处理较复杂，这里简化处理
-                    pass
+                    for tool_call in chunk.choices[0].delta.tool_calls:
+                        index = int(getattr(tool_call, "index", 0) or 0)
+                        part = tool_call_parts.setdefault(
+                            index,
+                            {"id": "", "name": "", "arguments": ""},
+                        )
+                        call_id = getattr(tool_call, "id", None)
+                        if call_id:
+                            part["id"] = str(call_id)
+                        function = getattr(tool_call, "function", None)
+                        if function is None:
+                            continue
+                        name = getattr(function, "name", None)
+                        if name:
+                            part["name"] = str(name)
+                        arguments = getattr(function, "arguments", None)
+                        if arguments:
+                            part["arguments"] += str(arguments)
                     
         except Exception as e:
             logger.exception("Error during streaming")
             # 如果流式失败，回退到非流式
             return self.generate(messages, tools)
         
-        # 如果没有工具调用，直接返回内容
-        if not raw_tool_calls:
+        parsed_tool_calls: list[LLMToolCall] = []
+        for index in sorted(tool_call_parts):
+            part = tool_call_parts[index]
+            if not part["name"]:
+                continue
+            arguments_json = part["arguments"] or "{}"
+            parsed_tool_calls.append(LLMToolCall(
+                id=part["id"] or f"stream_call_{index}",
+                name=part["name"],
+                arguments_json=arguments_json,
+                arguments=self._parse_tool_arguments(arguments_json),
+            ))
+
+        if parsed_tool_calls:
+            return LLMResult(content=full_content, tool_calls=parsed_tool_calls)
+        if full_content.strip():
             return LLMResult(content=full_content, tool_calls=None)
-        
-        # 有工具调用的情况需要特殊处理，暂时回退到非流式
+
+        logger.warning("流式模型返回空内容，回退到非流式请求")
         return self.generate(messages, tools)
 
     def _parse_tool_arguments(self, arguments_json: str) -> dict[str, str]:

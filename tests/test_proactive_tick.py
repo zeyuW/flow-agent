@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from flow_agent.llm.client import LLMResult, LLMToolCall
+from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.proactive.gate import ProactiveStateStore, AnyActionGate, check_gate
 from flow_agent.proactive.models import (
     AgentTick, GateResult, GatewayResult, DataItem,
@@ -147,3 +149,89 @@ def test_state_store_maintains_counts():
     assert store.daily_count == 1
     store.mark_sent("k2")
     assert store.daily_count == 2
+
+
+def test_judge_injects_shared_markdown_memory(tmp_path: Path):
+    markdown = MarkdownStore(tmp_path / "memory")
+    markdown.initialize()
+    markdown.append_memory_item("preference", "用户不喜欢悬疑压抑风格")
+    markdown.update_recent_compression("- 用户最近在挑选轻松的游戏")
+
+    class CapturingLLM:
+        def __init__(self):
+            self.messages = []
+
+        def generate(self, messages, tools=None):
+            self.messages = messages
+            return LLMResult(content="", tool_calls=[])
+
+    llm = CapturingLLM()
+    judge = JudgeLoop(llm_client=llm, markdown_store=markdown, max_steps=1)
+    gateway = GatewayResult(content=[
+        DataItem(source="feed", item_id="game-1", title="新游戏", summary="一款新作"),
+    ])
+
+    import asyncio
+    asyncio.run(judge.evaluate(gateway))
+
+    rendered = "\n".join(str(message.get("content", "")) for message in llm.messages)
+    assert "用户不喜欢悬疑压抑风格" in rendered
+    assert "用户最近在挑选轻松的游戏" in rendered
+    assert "待归档用户画像" not in rendered
+
+
+def test_judge_returns_recall_result_to_model():
+    class StubMemory:
+        def retrieve_for_prompt(self, query):
+            assert query == "用户对 Rust 的兴趣"
+            return "用户长期关注 Rust"
+
+    class SequencedLLM:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, messages, tools=None):
+            self.calls.append(messages)
+            if len(self.calls) == 1:
+                return LLMResult(content="", tool_calls=[LLMToolCall(
+                    id="recall-1",
+                    name="recall_memory",
+                    arguments_json='{"query":"用户对 Rust 的兴趣"}',
+                    arguments={"query": "用户对 Rust 的兴趣"},
+                )])
+            tool_messages = [message for message in messages if message.get("role") == "tool"]
+            assert tool_messages[-1]["content"] == "用户长期关注 Rust"
+            return LLMResult(content="", tool_calls=[
+                LLMToolCall(
+                    id="mark-1",
+                    name="mark_interesting",
+                    arguments_json='{"item_id":"rust-1","reason":"匹配长期兴趣"}',
+                    arguments={"item_id": "rust-1", "reason": "匹配长期兴趣"},
+                ),
+                LLMToolCall(
+                    id="push-1",
+                    name="message_push",
+                    arguments_json='{"text":"Rust 有一条值得关注的新动态。"}',
+                    arguments={"text": "Rust 有一条值得关注的新动态。"},
+                ),
+                LLMToolCall(
+                    id="finish-1",
+                    name="finish_turn",
+                    arguments_json='{"decision":"reply"}',
+                    arguments={"decision": "reply"},
+                ),
+            ])
+
+    llm = SequencedLLM()
+    judge = JudgeLoop(llm_client=llm, memory_engine=StubMemory(), max_steps=3)
+    gateway = GatewayResult(content=[
+        DataItem(source="feed", item_id="rust-1", title="Rust 更新", summary="工具链更新"),
+    ])
+
+    import asyncio
+    result = asyncio.run(judge.evaluate(gateway))
+
+    assert len(llm.calls) == 2
+    assert result.decision == "reply"
+    assert result.message == "Rust 有一条值得关注的新动态。"
+    assert result.cited_item_ids == ["rust-1"]

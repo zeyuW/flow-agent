@@ -1,9 +1,9 @@
 from pathlib import Path
+from types import SimpleNamespace
 
-from flow_agent.memory.maintenance import ConversationConsolidator
+from flow_agent.memory.maintenance import ConversationConsolidator, MemoryOptimizer
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.memory.memorizer import Memorizer
-from flow_agent.memory.optimizer import MemoryOptimizer
 from flow_agent.memory.vector_store import MemoryStore
 from flow_agent.session.session_manager import SessionManager
 from flow_agent.session.session_store import SessionStore
@@ -104,3 +104,39 @@ def test_markdown_prompt_memory_excludes_pending_and_recent_turns(tmp_path: Path
     assert "继续确认归档策略" in prompt_memory
     assert "用户喜欢中文回复" not in prompt_memory
     assert "这是一条临时消息" not in prompt_memory
+
+
+def test_consolidation_preserves_pending_tag_semantics_in_vectors(tmp_path: Path):
+    sessions, markdown, vectors, memorizer = _build_components(tmp_path)
+    sessions.append_message("chat-1", "user", "请更正我的账号和健康信息。")
+    sessions.append_message("chat-1", "assistant", "好的。")
+
+    class TaggedLLM:
+        def generate(self, messages):
+            prompt = str(messages[0]["content"])
+            if "history_entries" in prompt:
+                return SimpleNamespace(content='''{
+                    "history_entries": [],
+                    "pending_items": [
+                        {"tag": "key_info", "content": "用户账号是 roco"},
+                        {"tag": "health_long_term", "content": "用户有长期偏头痛"},
+                        {"tag": "correction", "content": "用户已经毕业，不是学生"}
+                    ]
+                }''')
+            return SimpleNamespace(content='''{
+                "compression": "- 用户正在更正长期资料",
+                "ongoing_threads": "- 继续核对资料"
+            }''')
+
+    consolidator = ConversationConsolidator(
+        session_manager=sessions,
+        markdown_store=markdown,
+        memorizer=memorizer,
+        llm_client=TaggedLLM(),
+        min_new_messages=2,
+    )
+
+    result = consolidator.on_turn_committed("chat-1")
+
+    assert result.vector_count == 3
+    assert {item.memory_type for item in vectors.list_active()} == {"fact"}

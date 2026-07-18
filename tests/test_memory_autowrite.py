@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
 from flow_agent.core.phase_module import TurnFlow
 from flow_agent.guard.guards import ToolGuard
+from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.memory.memorizer import Memorizer
@@ -228,6 +229,105 @@ def test_streaming_pipeline_reuses_rendered_memory_messages():
 
     assert result.final_output == "完成"
     assert stream_client.messages == flow.messages
+
+
+def test_streaming_tool_call_continues_in_tool_loop():
+    class StreamClient:
+        def generate_stream(self, messages, tools, on_delta):
+            return LLMResult(content="", tool_calls=[LLMToolCall(
+                id="call-1",
+                name="lookup",
+                arguments_json='{"query":"状态"}',
+                arguments={"query": "状态"},
+            )])
+
+    class Agent:
+        def __init__(self) -> None:
+            self.llm_client = StreamClient()
+            self.generate_calls = 0
+
+        def generate_from_messages(self, messages, tools=None):
+            self.generate_calls += 1
+            assert messages[-1]["role"] == "tool"
+            assert "查询完成" in messages[-1]["content"]
+            return LLMResult(content="最终回复", tool_calls=None)
+
+    class Registry:
+        def execute(self, tool_name, tool_input):
+            assert tool_name == "lookup"
+            assert tool_input == {"query": "状态"}
+            return SimpleNamespace(ok=True, content="查询完成")
+
+    agent = Agent()
+    pipeline = PassiveTurnPipeline(
+        agent=agent,
+        tool_registry=Registry(),
+        event_bus=SimpleNamespace(publish=lambda _event: None),
+        enable_thinking=True,
+    )
+    flow = TurnFlow(
+        user_input="查询状态",
+        session_id="s1",
+        channel="telegram",
+        inbound_metadata={"telegram_chat_id": "42"},
+        trace_id="trace-tool",
+    )
+    flow.messages = [{"role": "user", "content": "查询状态"}]
+    flow.tools = [{"type": "function", "function": {"name": "lookup"}}]
+
+    result = pipeline._reasoner(flow)
+
+    assert result.final_output == "最终回复"
+    assert agent.generate_calls == 1
+
+
+def test_after_turn_replaces_empty_model_output():
+    committed: list[tuple[str, str]] = []
+    sent: list[object] = []
+    agent = SimpleNamespace(
+        commit_turn=lambda user_input, assistant_output: committed.append(
+            (user_input, assistant_output)
+        ),
+    )
+    pipeline = PassiveTurnPipeline(
+        agent=agent,
+        tool_registry=ToolRegistry(),
+        outbound_port=SimpleNamespace(send=sent.append),
+    )
+    flow = TurnFlow(
+        user_input="你好",
+        session_id="s1",
+        channel="telegram",
+        trace_id="trace-empty",
+    )
+    flow.final_output = ""
+
+    pipeline._after_turn(flow)
+
+    assert flow.final_output == "抱歉，本轮没有生成有效回复，请再试一次。"
+    assert committed == [("你好", flow.final_output)]
+    assert sent[0].text == flow.final_output
+
+
+def test_error_reply_keeps_telegram_routing_metadata():
+    sent: list[object] = []
+    pipeline = PassiveTurnPipeline(
+        agent=SimpleNamespace(),
+        tool_registry=ToolRegistry(),
+        outbound_port=SimpleNamespace(send=sent.append),
+    )
+    flow = TurnFlow(
+        user_input="你好",
+        session_id="s1",
+        channel="telegram",
+        inbound_metadata={"telegram_chat_id": "42"},
+        trace_id="trace-error",
+    )
+
+    pipeline._send_error_reply(flow, IndexError("测试错误"))
+
+    assert sent[0].metadata["telegram_chat_id"] == "42"
+    assert sent[0].metadata["error"] is True
 
 
 def test_profile_query_can_find_preference_without_profile_type_filter(tmp_path: Path):

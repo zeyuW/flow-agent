@@ -1,16 +1,5 @@
-from dataclasses import dataclass
-from flow_agent.config.settings import ModelSettings, ProviderSettings
+from flow_agent.config.settings import EmbeddingSettings, ModelSettings, ProviderSettings
 from flow_agent.config.source_values import ConfigValues
-
-
-@dataclass
-class EmbeddingSettings:
-    """Embedding 模型配置。"""
-    provider: str
-    model: str
-    api_key: str
-    base_url: str
-
 
 def build_llm_model_settings(values: ConfigValues) -> ModelSettings:
     """构建 LLM 模型配置：仅从 config.toml 读取，不再使用环境变量。"""
@@ -30,7 +19,7 @@ def build_llm_model_settings(values: ConfigValues) -> ModelSettings:
         ),
         enable_thinking=values.get_bool(
             ("llm", "main", "enable_thinking"),
-            False,
+            True,
         ),
     )
 
@@ -45,8 +34,8 @@ def build_embedding_settings(values: ConfigValues) -> EmbeddingSettings:
     return EmbeddingSettings(
         provider=provider,
         model=model,
-        api_key=api_key,
-        base_url=base_url,
+        api_key=api_key or None,
+        base_url=base_url or None,
     )
 
 

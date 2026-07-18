@@ -286,10 +286,15 @@ class PassiveTurnPipeline:
                         tools=flow.tools,
                         on_delta=on_delta,
                     )
-                    
-                    # 更新 flow 的结果
-                    flow.final_output = result.content
-                    return flow
+
+                    if getattr(result, "tool_calls", None):
+                        # 流式首轮只完成工具选择，后续沿用同一个工具循环继续推理。
+                        return self._run_tool_loop(flow, initial_result=result)
+                    content = str(getattr(result, "content", "") or "")
+                    if content.strip():
+                        flow.final_output = content
+                        return flow
+                    logger.warning("流式推理返回空内容，改用普通工具循环")
         
         # 非思考模式或流式失败，使用正常流程
         return self._run_tool_loop(flow)
@@ -311,6 +316,9 @@ class PassiveTurnPipeline:
         - 如果先发送后广播，发送失败会导致状态不一致
         """
         logger.info("after_turn: final_output=%s", flow.final_output[:100] if flow.final_output else "EMPTY")
+        if not flow.final_output.strip():
+            logger.error("模型未生成有效回复，使用空回复兜底文案: trace=%s", flow.trace_id)
+            flow.final_output = "抱歉，本轮没有生成有效回复，请再试一次。"
         # 写入当前会话历史。
         self.agent.commit_turn(
             user_input=flow.user_input,
@@ -402,11 +410,17 @@ class PassiveTurnPipeline:
         """发送错误回复。"""
         if self.outbound_port is None:
             return
+        metadata: dict[str, object] = {
+            "trace_id": flow.trace_id,
+            "error": True,
+        }
+        if flow.inbound_metadata:
+            metadata.update(flow.inbound_metadata)
         dispatch = OutboundDispatch(
             channel=flow.channel,
             session_id=flow.session_id,
             text=f"处理消息时出错: {exc}",
-            metadata={"trace_id": flow.trace_id, "error": True},
+            metadata=metadata,
         )
         try:
             self.outbound_port.send(dispatch)
@@ -415,14 +429,22 @@ class PassiveTurnPipeline:
 
     # ── 工具调用循环 ────────────────────────────────────────
 
-    def _run_tool_loop(self, flow: TurnFlow) -> TurnFlow:
+    def _run_tool_loop(
+        self,
+        flow: TurnFlow,
+        initial_result=None,
+    ) -> TurnFlow:
+        """执行工具循环，并可复用流式首轮已经生成的工具调用。"""
         current_messages = list(flow.messages)
         loop_started = time.perf_counter()
         for step in range(self.max_tool_steps):
-            result = self.agent.generate_from_messages(
-                current_messages,
-                tools=flow.tools if flow.tools else None,
-            )
+            if step == 0 and initial_result is not None:
+                result = initial_result
+            else:
+                result = self.agent.generate_from_messages(
+                    current_messages,
+                    tools=flow.tools if flow.tools else None,
+                )
             if not result.tool_calls:
                 flow.final_output = result.content or ""
                 self._record_event({

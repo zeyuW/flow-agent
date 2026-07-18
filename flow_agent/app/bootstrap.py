@@ -21,8 +21,11 @@ from flow_agent.session.session_manager import SessionManager
 from flow_agent.tools.undo import UndoTool
 from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_events
 from flow_agent.memory.memory_engine import MemoryEngine
-from flow_agent.memory.maintenance import ConversationConsolidator
-from flow_agent.memory.optimizer import MemoryOptimizer, MemoryOptimizerLoop
+from flow_agent.memory.maintenance import (
+    ConversationConsolidator,
+    MemoryOptimizer,
+    MemoryOptimizerLoop,
+)
 from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
@@ -233,8 +236,9 @@ def create_app_runtime():
         memory_dir=WORKSPACE_LAYOUT.memory_dir,
         vector_db_path=WORKSPACE_LAYOUT.memory_vectors_db,
         embedding_cache_path=WORKSPACE_LAYOUT.embedding_cache_file,
-        api_key=cfg.api_key,
-        base_url=cfg.base_url,
+        api_key=cfg.embedding.api_key or cfg.api_key,
+        base_url=cfg.embedding.base_url or cfg.base_url,
+        embedding_model=cfg.embedding.model,
         llm_client=llm_client,
         llm_model=cfg.model.model,
     )
@@ -306,6 +310,7 @@ def create_app_runtime():
                 base_url_override=cfg.provider.fast_base_url,
             ),
             memory_engine=memory_runtime.engine,
+            markdown_store=memory_runtime.markdown_store,
             session_manager=session_manager,
             outbound_port=message_bus.outbound_port,
             event_bus=event_bus,
