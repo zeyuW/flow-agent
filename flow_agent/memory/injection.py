@@ -1,7 +1,7 @@
 """记忆提示词注入块构建器。
 
 实现 spec 3f：将检索结果格式化为结构化的提示词注入块，
-包含三个部分：强制约束 (procedures)、流程规范 (preferences)、相关历史 (events)。
+包含四个部分：强制约束、用户偏好、待跟进需求与任务、相关历史。
 """
 
 from flow_agent.memory.memory_retriever import RetrievalHit
@@ -16,6 +16,7 @@ def format_injection_block(
     分组策略：
     - procedure 类型 → 强制约束（最高优先级）
     - preference 类型 → 流程规范
+    - need / task 类型 → 待跟进需求与任务
     - event / fact 类型 → 相关历史
 
     Args:
@@ -30,6 +31,7 @@ def format_injection_block(
 
     procedures: list[str] = []
     preferences: list[str] = []
+    pending_items: list[str] = []
     history_items: list[str] = []
 
     for hit in hits:
@@ -41,23 +43,27 @@ def format_injection_block(
             procedures.append(summary)
         elif item.memory_type == "preference":
             preferences.append(summary)
+        elif item.memory_type in {"need", "task"}:
+            pending_items.append(summary)
         else:
-            # event, fact, 以及未分类的
+            # event、fact 以及未分类的记忆放入相关历史。
             history_items.append(summary)
 
     sections: list[tuple[str, str, list[str]]] = [
         ("[强制约束 - 必须执行]", "procedures", procedures),
         ("[流程规范 - 用户偏好与规则]", "preferences", preferences),
+        ("[待跟进 - 用户需求与任务]", "pending", pending_items),
         ("[相关历史 - 过往对话事件]", "history", history_items),
     ]
 
     lines: list[str] = []
 
-    # 预算分配：procedures 40%, preferences 30%, history 30%
+    # 预算分配：约束优先，其次是偏好、待跟进事项和相关历史。
     budgets = {
-        "procedures": int(max_chars * 0.40),
-        "preferences": int(max_chars * 0.30),
-        "history": int(max_chars * 0.30),
+        "procedures": int(max_chars * 0.35),
+        "preferences": int(max_chars * 0.25),
+        "pending": int(max_chars * 0.20),
+        "history": int(max_chars * 0.20),
     }
 
     for header, key, items in sections:

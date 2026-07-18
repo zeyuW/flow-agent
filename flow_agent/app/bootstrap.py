@@ -11,29 +11,23 @@ from flow_agent.tools.mcp_manage import McpAddTool, McpRemoveTool, McpListTool
 from flow_agent.core.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.context import ConversationContext
-from flow_agent.core.orchestrator import Orchestrator
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient
 from flow_agent.llm.assembler import PromptAssembler, PromptBudget
 from flow_agent.llm.router import LLMRouter
 from flow_agent.behavior.persona import PersonaProfile, PersonaResolver
-from flow_agent.memory.organizer import SimpleMemoryOrganizer
-from flow_agent.memory.consolidation import MemoryConsolidator
-from flow_agent.memory.retriever import KeywordMemoryRetriever
-from flow_agent.memory.store import SQLiteMessageStore
 from flow_agent.session.session_store import SessionStore
 from flow_agent.session.session_manager import SessionManager
 from flow_agent.tools.undo import UndoTool
 from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_events
 from flow_agent.memory.memory_engine import MemoryEngine
+from flow_agent.memory.maintenance import ConversationConsolidator
+from flow_agent.memory.optimizer import MemoryOptimizer, MemoryOptimizerLoop
 from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
-from flow_agent.background.jobs import JobSpec
-from flow_agent.background.consolidation_worker import ConsolidationWorker
 from flow_agent.infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
-from flow_agent.infra.persistence import PersistenceManager
 from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.runtime.workspace import init_workspace
@@ -44,7 +38,6 @@ from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.spawn import SpawnTool
-from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.plugins.plugin_loader import PluginManager
 from flow_agent.proactive.sources import LocalFileSource, LocalTaskSource, LocalTodoSource, RSSFeedSource, WebSnapshotSource
@@ -65,29 +58,11 @@ def create_core_components():
     """
     init_workspace(PROJECT_ROOT)
     cfg = settings.get()
-    PersistenceManager(Path(cfg.storage.memory_db_path)).initialize()
 
-    # 消息存储和上下文
-    message_store = SQLiteMessageStore(Path(cfg.storage.memory_db_path))
+    # 会话上下文
     session_store = SessionStore(Path(cfg.storage.memory_db_path))
     session_manager = SessionManager(session_store)
-    context = ConversationContext(db_path=Path(cfg.storage.memory_db_path))
-
-    # 记忆检索器
-    retriever = (
-        KeywordMemoryRetriever(store=message_store) if cfg.retrieval.enabled else None
-    )
-
-    # 记忆整理器
-    organizer = (
-        SimpleMemoryOrganizer(
-            store=message_store,
-            max_messages=cfg.memory_policy.max_messages,
-            dedupe=cfg.memory_policy.dedupe,
-        )
-        if cfg.memory_policy.enabled
-        else None
-    )
+    context = ConversationContext(session_manager=session_manager)
 
     # 事件记录器
     recorder = (
@@ -134,7 +109,7 @@ def create_core_components():
     tool_registry = ToolRegistry()
     tool_registry.set_guard(
         ToolGuard(
-            whitelist={"read_file"}
+            whitelist={"read_file", "recall_memory", "memorize"}
             if cfg.tooling.enabled
             else None
         )
@@ -166,26 +141,10 @@ def create_core_components():
         persona_resolver=persona_resolver,
     )
 
-    # Backward-compatible Orchestrator (for proactive and existing code)
-    orchestrator = Orchestrator(
-        agent=agent,
-        tool_registry=tool_registry,
-        max_tool_steps=cfg.tooling.max_tool_steps,
-        retriever=retriever,
-        retrieval_max_items=cfg.retrieval.max_items,
-        recorder=recorder,
-        organizer=organizer,
-        tool_selection_max=cfg.tooling.tool_selection_max,
-    )
-
     return {
         "agent": agent,
         "tool_registry": tool_registry,
-        "retriever": retriever,
-        "organizer": organizer,
         "recorder": recorder,
-        "orchestrator": orchestrator,
-        "message_store": message_store,
         "session_manager": session_manager,
         "llm_client": llm_client,
         "spawn_tool": spawn_tool if cfg.tooling.enabled else None,
@@ -207,8 +166,8 @@ def create_passive_turn_pipeline(
     tool_registry: ToolRegistry,
     message_bus: MessageBus,
     event_bus: EventBus,
-    retriever=None,
-    organizer=None,
+    memory_engine: MemoryEngine | None = None,
+    markdown_store=None,
     recorder=None,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
@@ -216,21 +175,18 @@ def create_passive_turn_pipeline(
     六个阶段：BeforeTurn → BeforeReasoning → PromptRender → Reasoner → AfterReasoning → AfterTurn
     """
     cfg = settings.get()
-    # 获取 enable_thinking 配置，默认为 False
-    enable_thinking = True  # 临时启用思考模式进行测试
     return PassiveTurnPipeline(
         agent=agent,
         tool_registry=tool_registry,
         message_bus=message_bus,
         event_bus=event_bus,
-        retriever=retriever,
-        retrieval_max_items=cfg.retrieval.max_items if cfg.retrieval.enabled else 0,
+        memory_engine=memory_engine,
+        markdown_store=markdown_store,
         max_tool_steps=cfg.tooling.max_tool_steps,
         recorder=recorder,
-        organizer=organizer,
         delegation_policy=DelegationPolicy(),
         tool_selection_max=cfg.tooling.tool_selection_max,
-        enable_thinking=enable_thinking,
+        enable_thinking=cfg.model.enable_thinking,
     )
 
 
@@ -246,20 +202,13 @@ def create_agent_loop(
     )
 
 
-# 原有 bootstrap 函数保持兼容
-def create_orchestrator() -> Orchestrator:
-    """创建 Orchestrator（保持向后兼容）。"""
-    components = create_core_components()
-    return components["orchestrator"]
-
-
 def create_app_runtime():
     """组装完整应用运行时。
 
     返回:
-        (orchestrator, proactive_loop, background_runtime,
-         subagent_runtime, runtime_service, message_bus, event_bus,
-         agent_loop, pipeline)
+        (proactive_loop, background_runtime, subagent_runtime,
+         runtime_service, message_bus, event_bus, agent_loop, pipeline,
+         tool_registry, memory_runtime, memory_optimizer_loop)
     """
     cfg = settings.get()
     
@@ -269,10 +218,7 @@ def create_app_runtime():
     components = create_core_components()
     agent = components["agent"]
     tool_registry = components["tool_registry"]
-    retriever = components["retriever"]
-    organizer = components["organizer"]
     recorder = components["recorder"]
-    orchestrator = components["orchestrator"]
     session_manager = components["session_manager"]
     llm_client = components["llm_client"]
     spawn_tool = components["spawn_tool"]
@@ -292,8 +238,24 @@ def create_app_runtime():
         llm_client=llm_client,
         llm_model=cfg.model.model,
     )
-    # 绑定记忆事件（TurnCommitted 后自动触发记忆处理）
-    wire_memory_events(memory_runtime, event_bus)
+    consolidator = None
+    if cfg.memory.enabled:
+        consolidator = ConversationConsolidator(
+            session_manager=session_manager,
+            markdown_store=memory_runtime.markdown_store,
+            memorizer=memory_runtime.memorizer,
+            llm_client=llm_client,
+            min_new_messages=cfg.memory.consolidation_min_new_messages,
+            recent_turns_limit=cfg.memory.recent_turns_limit,
+        )
+    wire_memory_events(memory_runtime, event_bus, consolidator=consolidator)
+
+    memory_optimizer_loop = None
+    if cfg.memory.enabled and cfg.memory.optimizer_enabled:
+        memory_optimizer_loop = MemoryOptimizerLoop(
+            MemoryOptimizer(memory_runtime.markdown_store, llm_client=llm_client),
+            interval_seconds=cfg.memory.optimizer_interval_seconds,
+        )
 
     # 创建管道
     pipeline = create_passive_turn_pipeline(
@@ -301,8 +263,8 @@ def create_app_runtime():
         tool_registry=tool_registry,
         message_bus=message_bus,
         event_bus=event_bus,
-        retriever=retriever,
-        organizer=organizer,
+        memory_engine=memory_runtime.engine,
+        markdown_store=memory_runtime.markdown_store,
         recorder=recorder,
     )
 
@@ -312,22 +274,8 @@ def create_app_runtime():
         pipeline=pipeline,
     )
 
-    # ── 以下是原有初始化代码（保持向后兼容） ──
-
-    consolidation_worker = None  # TODO: re-enable when BackgroundSettings is added
-
     background_store = InMemoryJobStore()
     background_registry = InMemoryJobRegistry()
-    # TODO: re-enable when BackgroundSettings is added
-    # if consolidation_worker is not None:
-    #     background_registry.register(
-    #         "memory_consolidation",
-    #         JobSpec(
-    #             name="memory_consolidation",
-    #             run_fn=consolidation_worker.run,
-    #             schedule_interval_hours=cfg.background.consolidation_interval_hours,
-    #         ),
-    #     )
 
     background_runtime = BackgroundRuntime(
         registry=background_registry,
@@ -395,6 +343,7 @@ def create_app_runtime():
             MemorizeTool(
                 memorizer=memory_runtime.memorizer,
                 store=memory_runtime.vector_store,
+                markdown_store=memory_runtime.markdown_store,
             )
         )
     )
@@ -407,11 +356,10 @@ def create_app_runtime():
         llm_client=llm_client,
     )
 
-    # Wire SpawnTool to subagent manager
-    spawn_tool._manager = subagent_runtime.manager
+    if spawn_tool is not None:
+        spawn_tool._manager = subagent_runtime.manager
 
     return (
-        orchestrator,
         proactive_loop,
         background_runtime,
         subagent_runtime,
@@ -422,6 +370,7 @@ def create_app_runtime():
         pipeline,
         tool_registry,
         memory_runtime,
+        memory_optimizer_loop,
     )
 
 
@@ -435,7 +384,7 @@ def create_runtime_service(
     runtime_service.register(
         RuntimeUnit(
             name="turn",
-            health_fn=lambda: RuntimeHealth(name="turn", ok=True, detail="orchestrator ready"),
+            health_fn=lambda: RuntimeHealth(name="turn", ok=True, detail="agent loop ready"),
             snapshot_fn=lambda: RuntimeUnitSnapshot(name="turn", running=True, details={}),
         )
     )

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import shutil
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +16,8 @@ class WorkspaceLayout:
     flow_dir: Path
     data_dir: Path
     memory_dir: Path
+    memory_journal_dir: Path
+    memory_consolidation_db: Path
     skills_dir: Path
     drift_dir: Path
     drift_skills_dir: Path
@@ -66,6 +65,8 @@ def build_layout(root: Path) -> WorkspaceLayout:
         flow_dir=flow,
         data_dir=data,
         memory_dir=memory,
+        memory_journal_dir=memory / "journal",
+        memory_consolidation_db=memory / "consolidation_writes.db",
         skills_dir=flow / "skills",
         drift_dir=drift,
         drift_skills_dir=drift / "skills",
@@ -98,15 +99,11 @@ def build_layout(root: Path) -> WorkspaceLayout:
 
 
 def init_workspace(root: Path) -> WorkspaceLayout:
-    """初始化运行时工作区，并把旧版根层数据安全迁移到分类目录。"""
+    """初始化当前版本的运行时工作区。"""
 
     layout = build_layout(root)
-    previous_version = _read_text(layout.marker_file)
     for folder in _workspace_directories(layout):
         folder.mkdir(parents=True, exist_ok=True)
-
-    if previous_version.strip() not in {WORKSPACE_VERSION}:
-        _migrate_legacy_layout(layout)
 
     for file_path, content in _workspace_files(layout):
         if not file_path.exists():
@@ -128,6 +125,7 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
     return (
         layout.data_dir,
         layout.memory_dir,
+        layout.memory_journal_dir,
         layout.skills_dir,
         layout.drift_skills_dir,
         layout.plugins_dir,
@@ -189,109 +187,11 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
     )
 
 
-def _migrate_legacy_layout(layout: WorkspaceLayout) -> None:
-    """迁移旧版根层文件；目标已有有效内容时不覆盖。"""
-
-    flow = layout.flow_dir
-    _migrate_sqlite(flow / "memory.db", layout.memory_db)
-    _migrate_sqlite(flow / "memory_vectors.db", layout.memory_vectors_db)
-    _merge_json_object(flow / "embedding_cache.json", layout.embedding_cache_file)
-    _merge_json_object(flow / "mcp_servers.json", layout.mcp_servers_file)
-    _merge_jsonl(flow / "trace.jsonl", layout.trace_file)
-    _merge_jsonl(flow / "subagent_tasks.jsonl", layout.subagent_tasks_file)
-
-
-def _migrate_sqlite(source: Path, target: Path) -> None:
-    """使用 SQLite backup 迁移数据库，确保 WAL 中的已提交数据也被复制。"""
-
-    if not source.is_file() or source.stat().st_size == 0:
-        return
-    if target.is_file() and target.stat().st_size > 0:
-        return
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        target.unlink()
-    try:
-        with sqlite3.connect(str(source)) as source_db:
-            with sqlite3.connect(str(target)) as target_db:
-                source_db.backup(target_db)
-    except sqlite3.DatabaseError:
-        shutil.copy2(source, target)
-
-
-def _merge_json_object(source: Path, target: Path) -> None:
-    """合并 JSON 对象，目标文件中的同名键优先。"""
-
-    source_data = _read_json_object(source)
-    if not source_data:
-        return
-    target_data = _read_json_object(target)
-    merged = {**source_data, **target_data}
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        json.dumps(merged, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-
-
-def _merge_jsonl(source: Path, target: Path) -> None:
-    """按完整行去重合并 JSONL，避免重复启动造成重复迁移。"""
-
-    if not source.is_file():
-        return
-    source_lines = [
-        line for line in source.read_text(encoding="utf-8").splitlines() if line
-    ]
-    if not source_lines:
-        return
-    target_lines = (
-        [
-            line
-            for line in target.read_text(encoding="utf-8").splitlines()
-            if line
-        ]
-        if target.is_file()
-        else []
-    )
-    known = set(target_lines)
-    merged = list(target_lines)
-    for line in source_lines:
-        if line not in known:
-            merged.append(line)
-            known.add(line)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("\n".join(merged) + "\n", encoding="utf-8")
-
-
-def _read_json_object(path: Path) -> dict:
-    """读取 JSON 对象，文件不存在或格式错误时返回空对象。"""
-
-    if not path.is_file():
-        return {}
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def _read_text(path: Path) -> str:
-    """读取可选文本文件。"""
-
-    try:
-        return path.read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
 def detect_workspace(start: Path | None = None) -> WorkspaceLayout | None:
     current = (start or Path.cwd()).resolve()
     for path in (current, *current.parents):
         new_marker = path / FLOW_DIR / WORKSPACE_MARKER
         if new_marker.exists():
-            return build_layout(path)
-        legacy_marker = path / WORKSPACE_MARKER
-        if legacy_marker.exists():
             return build_layout(path)
     return None
 

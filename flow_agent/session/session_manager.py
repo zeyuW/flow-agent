@@ -84,6 +84,48 @@ class SessionManager:
         """List all cached session keys."""
         return list(self._cache.keys())
 
+    def append_message(
+        self,
+        session_key: str,
+        role: str,
+        content: str,
+        *,
+        tool_chain: list | None = None,
+        extra: dict | None = None,
+    ) -> dict[str, Any]:
+        """同步写入一条会话消息，供被动回合结束时可靠持久化。"""
+        session = self.get_or_create(session_key)
+        seq = self._store.get_next_seq(session_key)
+        timestamp = datetime.now(timezone.utc).isoformat()
+        message = {
+            "role": role,
+            "content": content,
+            "tool_chain": tool_chain or [],
+            "extra": extra or {},
+            "timestamp": timestamp,
+            "seq": seq,
+            "session_key": session_key,
+        }
+        message["id"] = self._store.insert_message(
+            session_key=session_key,
+            seq=seq,
+            role=role,
+            content=content,
+            tool_chain=message["tool_chain"],
+            extra=message["extra"],
+            ts=timestamp,
+        )
+        session.messages.append(message)
+        session.updated_at = datetime.now(timezone.utc)
+        self._store.upsert_session(
+            key=session.key,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+            last_consolidated=session.last_consolidated,
+            metadata=session.metadata,
+        )
+        return message
+
     # ── Message Persistence (spec 2) ──
 
     def _lock(self, key: str) -> asyncio.Lock:
@@ -137,6 +179,13 @@ class SessionManager:
     async def update_consolidated(self, session: Session, new_cursor: int) -> None:
         """Update last_consolidated cursor and persist (spec 4c)."""
         session.last_consolidated = new_cursor
+        self._store.update_last_consolidated(session.key, new_cursor)
+        self._cache[session.key] = session
+
+    def mark_consolidated(self, session: Session, new_cursor: int) -> None:
+        """同步更新归档游标，供回合后归档流程使用。"""
+        session.last_consolidated = new_cursor
+        session.updated_at = datetime.now(timezone.utc)
         self._store.update_last_consolidated(session.key, new_cursor)
         self._cache[session.key] = session
 

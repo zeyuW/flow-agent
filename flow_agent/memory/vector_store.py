@@ -44,6 +44,24 @@ _LOCAL_TZ = timezone(timedelta(hours=8))
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
+_MEMORY_ITEMS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS memory_items (
+    id TEXT PRIMARY KEY,
+    memory_type TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    embedding TEXT,
+    reinforcement INTEGER NOT NULL DEFAULT 1,
+    emotional_weight INTEGER NOT NULL DEFAULT 0,
+    extra_json TEXT,
+    source_ref TEXT,
+    happened_at TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
 
 @dataclass(slots=True)
 class MemoryItem:
@@ -150,22 +168,7 @@ class MemoryStore:
         
         try:
             # 主表架构
-            self._db.executescript("""
-                CREATE TABLE IF NOT EXISTS memory_items (
-                    id TEXT PRIMARY KEY,
-                    memory_type TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    content_hash TEXT NOT NULL,
-                    embedding TEXT,
-                    reinforcement INTEGER NOT NULL DEFAULT 1,
-                    emotional_weight INTEGER NOT NULL DEFAULT 0,
-                    extra_json TEXT,
-                    source_ref TEXT,
-                    happened_at TEXT,
-                    status TEXT NOT NULL DEFAULT 'active',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
+            self._db.executescript(_MEMORY_ITEMS_TABLE_SQL + """
                 CREATE UNIQUE INDEX IF NOT EXISTS ux_items_hash
                     ON memory_items (content_hash, memory_type);
                 CREATE TABLE IF NOT EXISTS consolidation_events (
@@ -321,7 +324,7 @@ class MemoryStore:
         """
         content_hash = _compute_content_hash(summary, memory_type)
         now = _now_iso()
-        embedding_json = json.dumps(embedding) if embedding else None
+        embedding_payload = json.dumps(embedding) if embedding else None
         extra_json = json.dumps(extra) if extra else None
 
         existing = self._db.execute(
@@ -357,7 +360,7 @@ class MemoryStore:
                (id, memory_type, summary, content_hash, embedding, emotional_weight,
                 extra_json, source_ref, happened_at, created_at, updated_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-            (item_id, memory_type, summary, content_hash, embedding_json, emotional_weight,
+            (item_id, memory_type, summary, content_hash, embedding_payload, emotional_weight,
              extra_json, source_ref, happened_at, now, now),
         )
         item_rowid = cur.lastrowid
@@ -377,28 +380,28 @@ class MemoryStore:
     def _row_to_item(self, row) -> MemoryItem:
         """将数据库行转换为 MemoryItem。"""
         (
-            item_id, memory_type, summary, embedding_json, content_hash,
+            item_id, memory_type, summary, embedding_payload, content_hash,
             reinforcement, emotional_weight, status, source_ref,
             happened_at, extra_json, created_at, updated_at
         ) = row
         
-        embedding = json.loads(embedding_json) if embedding_json else None
+        embedding = json.loads(embedding_payload) if embedding_payload else None
         extra = json.loads(extra_json) if extra_json else {}
         
         return MemoryItem(
-            id=item_id,
+            id=str(item_id),
             memory_type=memory_type,
             summary=summary,
             embedding=embedding,
             content_hash=content_hash,
             reinforcement=reinforcement,
-            emotional_weight=emotional_weight,
+            emotional_weight=int(emotional_weight or 0),
             status=status,
             source_ref=source_ref or "",
             happened_at=happened_at or "",
             extra_json=extra,
-            created_at=created_at,
-            updated_at=updated_at,
+            created_at=str(created_at or ""),
+            updated_at=str(updated_at or ""),
         )
 
     @_synchronized
@@ -649,14 +652,14 @@ class MemoryStore:
                 result = f"reinforced:{row_id}"
             else:
                 item_id = hashlib.md5(f"{chash}{time.time()}".encode()).hexdigest()[:12]
-                embedding_json = json.dumps(embedding) if embedding else None
+                embedding_payload = json.dumps(embedding) if embedding else None
                 extra_json = json.dumps(extra) if extra else None
                 cur = self._db.execute(
                     """INSERT INTO memory_items
                        (id, memory_type, summary, content_hash, embedding, emotional_weight,
                         extra_json, source_ref, happened_at, created_at, updated_at)
                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-                    (item_id, "event", text, chash, embedding_json, emotional_weight,
+                    (item_id, "event", text, chash, embedding_payload, emotional_weight,
                      extra_json, src, happened_at, now, now),
                 )
                 new_item_rowid = cur.lastrowid

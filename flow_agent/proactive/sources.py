@@ -5,7 +5,6 @@ from typing import Protocol
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from flow_agent.memory.store import MessageStore
 from flow_agent.proactive.types import ProactiveCandidate, SourceRecord
 
 
@@ -127,39 +126,6 @@ class LocalTaskSource:
         return records
 
 
-class MemoryFollowUpSource:
-    '''从最近的用户问题中构建跟进记录'''
-
-    def __init__(self, store: MessageStore, session_id: str = "default") -> None:
-        self.store = store
-        self.session_id = session_id
-
-    @property
-    def name(self) -> str:
-        return "memory_followup"
-
-    def fetch_records(self) -> list[SourceRecord]:
-        history = self.store.list_messages(self.session_id)
-        for msg in reversed(history[-10:]):
-            if msg.get("role") != "user":
-                continue
-            content = (msg.get("content") or "").strip()
-            if not content:
-                continue
-            if "?" in content or "？" in content:
-                return [
-                    SourceRecord(
-                        source=self.name,
-                        title="Follow-up question",
-                        content=f"你之前问过：{content}",
-                        summary=content[:120],
-                        dedup_key=f"{self.name}:{content.lower()}",
-                        priority_hint=0.7,
-                    )
-                ]
-        return []
-
-
 class RSSFeedSource:
     '''从本地文件中读取RSS XML feeds'''
 
@@ -234,4 +200,3 @@ class WebSnapshotSource:
                 )
             )
         return records
-

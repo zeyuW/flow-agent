@@ -75,6 +75,16 @@ class MemoryPolicySettings(BaseModel):
     dedupe: bool = True
 
 
+class MemoryMaintenanceSettings(BaseModel):
+    """记忆沉淀与画像归档的运行参数。"""
+
+    enabled: bool = True
+    consolidation_min_new_messages: int = 5
+    recent_turns_limit: int = 8
+    optimizer_enabled: bool = True
+    optimizer_interval_seconds: int = 64800
+
+
 # ── 主动推送 ──
 
 class ProactiveSettings(BaseModel):
@@ -170,6 +180,7 @@ class Settings(BaseModel):
     retrieval: RetrievalSettings
     observe: ObserveSettings = Field(default_factory=ObserveSettings)
     memory_policy: MemoryPolicySettings = Field(default_factory=MemoryPolicySettings)
+    memory: MemoryMaintenanceSettings = Field(default_factory=MemoryMaintenanceSettings)
     proactive: ProactiveSettings = Field(default_factory=ProactiveSettings)
     drift: DriftSettings = Field(default_factory=DriftSettings)
     channels: ChannelsSettings = Field(default_factory=ChannelsSettings)

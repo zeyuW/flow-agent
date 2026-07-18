@@ -79,7 +79,7 @@ def build_memory_runtime(
     vector_store = MemoryStore(db_path=resolved_vector_db)
     logger.info("vector store initialized at %s", resolved_vector_db)
 
-    # Embedder
+    # 向量化器
     embedder = OpenAIEmbedder(
         api_key=api_key,
         base_url=base_url,
@@ -87,7 +87,7 @@ def build_memory_runtime(
         cache_path=embedding_cache_path or (data_dir / "embedding_cache.json"),
     )
 
-    # Memorizer
+    # 记忆写入器
     memorizer = Memorizer(store=vector_store, embedder=embedder)
 
     # 双通道检索器
@@ -100,14 +100,15 @@ def build_memory_runtime(
         retriever=retriever,
     )
 
-    # Supersede 检测器
+    # 失效替换检测器
     supersede_detector = SupersedeDetector(store=vector_store)
 
-    # Post-response 后处理 Worker
+    # 回复后记忆处理器
     post_response_worker = PostResponseMemoryWorker(
         store=vector_store,
         memorizer=memorizer,
         supersede_detector=supersede_detector,
+        markdown_store=markdown_store,
     )
 
     # 可选的高级组件
@@ -155,16 +156,18 @@ def build_memory_runtime(
 def wire_memory_events(
     runtime: MemoryRuntime,
     event_bus,
+    consolidator=None,
 ) -> None:
     """绑定记忆相关事件（spec 1e）。
 
     订阅 TurnCommitted 事件，在对话提交后自动触发：
-    - 记忆后处理（supersede 检测 + 隐式记忆提取）
-    - Markdown 层更新（事件记录 + 近期上下文更新）
+    - 立即生效的规则记忆处理
+    - 近期上下文刷新与对话 consolidation
 
     Args:
         runtime: 记忆运行时实例。
         event_bus: EventBus 实例。
+        consolidator: 可选的回合后对话归档器。
     """
     from flow_agent.messaging.event_bus import EventSubscriber, TurnCommitted
 
@@ -183,7 +186,7 @@ def wire_memory_events(
             assistant_output = event.assistant_output or ""
             tool_trace = event.tool_trace or []
 
-            # 后处理记忆（spec 4a）
+            # 立即生效的规则记忆处理。
             try:
                 result = self.rt.post_response_worker.on_turn_committed(
                     session_id=session_id,
@@ -199,15 +202,17 @@ def wire_memory_events(
             except Exception:
                 logger.exception("post-response memory processing failed")
 
-            # 更新 Markdown 事件记录
-            try:
-                if assistant_output:
-                    summary = assistant_output[:120].replace("\n", " ")
-                    self.rt.markdown_store.append_event(
-                        f"对话回复: {summary}",
+            if consolidator is not None:
+                try:
+                    maintenance_result = consolidator.on_turn_committed(session_id)
+                    logger.debug(
+                        "memory consolidation: consolidated=%s history=%d pending=%d",
+                        maintenance_result.consolidated,
+                        maintenance_result.history_count,
+                        maintenance_result.pending_count,
                     )
-            except Exception:
-                logger.exception("markdown event append failed")
+                except Exception:
+                    logger.exception("memory consolidation failed")
 
     subscriber = MemoryEventSubscriber(runtime)
     event_bus.subscribe(subscriber)

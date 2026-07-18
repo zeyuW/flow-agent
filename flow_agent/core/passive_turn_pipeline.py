@@ -15,14 +15,13 @@ from uuid import uuid4
 from typing import Any
 
 from flow_agent.core.agent import Agent
-from flow_agent.core.context_store import ContextStore
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.phase_module import PhaseModule, TurnFlow
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
-from flow_agent.memory.organizer import MemoryOrganizer
-from flow_agent.memory.retriever import MemoryRetriever
+from flow_agent.memory.memory_engine import MemoryEngine
+from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.messaging.event_bus import EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
@@ -46,11 +45,11 @@ class PassiveTurnPipeline:
         message_bus: MessageBus | None = None,
         event_bus: EventBus | None = None,
         outbound_port: OutboundPort | None = None,
-        retriever: MemoryRetriever | None = None,
+        memory_engine: MemoryEngine | None = None,
+        markdown_store: MarkdownStore | None = None,
         retrieval_max_items: int = 6,
         max_tool_steps: int = 5,
         recorder: TraceRecorder | None = None,
-        organizer: MemoryOrganizer | None = None,
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
         enable_thinking: bool = False,
@@ -63,19 +62,14 @@ class PassiveTurnPipeline:
         self.outbound_port = outbound_port or (
             message_bus.outbound_port if message_bus is not None else None
         )
-        self.retriever = retriever
+        self.memory_engine = memory_engine
+        self.markdown_store = markdown_store
         self.retrieval_max_items = retrieval_max_items
         self.max_tool_steps = max_tool_steps
         self.enable_thinking = enable_thinking
         self.recorder = recorder
-        self.organizer = organizer
         self.delegation_policy = delegation_policy or DelegationPolicy()
         self.tool_selection_max = max(1, tool_selection_max)
-        self.context_store = ContextStore(
-            agent=agent,
-            retriever=retriever,
-            retrieval_max_items=retrieval_max_items,
-        )
         self._phase_modules: list[PhaseModule] = []
 
     def register_phase_module(self, module: PhaseModule) -> None:
@@ -192,10 +186,7 @@ class PassiveTurnPipeline:
         persona_block = self._build_persona_block(proactive=False, channel=flow.channel)
 
         # 构建 memory 块
-        memory_block = self._build_memory_block(flow.session_id)
-
-        # 构建 retrieval 块
-        retrieval_block = self._build_retrieval_block(flow.session_id, flow.user_input)
+        memory_block = self._build_memory_block(flow.session_id, flow.user_input)
 
         # 构建工具说明
         tools = self.tool_registry.list_openai_tools()
@@ -211,7 +202,7 @@ class PassiveTurnPipeline:
             user_input=flow.user_input,
             persona_block=persona_block,
             memory_block=memory_block,
-            retrieval_block=retrieval_block,
+            retrieval_block="",
             tool_instructions=tool_instructions,
         )
         flow.messages = messages
@@ -226,34 +217,42 @@ class PassiveTurnPipeline:
             )
         return ""
 
-    def _build_memory_block(self, session_id: str) -> str:
-        """构建记忆块。"""
-        history = self.agent.context.get_history(session_id)
-        if not history:
-            return ""
-        lines = ["## 近期对话回顾"]
-        for msg in history[-6:]:
-            role = msg.get("role", "unknown")
-            content = str(msg.get("content", ""))[:200]
-            label = "用户" if role == "user" else "助手"
-            lines.append(f"- {label}: {content}")
-        return "\n".join(lines)
+    def _build_memory_block(self, session_id: str, user_input: str = "") -> str:
+        """构建由长期记忆和近期对话组成的提示词记忆块。"""
+        blocks: list[str] = []
 
-    def _build_retrieval_block(self, session_id: str, user_input: str) -> str:
-        """构建检索块。"""
-        if self.retriever is None:
-            return ""
-        try:
-            memories = self.retriever.retrieve(session_id, user_input, max_items=self.retrieval_max_items)
-            if not memories:
-                return ""
-            lines = ["## 相关记忆"]
-            for m in memories:
-                lines.append(f"- {m.content}")
-            return "\n".join(lines)
-        except Exception:
-            logger.exception("retrieval failed")
-            return ""
+        # 稳定档案与压缩上下文先注入，待归档缓冲绝不进入提示词。
+        if self.markdown_store is not None:
+            try:
+                markdown_block = self.markdown_store.render_prompt_memory()
+                if markdown_block:
+                    blocks.append(markdown_block)
+            except Exception:
+                logger.exception("Markdown 记忆提示词构建失败")
+
+        # 长期记忆优先注入，使跨会话的偏好、规则和待办能够影响当前回复。
+        if self.memory_engine is not None and user_input.strip():
+            try:
+                long_term_block = self.memory_engine.retrieve_for_prompt(
+                    user_input,
+                    max_items=self.retrieval_max_items,
+                )
+                if long_term_block:
+                    blocks.append(long_term_block)
+            except Exception:
+                logger.exception("长期记忆检索失败")
+
+        history = self.agent.context.get_history(session_id)
+        if history:
+            lines = ["## 近期对话回顾"]
+            for msg in history[-6:]:
+                role = msg.get("role", "unknown")
+                content = str(msg.get("content", ""))[:200]
+                label = "用户" if role == "user" else "助手"
+                lines.append(f"- {label}: {content}")
+            blocks.append("\n".join(lines))
+
+        return "\n\n".join(blocks)
 
     def _reasoner(self, flow: TurnFlow) -> TurnFlow:
         # 如果启用思考模式，使用流式生成
@@ -281,18 +280,9 @@ class PassiveTurnPipeline:
                 
                 # 使用流式生成（如果有流式方法）
                 if hasattr(self.agent.llm_client, 'generate_stream'):
-                    # 先构建消息
-                    messages = self.agent.build_turn_messages(
-                        user_input=flow.user_input,
-                        persona_block="",
-                        memory_block="",
-                        retrieval_block="",
-                        tool_instructions="",
-                    )
-                    
-                    # 调用流式生成
+                    # 复用提示词渲染阶段的结果，避免流式分支丢失长期记忆和工具说明。
                     result = self.agent.llm_client.generate_stream(
-                        messages=messages,
+                        messages=flow.messages,
                         tools=flow.tools,
                         on_delta=on_delta,
                     )
@@ -321,22 +311,11 @@ class PassiveTurnPipeline:
         - 如果先发送后广播，发送失败会导致状态不一致
         """
         logger.info("after_turn: final_output=%s", flow.final_output[:100] if flow.final_output else "EMPTY")
-        # 记忆持久化
-        self.context_store.commit(
+        # 写入当前会话历史。
+        self.agent.commit_turn(
             user_input=flow.user_input,
             assistant_output=flow.final_output,
         )
-        if self.organizer is not None:
-            try:
-                stats = self.organizer.organize(flow.session_id)
-                self._record_event({
-                    "type": "memory_organize",
-                    "trace_id": flow.trace_id,
-                    "session_id": flow.session_id,
-                    **stats,
-                })
-            except Exception:
-                logger.exception("memory organize failed")
 
         # ① 先广播 TurnCommitted 事件
         self._broadcast_turn_committed(flow)
@@ -469,6 +448,7 @@ class PassiveTurnPipeline:
                     "step": str(step + 1),
                     "tool": tool_call.name,
                     "status": "ok" if tool_result.ok else "failed",
+                    "arguments": tool_call.arguments_json,
                 })
                 current_messages.append({
                     "role": "tool",

@@ -2,7 +2,6 @@
 
 Markdown 层（人类可读）：
 - markdown_store: MEMORY.md / HISTORY.md / RECENT_CONTEXT.md 文件管理
-- consolidation: 对话归档压缩
 
 向量引擎层（语义检索）：
 - vector_store: SQLite 向量存储 + content_hash 去重 + supersede

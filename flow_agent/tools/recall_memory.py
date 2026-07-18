@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flow_agent.memory.memory_engine import MemoryEngine, MemoryQuery
-from flow_agent.tools.base import Tool
+from flow_agent.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class RecallMemoryTool:
         return (
             "从长期记忆库中检索相关记忆。用于查询用户的偏好、规则、历史事件等信息。"
             "参数: query (查询文本), intent (可选: answer/timeline/profile/rule), "
-            "max_items (返回条数, 默认8)"
+            "max_items (返回条数, 默认8), memory_type (可选类型过滤)"
         )
 
     @property
@@ -57,7 +57,7 @@ class RecallMemoryTool:
                 },
                 "memory_type": {
                     "type": "string",
-                    "enum": ["procedure", "preference", "event", "fact"],
+                    "enum": ["procedure", "preference", "event", "fact", "need", "task"],
                     "description": "记忆类型过滤",
                 },
             },
@@ -142,6 +142,11 @@ class RecallMemoryToolAdapter:
         payload = json.dumps(kwargs)
         return self.tool(payload)
 
+    def run(self, tool_input: dict[str, str]) -> ToolResult:
+        """按 ToolRegistry 协议执行记忆检索。"""
+        content = self.execute(**tool_input)
+        return ToolResult(ok=_json_result_ok(content), content=content)
+
     def to_openai_function(self) -> dict[str, Any]:
         return {
             "type": "function",
@@ -151,3 +156,12 @@ class RecallMemoryToolAdapter:
                 "parameters": self.tool.schema,
             },
         }
+
+
+def _json_result_ok(content: str) -> bool:
+    """根据工具 JSON 结果判断是否成功。"""
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        return False
+    return not (isinstance(data, dict) and data.get("error"))

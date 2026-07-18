@@ -5,9 +5,7 @@
 """
 
 import logging
-import time
 from dataclasses import dataclass
-from pathlib import Path
 
 from flow_agent.memory.embedder import Embedder
 from flow_agent.memory.vector_store import MemoryStore
@@ -19,7 +17,7 @@ logger = logging.getLogger(__name__)
 class MemorizeResult:
     """写入记忆的结果。"""
 
-    item_id: int
+    item_id: str
     content_hash: str
     was_duplicate: bool
     reinforcement: int
@@ -50,7 +48,7 @@ class Memorizer:
         # 先检查是否已存在（只用 content_hash，不走 embedding 以节省成本）
         from flow_agent.memory.vector_store import _compute_content_hash
 
-        content_hash = _compute_content_hash(summary)
+        content_hash = _compute_content_hash(summary, memory_type)
         existing = self.store.search_by_source_ref(source_ref) if source_ref else []
 
         # 生成 embedding（新条目需要）
@@ -64,7 +62,7 @@ class Memorizer:
             emotional_weight=emotional_weight,
         )
 
-        was_dup = existing and any(e.content_hash == content_hash for e in existing)
+        was_dup = item.reinforcement > 1 or any(e.content_hash == content_hash for e in existing)
         return MemorizeResult(
             item_id=item.id,
             content_hash=content_hash,
@@ -105,7 +103,7 @@ class Memorizer:
             embedding = self.embedder.embed(summary)
         from flow_agent.memory.vector_store import _compute_content_hash
 
-        content_hash = _compute_content_hash(summary)
+        content_hash = _compute_content_hash(summary, memory_type)
         item = self.store.write(
             memory_type=memory_type,
             summary=summary,

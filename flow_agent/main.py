@@ -32,7 +32,6 @@ def run_service() -> None:
 
     try:
         (
-            orchestrator,
             proactive_runtime,
             background_runtime,
             subagent_runtime,
@@ -42,7 +41,8 @@ def run_service() -> None:
             agent_loop,
             pipeline,
             tool_registry,
-            *_,
+            memory_runtime,
+            memory_optimizer_loop,
         ) = create_app_runtime()
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
@@ -117,6 +117,10 @@ def run_service() -> None:
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
+    if memory_optimizer_loop is not None:
+        memory_optimizer_loop.start()
+        print("memory optimizer started")
+
     # 启动主动回复循环（后台线程）
     proactive_thread = None
     if proactive_runtime:
@@ -161,6 +165,8 @@ def run_service() -> None:
         print("\nShutting down...")
         if proactive_runtime:
             proactive_runtime.request_stop()
+        if memory_optimizer_loop is not None:
+            memory_optimizer_loop.stop()
         if proactive_thread is not None:
             proactive_thread.join(timeout=5.0)
         if telegram:

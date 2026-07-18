@@ -1,5 +1,4 @@
 import json
-import sqlite3
 from pathlib import Path
 
 from flow_agent.main import main as cli_main
@@ -12,6 +11,9 @@ def test_workspace_init_and_detect(tmp_path: Path):
     layout = init_workspace(tmp_path)
     assert layout.marker_file.exists()
     assert layout.memory_dir.is_dir()
+    assert layout.memory_journal_dir.is_dir()
+    assert (layout.memory_dir / "SELF.md").exists()
+    assert (layout.memory_dir / "PENDING.md").exists()
     assert layout.drift_skills_dir.is_dir()
     assert layout.plugin_data_dir.is_dir()
     assert layout.rss_sources_dir.is_dir()
@@ -24,23 +26,6 @@ def test_workspace_init_and_detect(tmp_path: Path):
     assert detected is not None
     assert detected.root == tmp_path.resolve()
 
-
-def test_workspace_migrates_legacy_sqlite_database(tmp_path: Path):
-    legacy_flow = tmp_path / ".flow"
-    legacy_flow.mkdir()
-    legacy_db = legacy_flow / "memory.db"
-    with sqlite3.connect(legacy_db) as connection:
-        connection.execute("CREATE TABLE sample (value TEXT)")
-        connection.execute("INSERT INTO sample VALUES (\"保留数据\")")
-    (legacy_flow / ".workspace").write_text(
-        "flow-agent-workspace-v1\n",
-        encoding="utf-8",
-    )
-
-    layout = init_workspace(tmp_path)
-    with sqlite3.connect(layout.memory_db) as connection:
-        value = connection.execute("SELECT value FROM sample").fetchone()[0]
-    assert value == "保留数据"
 
 def test_skill_manager_install_enable_disable(tmp_path: Path):
     layout = init_workspace(tmp_path)

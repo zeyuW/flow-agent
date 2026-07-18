@@ -14,7 +14,6 @@ from flow_agent.core.agent import Agent
 from flow_agent.core.context import ConversationContext
 from flow_agent.llm.client import FakeLLMClient
 from flow_agent.llm.prompts import build_messages
-from flow_agent.memory.store import InMemoryMessageStore
 
 
 def test_build_messages():
@@ -68,15 +67,13 @@ def test_agent_run():
     ]
 
 
-def test_context_uses_store():
-    store = InMemoryMessageStore()
-    context = ConversationContext(store=store)
+def test_context_uses_session_storage(tmp_path):
+    context = ConversationContext(db_path=tmp_path / "sessions.db")
 
     context.append_user_message("s1", "u1")
     context.append_assistant_message("s1", "a1")
 
-    assert store.list_messages("s1") == [
+    assert context.get_history("s1") == [
         {"role": "user", "content": "u1"},
         {"role": "assistant", "content": "a1"},
     ]
-    assert context.get_history("s1") == store.list_messages("s1")

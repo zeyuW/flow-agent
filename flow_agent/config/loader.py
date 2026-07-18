@@ -9,6 +9,7 @@ from flow_agent.config.settings import (
     DriftSettings,
     JobsSettings,
     LoggingSettings,
+    MemoryMaintenanceSettings,
     MemoryPolicySettings,
     ObserveSettings,
     PersonaSettings,
@@ -163,6 +164,28 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             dedupe=values.get_bool(
                 ("memory_policy", "dedupe"),
                 True,
+            ),
+        ),
+        memory=MemoryMaintenanceSettings(
+            enabled=values.get_bool(("memory", "enabled"), True),
+            consolidation_min_new_messages=values.get_int(
+                ("memory", "consolidation_min_new_messages"),
+                5,
+                minimum=1,
+            ),
+            recent_turns_limit=values.get_int(
+                ("memory", "recent_turns_limit"),
+                8,
+                minimum=2,
+            ),
+            optimizer_enabled=values.get_bool(
+                ("memory", "optimizer_enabled"),
+                True,
+            ),
+            optimizer_interval_seconds=values.get_int(
+                ("memory", "optimizer_interval_seconds"),
+                64800,
+                minimum=60,
             ),
         ),
         proactive=ProactiveSettings(

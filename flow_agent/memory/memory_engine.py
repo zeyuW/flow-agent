@@ -40,8 +40,8 @@ class MemoryEngine:
 
     支持多种查询意图：
     - answer: 一般问答（默认），返回最相关的记忆
-    - timeline: 时间线查询，返回按时间排序的事件记忆
-    - profile: 查询用户档案相关记忆（identity, preference 等）
+    - timeline: 时间线查询，返回事件记忆
+    - profile: 查询用户画像相关记忆，不强制限定单一类型
     - rule: 查询规则/约束类记忆
     """
 
@@ -66,8 +66,6 @@ class MemoryEngine:
         mt = q.memory_type
         if q.intent == "timeline":
             mt = mt or "event"
-        elif q.intent == "profile":
-            mt = mt or "profile"
         elif q.intent == "rule":
             mt = mt or "procedure"
 
