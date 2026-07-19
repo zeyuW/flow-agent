@@ -15,12 +15,31 @@ from flow_agent.infra.paths import WORKSPACE_LAYOUT
 from flow_agent.runtime.workspace import init_workspace
 from flow_agent.channels.telegram import TelegramChannel
 from flow_agent.tools.message_push import MessagePushTool
+from flow_agent.runtime.workspace_lock import (
+    WorkspaceAlreadyRunningError,
+    WorkspaceProcessLock,
+)
 
 
 logger = logging.getLogger(__name__)
 
 
 def run_service() -> None:
+    """获取工作区唯一所有权后启动完整服务。"""
+
+    lock = WorkspaceProcessLock(WORKSPACE_LAYOUT.flow_dir / "runtime.lock")
+    try:
+        lock.acquire()
+    except WorkspaceAlreadyRunningError as exc:
+        print(f"启动失败：{exc}")
+        return
+    try:
+        _run_service()
+    finally:
+        lock.release()
+
+
+def _run_service() -> None:
     cfg = settings.get()
     configure_logging(cfg.logging.level, WORKSPACE_LAYOUT.app_log_file)
     print(
@@ -98,16 +117,21 @@ def run_service() -> None:
     )
     
     # 启动 Telegram 渠道（使用新协议，在后台线程运行）
+    telegram_thread = None
+    telegram_loop_holder: dict[str, object] = {}
     if cfg.channels.telegram_enabled and telegram:
         import threading
         import asyncio
         def run_telegram():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            # 启动渠道后保持事件循环运行
-            loop.run_until_complete(telegram.start(channel_ctx))
-            # start 方法会创建轮询任务，这里需要保持循环运行
-            loop.run_forever()
+            telegram_loop_holder["loop"] = loop
+            try:
+                # Telegram.start 会持续等待轮询任务，不需要额外 run_forever。
+                loop.run_until_complete(telegram.start(channel_ctx))
+            finally:
+                telegram_loop_holder.pop("loop", None)
+                loop.close()
         telegram_thread = threading.Thread(target=run_telegram, daemon=True)
         telegram_thread.start()
         print("telegram channel started")
@@ -179,10 +203,15 @@ def run_service() -> None:
         if proactive_thread is not None:
             proactive_thread.join(timeout=5.0)
         if telegram:
-            import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(telegram.stop())
+            loop = telegram_loop_holder.get("loop")
+            if loop is not None and not loop.is_closed():
+                future = asyncio.run_coroutine_threadsafe(telegram.stop(), loop)
+                try:
+                    future.result(timeout=5.0)
+                except Exception:
+                    logger.exception("Telegram 渠道停止失败")
+            if telegram_thread is not None:
+                telegram_thread.join(timeout=8.0)
         print("Shutdown complete.")
 
 

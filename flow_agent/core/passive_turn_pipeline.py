@@ -14,6 +14,7 @@ import time
 from datetime import datetime
 from uuid import uuid4
 from typing import Any
+from collections.abc import Callable
 
 from flow_agent.core.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
@@ -24,7 +25,7 @@ from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.messaging.event_bus import EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
+from flow_agent.messaging.event_bus import Event, EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,8 @@ class PassiveTurnPipeline:
         delegation_policy: DelegationPolicy | None = None,
         tool_selection_max: int = 8,
         enable_thinking: bool = False,
+        phase_modules_provider: Callable[[], list[Any]] | None = None,
+        tool_hook_executor=None,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -72,6 +75,8 @@ class PassiveTurnPipeline:
         self.delegation_policy = delegation_policy or DelegationPolicy()
         self.tool_selection_max = max(1, tool_selection_max)
         self._phase_modules: list[PhaseModule] = []
+        self._phase_modules_provider = phase_modules_provider
+        self._tool_hook_executor = tool_hook_executor
 
     def register_phase_module(self, module: PhaseModule) -> None:
         """注册一个阶段模块（插件）。"""
@@ -96,6 +101,7 @@ class PassiveTurnPipeline:
             inbound_metadata=inbound.metadata or {},  # 保存入站 metadata
             trace_id=uuid4().hex[:12],
         )
+        flow.extensions["_phase_modules"] = self._phase_module_snapshot()
         self.agent.set_session(flow.session_id)
 
         turn_started = time.perf_counter()
@@ -109,11 +115,7 @@ class PassiveTurnPipeline:
 
         try:
             # Phase 0: TurnStarted (notify phase modules)
-            for module in self._phase_modules:
-                try:
-                    module.on_turn_started(flow)
-                except Exception:
-                    logger.exception("phase module %s on_turn_started failed", module.name)
+            self._call_phase_modules(flow, "on_turn_started")
 
             # Phase 1: BeforeTurn
             flow = self._run_phase(flow, "before_turn", self._before_turn)
@@ -162,14 +164,11 @@ class PassiveTurnPipeline:
     # ── 阶段钩子 ────────────────────────────────────────────
 
     def _before_turn(self, flow: TurnFlow) -> TurnFlow:
+        self._call_phase_modules(flow, "on_before_turn")
         return flow
 
     def _before_reasoning(self, flow: TurnFlow) -> TurnFlow:
-        for module in self._phase_modules:
-            try:
-                module.on_before_reasoning(flow)
-            except Exception:
-                logger.exception("phase module %s on_before_reasoning failed", module.name)
+        self._call_phase_modules(flow, "on_before_reasoning")
         return flow
 
     def _prompt_render(self, flow: TurnFlow) -> TurnFlow:
@@ -177,11 +176,7 @@ class PassiveTurnPipeline:
 
         构建 persona、memory、retrieval 块，组装最终的 messages。
         """
-        for module in self._phase_modules:
-            try:
-                module.on_prompt_render(flow)
-            except Exception:
-                logger.exception("phase module %s on_prompt_render failed", module.name)
+        self._call_phase_modules(flow, "on_prompt_render")
 
         # 构建 persona 块
         persona_block = self._build_persona_block(proactive=False, channel=flow.channel)
@@ -222,6 +217,17 @@ class PassiveTurnPipeline:
             instructions.append(
                 "当用户要求提醒、定时执行或周期任务时，必须调用 schedule_task，"
                 "不得仅写入长期记忆，也不得声称系统无法定时唤醒。"
+            )
+            instructions.append(
+                "当用户要求长时间不互动后主动联系、主动推送感兴趣内容或修改主动策略时，"
+                "必须调用 configure_proactive_policy；未给出具体时长时默认使用 120 分钟并告知用户。"
+                "查询当前策略时调用 get_proactive_status。"
+            )
+            instructions.append(
+                "当用户要求执行插件提供的后台任务时，先调用 list_background_jobs 确认名称，"
+                "再调用 run_background_job；需要查看进度或结果时调用 list_background_runs。"
+                "后台任务不是 MCP 服务，不得使用 mcp_list 判断后台任务是否存在。"
+                "回答时必须原样引用工具返回的 job_name，不得自行改写任务名称。"
             )
         tool_instructions = "\n\n".join(instructions)
 
@@ -282,6 +288,7 @@ class PassiveTurnPipeline:
         return "\n\n".join(blocks)
 
     def _reasoner(self, flow: TurnFlow) -> TurnFlow:
+        self._call_phase_modules(flow, "on_reasoner")
         # 如果启用思考模式，使用流式生成
         if self.enable_thinking and self.event_bus:
             chat_id = flow.inbound_metadata.get("telegram_chat_id") if flow.inbound_metadata else ""
@@ -327,11 +334,7 @@ class PassiveTurnPipeline:
         return self._run_tool_loop(flow)
 
     def _after_reasoning(self, flow: TurnFlow) -> TurnFlow:
-        for module in self._phase_modules:
-            try:
-                module.on_after_reasoning(flow)
-            except Exception:
-                logger.exception("phase module %s on_after_reasoning failed", module.name)
+        self._call_phase_modules(flow, "on_after_reasoning")
         return flow
 
     def _after_turn(self, flow: TurnFlow) -> TurnFlow:
@@ -359,11 +362,7 @@ class PassiveTurnPipeline:
         self._send_outbound_reply(flow)
 
         # 通知阶段模块
-        for module in self._phase_modules:
-            try:
-                module.on_after_turn(flow)
-            except Exception:
-                logger.exception("phase module %s on_after_turn failed", module.name)
+        self._call_phase_modules(flow, "on_after_turn")
 
         return flow
 
@@ -493,6 +492,8 @@ class PassiveTurnPipeline:
                     "schedule_task",
                     "list_scheduled_tasks",
                     "cancel_scheduled_task",
+                    "configure_proactive_policy",
+                    "get_proactive_status",
                 }:
                     tool_input["__session_id"] = flow.session_id
                     tool_input["__channel"] = flow.channel
@@ -500,6 +501,31 @@ class PassiveTurnPipeline:
                         flow.inbound_metadata.get("telegram_chat_id")
                         or flow.session_id
                     )
+                if self._tool_hook_executor is not None:
+                    outcome = self._tool_hook_executor.execute_sync(
+                        tool_call.name,
+                        tool_input,
+                        flow.session_id,
+                    )
+                    if outcome.decision == "deny":
+                        tool_message = (
+                            f"Tool `{tool_call.name}` ok=False: "
+                            f"插件钩子阻止执行: {outcome.reason}"
+                        )
+                        flow.tool_trace.append({
+                            "step": str(step + 1),
+                            "tool": tool_call.name,
+                            "status": "blocked",
+                            "arguments": tool_call.arguments_json,
+                        })
+                        current_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": tool_message,
+                        })
+                        continue
+                    if outcome.modified_args is not None:
+                        tool_input = dict(outcome.modified_args)
                 tool_result = self.tool_registry.execute(
                     tool_name=tool_call.name,
                     tool_input=tool_input,
@@ -526,6 +552,33 @@ class PassiveTurnPipeline:
         })
         return flow
 
+    def _phase_module_snapshot(self) -> list[Any]:
+        """在回合开始时冻结当前插件阶段模块。"""
+
+        modules = list(self._phase_modules)
+        if self._phase_modules_provider is not None:
+            for module in self._phase_modules_provider():
+                if module not in modules:
+                    modules.append(module)
+        return modules
+
+    def _call_phase_modules(self, flow: TurnFlow, method_name: str) -> None:
+        """调用当前回合快照中实现了指定钩子的阶段模块。"""
+
+        modules = flow.extensions.get("_phase_modules", [])
+        for module in modules:
+            handler = getattr(module, method_name, None)
+            if not callable(handler):
+                continue
+            try:
+                handler(flow)
+            except Exception:
+                logger.exception(
+                    "phase module %s %s failed",
+                    getattr(module, "name", type(module).__name__),
+                    method_name,
+                )
+
     def _tool_call_to_message_item(self, tool_call: LLMToolCall) -> dict[str, Any]:
         return {
             "id": tool_call.id,
@@ -540,6 +593,8 @@ class PassiveTurnPipeline:
 
     def _run_phase(self, flow: TurnFlow, phase: str, fn):
         started = time.perf_counter()
+        if not phase.startswith("after_"):
+            self._publish_phase_event(flow, phase)
         self._record_event({
             "type": "turn_phase_start",
             "phase": phase,
@@ -548,6 +603,8 @@ class PassiveTurnPipeline:
         })
         try:
             result = fn(flow)
+            if phase.startswith("after_"):
+                self._publish_phase_event(result, phase)
             self._record_event({
                 "type": "turn_phase_end",
                 "phase": phase,
@@ -568,6 +625,23 @@ class PassiveTurnPipeline:
                 "latency_ms": round((time.perf_counter() - started) * 1000, 2),
             })
             raise
+
+    def _publish_phase_event(self, flow: TurnFlow, phase: str) -> None:
+        """在阶段语义对应的前置或后置时点广播插件生命周期事件。"""
+
+        if self.event_bus is None:
+            return
+        self.event_bus.publish(Event(
+            event_type=phase,
+            trace_id=flow.trace_id,
+            session_id=flow.session_id,
+            payload={
+                "user_input": flow.user_input,
+                "assistant_output": flow.final_output,
+                "channel": flow.channel,
+                "flow": flow,
+            },
+        ))
 
     def _record_event(self, event: dict[str, Any]) -> None:
         if self.recorder is not None:

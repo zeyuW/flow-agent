@@ -409,7 +409,8 @@ class TelegramChannel(Channel, EventSubscriber):
                 logger.debug(f"telegram POST response: {result}")
                 return result
         except Exception:
-            logger.exception("telegram POST %s failed", url)
+            endpoint = urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1]
+            logger.exception("telegram POST endpoint=%s failed", endpoint)
             return {}
     
     # ── 供 MessagePushTool 使用 ──

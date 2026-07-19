@@ -271,6 +271,7 @@ class ProactiveLoop:
         self._is_executing = False
         self._task: asyncio.Task | None = None
         self._polling_module = polling_module
+        self._state_store = state_store
         self._trace_recorder = trace_recorder
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._wake_event: asyncio.Event | None = None
@@ -333,6 +334,11 @@ class ProactiveLoop:
             await self._pool.close_all()
         except Exception:
             logger.exception("MCP 连接池关闭失败")
+        if hasattr(self._pipeline, "close"):
+            try:
+                self._pipeline.close()
+            except Exception:
+                logger.exception("主动链路状态存储关闭失败")
 
     async def _run_loop(self) -> None:
         """首次立即检查，后续按霍克斯强度或固定间隔调度。"""
@@ -425,6 +431,41 @@ class ProactiveLoop:
         self._running = False
         self._notify_schedule_changed()
 
+    def apply_runtime_config(
+        self,
+        *,
+        min_interval: float,
+        max_interval: float,
+        max_per_day: int,
+        cooldown: float,
+        base_intensity: float,
+        excitation_alpha: float,
+        decay_beta: float,
+        time_constant: float,
+        drift_min_interval_hours: float | None = None,
+    ) -> None:
+        """热更新不要求重建外部连接的主动调度参数。"""
+
+        candidate = HawkesConfig(
+            base_intensity=base_intensity,
+            excitation_alpha=excitation_alpha,
+            decay_beta=decay_beta,
+            time_constant=time_constant,
+            min_interval=min_interval,
+            max_interval=max_interval,
+        )
+        self._min_interval = candidate.min_interval
+        self._max_interval = candidate.max_interval
+        self._hawkes._config = candidate
+        self._pipeline._cooldown = max(0.0, float(cooldown))
+        self._pipeline._any_action.max_per_day = max(1, int(max_per_day))
+        self._pipeline._any_action.min_interval = max(0.0, float(cooldown))
+        if drift_min_interval_hours is not None:
+            self._pipeline._drift_min_interval = (
+                max(0.0, float(drift_min_interval_hours)) * 3600.0
+            )
+        self._notify_schedule_changed()
+
     async def stop(self) -> None:
         """停止循环，并在同一事件循环中等待资源清理完成。"""
 
@@ -468,6 +509,11 @@ class ProactiveLoop:
             timestamp=timestamp,
             weight=effective_weight,
         )
+        if self._state_store is not None and event_type == "user_message":
+            self._state_store.record_user_interaction(
+                self._chat_id,
+                timestamp=timestamp,
+            )
         self._notify_schedule_changed()
 
     def _notify_schedule_changed(self) -> None:

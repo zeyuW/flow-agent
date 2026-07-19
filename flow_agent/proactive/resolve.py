@@ -7,7 +7,7 @@ from flow_agent.proactive.gate import ProactiveStateStore
 from flow_agent.proactive.models import JudgeResult, ResolveResult
 
 logger = logging.getLogger(__name__)
-_DELIVERY_WINDOW = 300.0
+_DELIVERY_WINDOW = 86400.0
 
 
 def resolve_decision(

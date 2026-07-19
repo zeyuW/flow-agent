@@ -119,6 +119,9 @@ class ProactiveSettings(BaseModel):
     hawkes_decay_beta: float = 0.1
     hawkes_time_constant: float = 30.0
     telegram_target_user_id: str | None = None
+    idle_enabled: bool = False
+    idle_threshold_minutes: float = 120.0
+    interest_topics: tuple[str, ...] = ()
     state_path: str = ".flow/data/proactive.db"
     trace_path: str = ".flow/logs/proactive.jsonl"
 

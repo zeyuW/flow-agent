@@ -35,6 +35,8 @@ class WorkspaceLayout:
     memory_vectors_db: Path
     embedding_cache_file: Path
     proactive_state_db: Path
+    background_jobs_db: Path
+    drift_state_db: Path
     scheduled_tasks_db: Path
     trace_file: Path
     proactive_trace_file: Path
@@ -84,6 +86,8 @@ def build_layout(root: Path) -> WorkspaceLayout:
         memory_vectors_db=data / "memory_vectors.db",
         embedding_cache_file=data / "embedding_cache.json",
         proactive_state_db=data / "proactive.db",
+        background_jobs_db=data / "background_jobs.db",
+        drift_state_db=drift / "drift.db",
         scheduled_tasks_db=data / "scheduled_tasks.db",
         trace_file=logs / "trace.jsonl",
         proactive_trace_file=logs / "proactive.jsonl",

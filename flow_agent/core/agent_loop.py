@@ -100,6 +100,11 @@ class AgentLoop:
         self._process(inbound)
         return True
 
+    def is_processing(self, session_id: str) -> bool:
+        """供主动准入检查指定会话是否正在执行被动回合。"""
+
+        return self._processing.is_processing(session_id)
+
     async def run_forever(self) -> None:
         """持续异步轮询处理入站消息。
 

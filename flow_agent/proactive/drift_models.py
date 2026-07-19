@@ -1,6 +1,7 @@
 """漂移模式数据模型。"""
 
 from dataclasses import dataclass, field
+from uuid import uuid4
 
 
 @dataclass
@@ -12,16 +13,21 @@ class DriftSkill:
     requires_mcp: list[str] = field(default_factory=list)
     state: dict = field(default_factory=dict)
     path: str = ""
+    instructions: str = ""
 
 
 @dataclass
 class DriftRun:
     """单次漂移运行记录。"""
 
+    run_id: str = field(default_factory=lambda: uuid4().hex)
     skill_name: str = ""
     action: str = ""
     result: str = ""
+    status: str = "completed"
     timestamp: str = ""
+    finished_at: str = ""
+    error: str = ""
 
 
 @dataclass

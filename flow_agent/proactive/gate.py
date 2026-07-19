@@ -1,5 +1,6 @@
 """主动检查执行前的准入规则。"""
 
+import json
 import sqlite3
 import threading
 import time
@@ -7,6 +8,15 @@ from dataclasses import dataclass, field
 
 from pathlib import Path
 from flow_agent.proactive.models import GateResult
+
+
+@dataclass(frozen=True, slots=True)
+class ProactivePolicy:
+    """单个聊天的主动推送策略。"""
+
+    enabled: bool = False
+    idle_threshold_seconds: float = 0.0
+    topics: tuple[str, ...] = ()
 
 
 @dataclass
@@ -19,6 +29,8 @@ class ProactiveStateStore:
     _daily_count: int = 0
     _day_start: float = 0.0
     _drift_last_at: float = 0.0
+    _policies: dict[str, ProactivePolicy] = field(default_factory=dict)
+    _last_user_interactions: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """连接可选 SQLite 数据库并恢复上次运行状态。"""
@@ -51,6 +63,15 @@ class ProactiveStateStore:
                 'CREATE TABLE IF NOT EXISTS hawkes_events (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL NOT NULL, event_type TEXT NOT NULL, weight REAL NOT NULL)'
             )
             self._db.execute(
+                'CREATE TABLE IF NOT EXISTS proactive_policies ('
+                'chat_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL, '
+                'idle_threshold_seconds REAL NOT NULL, topics_json TEXT NOT NULL)'
+            )
+            self._db.execute(
+                'CREATE TABLE IF NOT EXISTS proactive_activity ('
+                'chat_id TEXT PRIMARY KEY, last_user_interaction REAL NOT NULL)'
+            )
+            self._db.execute(
                 'INSERT OR IGNORE INTO proactive_state (id, last_sent, daily_count, day_start, drift_last_at) VALUES (1, 0, 0, 0, 0)'
             )
             self._db.commit()
@@ -68,9 +89,30 @@ class ProactiveStateStore:
             key_rows = self._db.execute(
                 'SELECT delivery_key, delivered_at FROM delivery_keys'
             ).fetchall()
+            policy_rows = self._db.execute(
+                'SELECT chat_id, enabled, idle_threshold_seconds, topics_json '
+                'FROM proactive_policies'
+            ).fetchall()
+            activity_rows = self._db.execute(
+                'SELECT chat_id, last_user_interaction FROM proactive_activity'
+            ).fetchall()
         if row is not None:
             self._last_sent, self._daily_count, self._day_start, self._drift_last_at = row
         self._delivery_keys = {str(key): float(timestamp) for key, timestamp in key_rows}
+        policies: dict[str, ProactivePolicy] = {}
+        for chat_id, enabled, threshold, topics_json in policy_rows:
+            topics = json.loads(str(topics_json))
+            if not isinstance(topics, list) or not all(isinstance(item, str) for item in topics):
+                raise ValueError(f"主动策略 topics_json 损坏: chat_id={chat_id}")
+            policies[str(chat_id)] = ProactivePolicy(
+                enabled=bool(enabled),
+                idle_threshold_seconds=max(0.0, float(threshold)),
+                topics=tuple(item.strip() for item in topics if item.strip()),
+            )
+        self._policies = policies
+        self._last_user_interactions = {
+            str(chat_id): float(timestamp) for chat_id, timestamp in activity_rows
+        }
 
 
     def _persist_runtime_state(self) -> None:
@@ -143,6 +185,111 @@ class ProactiveStateStore:
 
         return self._drift_last_at
 
+    def set_policy(
+        self,
+        chat_id: str,
+        *,
+        enabled: bool,
+        idle_threshold_seconds: float,
+        topics: list[str] | tuple[str, ...],
+    ) -> ProactivePolicy:
+        """保存聊天级主动策略，并返回规范化结果。"""
+
+        key = chat_id.strip()
+        if not key:
+            raise ValueError("chat_id 不能为空")
+        threshold = float(idle_threshold_seconds)
+        if threshold < 60:
+            raise ValueError("静默阈值至少为 60 秒")
+        normalized_topics = tuple(
+            dict.fromkeys(item.strip() for item in topics if item.strip())
+        )
+        policy = ProactivePolicy(
+            enabled=bool(enabled),
+            idle_threshold_seconds=threshold,
+            topics=normalized_topics,
+        )
+        with self._lock:
+            if self._db is not None:
+                self._db.execute(
+                    'INSERT INTO proactive_policies '
+                    '(chat_id, enabled, idle_threshold_seconds, topics_json) '
+                    'VALUES (?, ?, ?, ?) '
+                    'ON CONFLICT(chat_id) DO UPDATE SET '
+                    'enabled=excluded.enabled, '
+                    'idle_threshold_seconds=excluded.idle_threshold_seconds, '
+                    'topics_json=excluded.topics_json',
+                    (
+                        key,
+                        int(policy.enabled),
+                        policy.idle_threshold_seconds,
+                        json.dumps(list(policy.topics), ensure_ascii=False),
+                    ),
+                )
+                self._db.commit()
+            self._policies[key] = policy
+        return policy
+
+    def get_policy(self, chat_id: str) -> ProactivePolicy:
+        """读取聊天级主动策略；未配置时返回关闭策略。"""
+
+        with self._lock:
+            return self._policies.get(chat_id.strip(), ProactivePolicy())
+
+    def has_policy(self, chat_id: str) -> bool:
+        """判断聊天是否已经显式保存过主动策略。"""
+
+        with self._lock:
+            return chat_id.strip() in self._policies
+
+    def record_user_interaction(self, chat_id: str, timestamp: float | None = None) -> None:
+        """记录最近一次用户互动，供静默准入判断使用。"""
+
+        key = chat_id.strip()
+        if not key:
+            return
+        occurred_at = time.time() if timestamp is None else float(timestamp)
+        with self._lock:
+            previous = self._last_user_interactions.get(key, 0.0)
+            if occurred_at < previous:
+                return
+            if self._db is not None:
+                self._db.execute(
+                    'INSERT INTO proactive_activity(chat_id, last_user_interaction) '
+                    'VALUES (?, ?) ON CONFLICT(chat_id) DO UPDATE SET '
+                    'last_user_interaction=excluded.last_user_interaction',
+                    (key, occurred_at),
+                )
+                self._db.commit()
+            self._last_user_interactions[key] = occurred_at
+
+    def get_last_user_interaction(self, chat_id: str) -> float:
+        """返回指定聊天最近一次用户互动时间。"""
+
+        with self._lock:
+            return self._last_user_interactions.get(chat_id.strip(), 0.0)
+
+    def get_latest_interaction_event(self) -> float:
+        """读取旧版霍克斯事件中的最近用户互动，供状态迁移使用。"""
+
+        if self._db is None:
+            return 0.0
+        with self._lock:
+            row = self._db.execute(
+                "SELECT MAX(timestamp) FROM hawkes_events WHERE event_type = ?",
+                ("user_message",),
+            ).fetchone()
+        return float(row[0]) if row and row[0] is not None else 0.0
+
+    def get_idle_seconds(self, chat_id: str, now: float | None = None) -> float | None:
+        """返回用户静默秒数；尚无互动基线时返回 None。"""
+
+        last = self.get_last_user_interaction(chat_id)
+        if last <= 0:
+            return None
+        current = time.time() if now is None else float(now)
+        return max(0.0, current - last)
+
     def append_interaction_event(self, timestamp: float, event_type: str, weight: float) -> None:
         """持久化一条影响霍克斯强度的真实互动事件。"""
 
@@ -207,6 +354,7 @@ def check_gate(
     any_action: AnyActionGate | None = None,
     cooldown: float = 120.0,
     base_score: float = 0.0,
+    now: float | None = None,
 ) -> GateResult:
     """依次检查目标、被动链路占用、冷却和每日配额。"""
 
@@ -216,8 +364,16 @@ def check_gate(
         return GateResult(passed=False, reason="passive_busy")
 
     if state_store is not None:
+        policy = state_store.get_policy(chat_id)
+        if policy.enabled:
+            idle_seconds = state_store.get_idle_seconds(chat_id, now=now)
+            if idle_seconds is None:
+                return GateResult(passed=False, reason="idle_baseline_missing")
+            if idle_seconds < policy.idle_threshold_seconds:
+                return GateResult(passed=False, reason="idle_wait")
         last_sent = state_store.get_last_sent_at()
-        if last_sent > 0 and (time.time() - last_sent) < cooldown:
+        current = time.time() if now is None else float(now)
+        if last_sent > 0 and (current - last_sent) < cooldown:
             return GateResult(passed=False, reason="cooldown")
 
     if any_action is not None and state_store is not None:

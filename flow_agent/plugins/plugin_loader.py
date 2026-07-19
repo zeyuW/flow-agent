@@ -1,18 +1,26 @@
-"""插件管理器：发现、导入、绑定、初始化并在失败时回滚。"""
+"""插件运行时：发现、候选准备、能力发布和文件热重载。"""
 
+from __future__ import annotations
+
+import asyncio
 import functools
-import importlib.util
+import hashlib
 import logging
+import re
+import sys
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Any, Callable
 
+from flow_agent.background.jobs import JobSpec
 from flow_agent.mcp.config import McpServerSpec
 from flow_agent.plugins.plugin_base import Plugin
 from flow_agent.plugins.plugin_context import PluginContext
 from flow_agent.plugins.plugin_registry import (
     HandlerMeta,
     MetadataKind,
-    PluginRegistry,
     ToolMeta,
     plugin_registry,
 )
@@ -21,8 +29,35 @@ from flow_agent.plugins.tool_hooks import ToolHookExecutor, _PluginToolHook
 logger = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _PreparedPlugin:
+    """尚未对外发布的一代插件贡献。"""
+
+    name: str
+    plugin_dir: Path
+    revision: str
+    module_name: str
+    instance: Plugin
+    handlers: list[HandlerMeta]
+    tools: list[ToolMeta]
+    phase_modules: list[Any]
+    proactive_sources: list[Any]
+    mcp_servers: list[McpServerSpec]
+    background_jobs: list[JobSpec]
+
+
+@dataclass(slots=True)
+class _ActivePlugin:
+    """当前已经发布并可被运行时观察的一代插件。"""
+
+    prepared: _PreparedPlugin
+    subscribers: list[Any] = field(default_factory=list)
+    tool_names: list[str] = field(default_factory=list)
+    job_names: list[str] = field(default_factory=list)
+
+
 class PluginManager:
-    """运行时插件管理器，统一编译并绑定插件能力。"""
+    """把插件的一组运行时贡献作为一个热重载单元管理。"""
 
     def __init__(
         self,
@@ -30,241 +65,513 @@ class PluginManager:
         *,
         event_bus=None,
         tool_registry=None,
+        background_registry=None,
         workspace: Path | None = None,
         plugin_data_dir: Path | None = None,
+        on_contributions_changed: Callable[[], None] | None = None,
     ) -> None:
         self._dir = plugins_dir
         self._event_bus = event_bus
         self._tool_registry = tool_registry
+        self._background_registry = background_registry
         self._workspace = workspace
         self._plugin_data_dir = plugin_data_dir or (
             workspace / "plugin-data" if workspace is not None else None
         )
-        self._loaded: dict[str, Plugin] = {}
-        self._tool_names: dict[str, list[str]] = {}  # 记录模块绑定的工具名称
+        self._loaded: dict[str, _ActivePlugin] = {}
         self._tool_hook_executor = ToolHookExecutor()
-        self._proactive_sources: dict[str, list] = {}  # 按插件标识保存主动信息源
-        self._mcp_servers: list[McpServerSpec] = []
+        self._on_contributions_changed = on_contributions_changed
+        self._lock = threading.RLock()
+        self._reconcile_lock = threading.Lock()
+        self._watch_thread: threading.Thread | None = None
+        self._watch_stop = threading.Event()
 
     @property
     def tool_hook_executor(self) -> ToolHookExecutor:
         return self._tool_hook_executor
 
-    def get_proactive_sources(self) -> dict[str, list]:
-        """获取所有插件的主动推送数据源声明"""
-        return self._proactive_sources
+    def set_contributions_callback(
+        self,
+        callback: Callable[[], None] | None,
+    ) -> None:
+        """设置插件代际发布后的宿主刷新回调。"""
+
+        self._on_contributions_changed = callback
+
+    def get_phase_modules(self) -> list[Any]:
+        """返回当前插件代际的阶段模块快照。"""
+
+        with self._lock:
+            return [
+                module
+                for active in self._loaded.values()
+                for module in active.prepared.phase_modules
+            ]
+
+    def get_proactive_sources(self) -> dict[str, list[Any]]:
+        """返回当前插件代际的主动信息源。"""
+
+        with self._lock:
+            return {
+                name: list(active.prepared.proactive_sources)
+                for name, active in self._loaded.items()
+                if active.prepared.proactive_sources
+            }
 
     def get_mcp_servers(self) -> list[McpServerSpec]:
-        """返回所有已加载插件解析后的 MCP 服务声明。"""
-        return list(self._mcp_servers)
+        """返回当前插件代际解析后的 MCP 服务声明。"""
 
-    # ── 发现 ──
+        with self._lock:
+            return [
+                spec
+                for active in self._loaded.values()
+                for spec in active.prepared.mcp_servers
+            ]
 
     def discover(self) -> list[dict[str, str]]:
-        """扫描包含 plugin.py 的插件子目录。"""
+        """扫描包含 plugin.py 且未禁用的插件目录。"""
+
         if not self._dir.exists():
             return []
-        results: list[dict[str, str]] = []
-        for d in sorted(self._dir.iterdir()):
-            if not d.is_dir():
-                continue
-            if (d / "plugin.py").exists():
-                results.append({"name": d.name, "path": str(d)})
-        return results
-
-    # ── 批量加载 ──
+        return [
+            {"name": path.name, "path": str(path)}
+            for path in sorted(self._dir.iterdir())
+            if path.is_dir()
+            and (path / "plugin.py").is_file()
+            and not (path / "plugin.disabled").exists()
+        ]
 
     async def load_all(self) -> None:
-        """发现并加载全部可用插件。"""
-        for mod in self.discover():
+        """根据同一个发现快照加载或更新全部插件。"""
+
+        await self.reconcile()
+
+    async def reconcile(self) -> bool:
+        """准备变化候选；失败保留旧代，成功后发布新贡献。"""
+
+        with self._reconcile_lock:
+            return await self._reconcile_once()
+
+    async def _reconcile_once(self) -> bool:
+        """使用单个发现快照执行一轮串行代际协调。"""
+
+        snapshot = {item["name"]: Path(item["path"]) for item in self.discover()}
+        changed = False
+        for name in sorted(snapshot):
+            plugin_dir = snapshot[name]
+            data_dir = self._plugin_data_dir / name if self._plugin_data_dir else None
+            revision = _plugin_revision(plugin_dir, data_dir)
+            with self._lock:
+                active = self._loaded.get(name)
+            if active is not None and active.prepared.revision == revision:
+                continue
             try:
-                await self._load_one(mod)
+                candidate = await self._prepare(name, plugin_dir, revision)
+                await self._publish(candidate)
+                changed = True
             except Exception:
-                logger.exception("plugin load failed: %s", mod["name"])
+                plugin_registry.clear()
+                logger.exception("插件候选加载失败，继续使用上一代: %s", name)
+
+        with self._lock:
+            removed = sorted(set(self._loaded) - set(snapshot))
+        for name in removed:
+            await self._unload(name)
+            changed = True
+
+        if changed and self._on_contributions_changed is not None:
+            self._on_contributions_changed()
+        return changed
 
     async def shutdown_all(self) -> None:
-        """按加载逆序关闭插件，并释放其运行时资源。"""
-        for name, instance in reversed(list(self._loaded.items())):
-            try:
-                await instance.shutdown()
-            except Exception:
-                logger.exception("插件关闭失败: %s", name)
-        self._loaded.clear()
-        self._mcp_servers.clear()
+        """停止 watcher，并按加载逆序关闭全部插件。"""
 
-    # ── 单插件加载与回滚 ──
+        self.stop_watcher()
+        with self._lock:
+            names = list(self._loaded)
+        for name in reversed(names):
+            await self._unload(name)
 
-    async def _load_one(self, mod: dict[str, str]) -> None:
-        """幂等执行启用检查、导入、实例化、绑定和初始化。"""
-        name = mod["name"]
-        pdir = Path(mod["path"])
+    def start_watcher(self, interval_seconds: float = 1.0) -> None:
+        """启动插件代码与插件配置文件的轮询热重载。"""
 
-        if (pdir / "plugin.disabled").exists() or name in self._loaded:
+        if self._watch_thread is not None and self._watch_thread.is_alive():
             return
+        self._watch_stop.clear()
 
-        # 动态导入会触发插件类和装饰器元数据的自动注册。
-        module = _import_module(pdir / "plugin.py", f"plugins.{name}")
+        def watch() -> None:
+            while not self._watch_stop.wait(max(0.2, interval_seconds)):
+                try:
+                    asyncio.run(self.reconcile())
+                except Exception:
+                    logger.exception("插件热重载失败，继续使用当前代")
 
-        # 从本次导入产生的注册结果中取得插件类。
-        cls_name = _find_plugin_class(module, name)
-        if cls_name is None:
-            logger.warning("no Plugin subclass found in %s", name)
-            return
-        cls = plugin_registry.pop_class(cls_name)
-        if cls is None:
-            return
-
-        # 实例化后注入宿主资源与插件私有目录。
-        instance = cls()
-        instance._inject_context(
-            PluginContext(
-                event_bus=self._event_bus,
-                tool_registry=self._tool_registry,
-                workspace=self._workspace,
-                data_dir=(self._plugin_data_dir / name) if self._plugin_data_dir else None,
-            ),
-            pdir,
+        self._watch_thread = threading.Thread(
+            target=watch,
+            name="plugin-config-watcher",
+            daemon=True,
         )
+        self._watch_thread.start()
 
-        plugin_data_dir = (
-            self._plugin_data_dir / name
-            if self._plugin_data_dir is not None
-            else pdir
-        )
-        resolved_mcp_specs: list[McpServerSpec] = []
-        for spec in instance.mcp_servers():
-            if not isinstance(spec, McpServerSpec):
-                raise TypeError(f"插件 {name} 返回了无效的 MCP 声明")
-            resolved_mcp_specs.append(
-                spec.with_plugin_paths(pdir, plugin_data_dir)
-            )
+    def stop_watcher(self) -> None:
+        """停止并等待插件热重载线程退出。"""
 
-        # 绑定生命周期处理器、工具和工具钩子。
-        handlers = plugin_registry.pop_handlers()
-        tools = plugin_registry.pop_tools()
-        self._bind_handlers(instance, name, handlers)
-        self._bind_tools(instance, name, tools)
-        self._bind_tool_hooks(instance, name, handlers)
+        self._watch_stop.set()
+        if self._watch_thread is not None:
+            self._watch_thread.join(timeout=3.0)
+            self._watch_thread = None
 
-        # 收集插件声明的主动信息源。
-        if hasattr(instance, "proactive_sources"):
-            proactive_sources = instance.proactive_sources()
-            if proactive_sources:
-                from flow_agent.proactive.specs import RegisteredProactiveSource
-                registered = [
-                    RegisteredProactiveSource(spec=spec, plugin_id=name)
-                    for spec in proactive_sources
-                ]
-                self._proactive_sources[name] = registered
-                logger.info("plugin %s registered %d proactive sources", name, len(registered))
+    async def _prepare(
+        self,
+        name: str,
+        plugin_dir: Path,
+        revision: str,
+    ) -> _PreparedPlugin:
+        """导入并初始化候选，但不注册任何公开能力。"""
 
-        # 异步初始化失败时撤销此前绑定的能力。
+        plugin_registry.clear()
+        safe_name = re.sub(r"[^0-9A-Za-z_]", "_", name)
+        module_name = f"flow_plugin_{safe_name}_{revision[:12]}"
+        instance: Plugin | None = None
         try:
-            if hasattr(instance, "initialize"):
-                await instance.initialize()
+            module = _import_module(plugin_dir / "plugin.py", module_name, plugin_dir)
+            handlers = plugin_registry.pop_handlers()
+            tools = plugin_registry.pop_tools()
+            cls = _find_plugin_class(module)
+            if cls is None:
+                raise ValueError(f"插件 {name} 未声明 Plugin 子类")
+            instance = cls()
+            data_dir = self._plugin_data_dir / name if self._plugin_data_dir else None
+            instance._inject_context(
+                PluginContext(
+                    event_bus=self._event_bus,
+                    tool_registry=self._tool_registry,
+                    workspace=self._workspace,
+                    data_dir=data_dir,
+                ),
+                plugin_dir,
+            )
+            mcp_servers = [
+                _resolve_mcp_spec(name, spec, plugin_dir, data_dir or plugin_dir)
+                for spec in instance.mcp_servers()
+            ]
+            phase_modules = _collect_phase_modules(instance)
+            proactive_sources = _collect_proactive_sources(instance, name)
+            background_jobs = _collect_background_jobs(instance, name)
+            self._validate_names(name, tools, background_jobs)
+            await instance.initialize()
+            return _PreparedPlugin(
+                name=name,
+                plugin_dir=plugin_dir,
+                revision=revision,
+                module_name=module_name,
+                instance=instance,
+                handlers=handlers,
+                tools=tools,
+                phase_modules=phase_modules,
+                proactive_sources=proactive_sources,
+                mcp_servers=mcp_servers,
+                background_jobs=background_jobs,
+            )
         except Exception:
-            logger.exception("plugin init failed, rolling back: %s", name)
-            self._rollback(instance, name, tools)
+            if instance is not None:
+                try:
+                    await instance.shutdown()
+                except Exception:
+                    logger.exception("插件候选清理失败: %s", name)
+            _discard_modules(module_name)
+            raise
+        finally:
+            plugin_registry.clear()
+
+    def _validate_names(
+        self,
+        plugin_name: str,
+        tools: list[ToolMeta],
+        jobs: list[JobSpec],
+    ) -> None:
+        """在发布前拒绝动态工具和后台任务名称冲突。"""
+
+        tool_names = [item.name for item in tools]
+        if len(tool_names) != len(set(tool_names)):
+            raise ValueError(f"插件 {plugin_name} 存在重复工具名称")
+        if self._tool_registry is not None:
+            existing = self._tool_registry.list_tool_names()
+            with self._lock:
+                old = self._loaded.get(plugin_name)
+            if old is not None:
+                existing.difference_update(old.tool_names)
+            conflicts = existing.intersection(tool_names)
+            if conflicts:
+                raise ValueError(f"插件工具名称冲突: {', '.join(sorted(conflicts))}")
+
+        job_names = [item.name for item in jobs]
+        if len(job_names) != len(set(job_names)):
+            raise ValueError(f"插件 {plugin_name} 存在重复后台任务名称")
+
+    async def _publish(self, candidate: _PreparedPlugin) -> None:
+        """以候选贡献替换同名旧插件，并清理旧实例。"""
+
+        name = candidate.name
+        with self._lock:
+            previous = self._loaded.get(name)
+        subscribers = self._bind_handlers(candidate)
+        hooks = self._build_hooks(candidate)
+        tool_entries = self._build_tools(candidate)
+        tools = [tool.name for tool, _ in tool_entries]
+        replaced_tools = False
+        if self._tool_registry is not None:
+            previous_names = set(previous.tool_names) if previous is not None else set()
+            if hasattr(self._tool_registry, "replace_many"):
+                self._tool_registry.replace_many(previous_names, tool_entries)
+                replaced_tools = True
+            else:
+                for tool, risk in tool_entries:
+                    self._tool_registry.register_with_meta(
+                        tool,
+                        risk=risk,
+                        source_type="plugin",
+                        source_name=candidate.name,
+                    )
+        jobs = self._bind_jobs(candidate)
+        self._tool_hook_executor.replace_plugin(name, hooks)
+        active = _ActivePlugin(
+            prepared=candidate,
+            subscribers=subscribers,
+            tool_names=tools,
+            job_names=jobs,
+        )
+        with self._lock:
+            self._loaded[name] = active
+        if previous is not None:
+            self._remove_bindings(
+                previous,
+                keep_tools=(
+                    set(previous.tool_names) if replaced_tools else set(tools)
+                ),
+                keep_jobs=set(jobs),
+            )
+            try:
+                await previous.prepared.instance.shutdown()
+            except Exception:
+                logger.exception("插件旧代关闭失败: %s", name)
+            _discard_modules(previous.prepared.module_name)
+        logger.info("插件代际已发布: %s revision=%s", name, candidate.revision[:12])
+
+    async def _unload(self, name: str) -> None:
+        """注销插件能力并关闭实例，但保留 plugin-data。"""
+
+        with self._lock:
+            active = self._loaded.pop(name, None)
+        if active is None:
             return
+        self._remove_bindings(active)
+        self._tool_hook_executor.unregister_plugin(name)
+        try:
+            await active.prepared.instance.shutdown()
+        except Exception:
+            logger.exception("插件关闭失败: %s", name)
+        _discard_modules(active.prepared.module_name)
 
-        self._mcp_servers.extend(resolved_mcp_specs)
-
-        self._loaded[name] = instance
-        logger.info("plugin loaded: %s", name)
-
-    # ── 生命周期事件绑定 ──
-
-    def _bind_handlers(self, instance: Plugin, module_path: str, metas: list[HandlerMeta]) -> None:
-        """把插件生命周期处理器注册到事件总线。"""
+    def _bind_handlers(self, candidate: _PreparedPlugin) -> list[Any]:
+        subscribers: list[Any] = []
         if self._event_bus is None:
-            return
-        for md in metas:
-            if md.kind != MetadataKind.LIFECYCLE:
+            return subscribers
+        for meta in candidate.handlers:
+            if meta.kind != MetadataKind.LIFECYCLE:
                 continue
-            bound = functools.partial(md.handler, instance)
-            self._event_bus.subscribe(_EventSub(bound, md.event_type))
-
-    # ── 工具钩子绑定 ──
-
-    def _bind_tool_hooks(self, instance: Plugin, module_path: str, metas: list[HandlerMeta]) -> None:
-        """把插件工具钩子处理器转换为宿主适配器。"""
-        for md in metas:
-            if md.kind != MetadataKind.TOOL_HOOK:
-                continue
-            bound_handler = functools.partial(md.handler, instance)
-            hook = _PluginToolHook(
-                tool_name=md.tool_name,
-                priority=md.priority,
-                handler=lambda ctx, h=bound_handler: h(ctx),
+            subscriber = _EventSub(
+                functools.partial(meta.handler, candidate.instance),
+                meta.event_type,
             )
-            self._tool_hook_executor.register(hook)
+            self._event_bus.subscribe(subscriber)
+            subscribers.append(subscriber)
+        return subscribers
 
-    # ── 工具注册 ──
+    def _build_hooks(self, candidate: _PreparedPlugin) -> list[_PluginToolHook]:
+        hooks: list[_PluginToolHook] = []
+        for meta in candidate.handlers:
+            if meta.kind != MetadataKind.TOOL_HOOK:
+                continue
+            hooks.append(_PluginToolHook(
+                tool_name=meta.tool_name,
+                priority=meta.priority,
+                handler=functools.partial(meta.handler, candidate.instance),
+                plugin_id=candidate.name,
+            ))
+        return hooks
 
-    def _bind_tools(self, instance: Plugin, module_path: str, metas: list[ToolMeta]) -> None:
-        """为装饰器工具创建动态适配器并注册到工具表。"""
+    def _build_tools(
+        self,
+        candidate: _PreparedPlugin,
+    ) -> list[tuple[_DynamicTool, str]]:
         if self._tool_registry is None:
-            return
+            return []
+        entries: list[tuple[_DynamicTool, str]] = []
+        for meta in candidate.tools:
+            tool = _DynamicTool(
+                name=meta.name,
+                description=meta.description,
+                schema=meta.schema,
+                execute_fn=functools.partial(meta.handler, candidate.instance),
+            )
+            entries.append((tool, "external-side-effect"))
+        return entries
+
+    def _bind_jobs(self, candidate: _PreparedPlugin) -> list[str]:
+        if self._background_registry is None:
+            return []
         names: list[str] = []
-        for tm in metas:
-            # 每个处理器独立包装，避免插件实现依赖宿主工具基类。
-            bound = functools.partial(tm.handler, instance)
-            tool_inst = _DynamicTool(
-                name=tm.name,
-                description=tm.description,
-                schema=tm.schema,
-                execute_fn=bound,
-            )
-            self._tool_registry.register_with_meta(
-                tool_inst,
-                risk="external-side-effect",
-                source_type="plugin",
-                source_name=module_path,
-            )
-            names.append(tm.name)
-        self._tool_names[module_path] = names
+        for spec in candidate.background_jobs:
+            qualified = f"{candidate.name}:{spec.name}"
+            self._background_registry.register(JobSpec(
+                name=qualified,
+                func=spec.func,
+                max_retries=spec.max_retries,
+            ))
+            names.append(qualified)
+        return names
 
-    # ── 回滚 ──
+    def _remove_bindings(
+        self,
+        active: _ActivePlugin,
+        *,
+        keep_tools: set[str] | None = None,
+        keep_jobs: set[str] | None = None,
+    ) -> None:
+        keep_tools = keep_tools or set()
+        keep_jobs = keep_jobs or set()
+        if self._event_bus is not None:
+            for subscriber in active.subscribers:
+                self._event_bus.unsubscribe(subscriber)
+        if self._tool_registry is not None:
+            for name in active.tool_names:
+                if name not in keep_tools:
+                    self._tool_registry.unregister(name)
+        if self._background_registry is not None:
+            for name in active.job_names:
+                if name not in keep_jobs:
+                    self._background_registry.unregister(name)
 
-    def _rollback(self, instance: Plugin, module_path: str, tools: list[ToolMeta]) -> None:
-        """初始化失败时注销工具并清理钩子。"""
-        for name in self._tool_names.pop(module_path, []):
-            if self._tool_registry and hasattr(self._tool_registry, "unregister"):
-                self._tool_registry.unregister(name)
-        for tm in tools:
-            plugin_registry.add_tool(tm)  # 放回注册池供后续重试
-        self._tool_hook_executor.unregister_all()
+
+def _plugin_revision(plugin_dir: Path, data_dir: Path | None) -> str:
+    """计算插件代码、声明和用户配置文件的稳定修订。"""
+
+    digest = hashlib.sha256()
+    paths = list(plugin_dir.rglob("*"))
+    if data_dir is not None:
+        paths.extend(
+            path
+            for name in ("plugin_config.json", "config.local.toml")
+            if (path := data_dir / name).exists()
+        )
+    for path in sorted(paths, key=lambda item: str(item)):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.suffix.lower() not in {".py", ".json", ".toml", ".yaml", ".yml"}:
+            continue
+        stat = path.stat()
+        try:
+            relative = path.relative_to(plugin_dir)
+        except ValueError:
+            relative = Path("plugin-data") / path.name
+        digest.update(str(relative).encode())
+        digest.update(f"{stat.st_mtime_ns}:{stat.st_size}".encode())
+    return digest.hexdigest()
 
 
-# ── 辅助函数 ──
+def _import_module(filepath: Path, package_name: str, plugin_dir: Path):
+    """建立独立包并直接编译源码，支持相对导入且不复用旧字节码。"""
 
-def _import_module(filepath: Path, modname: str):
-    spec = importlib.util.spec_from_file_location(modname, filepath)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {filepath}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    package = ModuleType(package_name)
+    package.__path__ = [str(plugin_dir)]
+    package.__package__ = package_name
+    sys.modules[package_name] = package
+    module_name = f"{package_name}.plugin"
+    module = ModuleType(module_name)
+    module.__file__ = str(filepath)
+    module.__package__ = package_name
+    sys.modules[module_name] = module
+    source = filepath.read_text(encoding="utf-8")
+    exec(compile(source, str(filepath), "exec"), module.__dict__)
     return module
 
 
-def _find_plugin_class(module, dirname: str) -> str | None:
-    for attr in dir(module):
-        obj = getattr(module, attr)
-        if isinstance(obj, type) and issubclass(obj, Plugin) and obj is not Plugin:
-            return attr
+def _discard_modules(package_name: str) -> None:
+    """移除一个插件代际包及其相对导入的全部子模块。"""
+
+    for name in [
+        item
+        for item in sys.modules
+        if item == package_name or item.startswith(package_name + ".")
+    ]:
+        sys.modules.pop(name, None)
+
+
+def _find_plugin_class(module) -> type[Plugin] | None:
+    for value in vars(module).values():
+        if isinstance(value, type) and issubclass(value, Plugin) and value is not Plugin:
+            return value
     return None
 
 
-# ── 动态工具包装器 ──
+def _resolve_mcp_spec(
+    plugin_name: str,
+    spec: McpServerSpec,
+    plugin_dir: Path,
+    data_dir: Path,
+) -> McpServerSpec:
+    if not isinstance(spec, McpServerSpec):
+        raise TypeError(f"插件 {plugin_name} 返回了无效的 MCP 声明")
+    return spec.with_plugin_paths(plugin_dir, data_dir)
+
+
+def _collect_phase_modules(instance: Plugin) -> list[Any]:
+    """按被动回合顺序收集插件声明的阶段模块。"""
+
+    modules: list[Any] = []
+    for method_name in (
+        "turn_started_modules",
+        "before_turn_modules",
+        "before_reasoning_modules",
+        "prompt_render_modules",
+        "reasoner_modules",
+        "after_reasoning_modules",
+        "after_turn_modules",
+    ):
+        for module in getattr(instance, method_name)() or []:
+            if module not in modules:
+                modules.append(module)
+    return modules
+
+
+def _collect_proactive_sources(instance: Plugin, plugin_name: str) -> list[Any]:
+    sources = instance.proactive_sources() or []
+    if not sources:
+        return []
+    from flow_agent.proactive.specs import RegisteredProactiveSource
+
+    return [
+        RegisteredProactiveSource(spec=spec, plugin_id=plugin_name)
+        for spec in sources
+    ]
+
+
+def _collect_background_jobs(instance: Plugin, plugin_name: str) -> list[JobSpec]:
+    jobs = instance.background_jobs() or []
+    if not all(isinstance(job, JobSpec) for job in jobs):
+        raise TypeError(f"插件 {plugin_name} 返回了无效的后台任务")
+    return list(jobs)
+
 
 class _DynamicTool:
-    """为插件装饰器方法创建的工具实例。"""
+    """把插件方法适配为宿主工具协议。"""
 
     def __init__(self, name: str, description: str, schema: dict | None, execute_fn) -> None:
         self._name = name
-        self._desc = description
+        self._description = description
         self._schema = schema or {}
-        self._fn = execute_fn
+        self._execute = execute_fn
 
     @property
     def name(self) -> str:
@@ -272,7 +579,7 @@ class _DynamicTool:
 
     @property
     def description(self) -> str:
-        return self._desc
+        return self._description
 
     @property
     def input_schema(self) -> dict:
@@ -280,28 +587,29 @@ class _DynamicTool:
 
     def run(self, tool_input: dict):
         from flow_agent.tools.base import ToolResult
-        import asyncio
+
         try:
-            result = self._fn(**tool_input)
+            result = self._execute(**tool_input)
             if asyncio.iscoroutine(result):
                 result = asyncio.run(result)
             return ToolResult(ok=True, content=str(result))
         except Exception as exc:
-            return ToolResult(ok=False, content=f"plugin tool error: {exc}")
+            return ToolResult(ok=False, content=f"插件工具执行失败: {exc}")
 
-
-# ── 事件订阅适配器 ──
 
 class _EventSub:
-    def __init__(self, handler, event_type: str):
+    """只向匹配事件类型的插件生命周期处理器分发事件。"""
+
+    def __init__(self, handler, event_type: str) -> None:
         self.handler = handler
         self.event_type = event_type
 
     def on_event(self, event) -> None:
-        import asyncio
+        if getattr(event, "event_type", "") != self.event_type:
+            return
         try:
             result = self.handler(ctx=event)
             if asyncio.iscoroutine(result):
                 asyncio.run(result)
         except Exception:
-            logger.exception("plugin event handler failed")
+            logger.exception("插件生命周期处理器执行失败: %s", self.event_type)

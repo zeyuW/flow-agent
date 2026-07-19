@@ -39,6 +39,13 @@ def clear_settings_cache() -> None:
     _SETTINGS_CACHE = None
 
 
+def replace_settings_cache(candidate: Settings | None) -> None:
+    """供配置 watcher 在提交失败时恢复上一版配置快照。"""
+
+    global _SETTINGS_CACHE
+    _SETTINGS_CACHE = candidate
+
+
 def load_settings(*, force_reload: bool = False) -> Settings:
     global _SETTINGS_CACHE
     if _SETTINGS_CACHE is not None and not force_reload:
@@ -239,6 +246,23 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             telegram_target_user_id=values.get_str(
                 ("proactive", "telegram_target_user_id"),
                 "",
+            ),
+            idle_enabled=values.get_bool(
+                ("proactive", "idle_enabled"),
+                False,
+            ),
+            idle_threshold_minutes=values.get_float(
+                ("proactive", "idle_threshold_minutes"),
+                120.0,
+                minimum=1.0,
+            ),
+            interest_topics=tuple(
+                item.strip()
+                for item in values.get_str(
+                    ("proactive", "interest_topics"),
+                    "",
+                ).split(",")
+                if item.strip()
             ),
             state_path=values.get_str(
                 ("proactive", "state_path"),

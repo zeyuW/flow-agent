@@ -8,7 +8,7 @@ from typing import Any
 
 from flow_agent.mcp.builtin import builtin_mcp_catalog
 from flow_agent.mcp.config import McpServerSpec, load_project_mcp_specs, merge_mcp_specs
-from flow_agent.mcp.mcp_client import McpClient, McpToolInfo
+from flow_agent.mcp.mcp_client import McpClient
 from flow_agent.mcp.tool_wrapper import McpToolWrapper
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,18 @@ class McpServerRegistry:
             self._replace_generation(specs)
             self._revision = revision
 
+    def update_additional_specs(self, specs: list[McpServerSpec]) -> None:
+        """更新插件贡献的 MCP 声明，并尝试原子发布新代。"""
+
+        with self._generation_lock:
+            previous = self._additional_specs
+            self._additional_specs = list(specs)
+            try:
+                self.reload()
+            except Exception:
+                self._additional_specs = previous
+                raise
+
     def stop_all(self) -> None:
         """注销全部 MCP 工具并关闭所有服务进程。"""
         logger.debug("MCP registry stopping watcher")
@@ -72,7 +84,14 @@ class McpServerRegistry:
         logger.debug("MCP registry stopping clients")
         with self._generation_lock:
             clients = list(self._clients.values())
-            for tool_names in self._server_tools.values():
+            tool_names = {
+                tool_name
+                for names in self._server_tools.values()
+                for tool_name in names
+            }
+            if hasattr(self.tool_registry, "replace_many"):
+                self.tool_registry.replace_many(tool_names, [])
+            else:
                 for tool_name in tool_names:
                     self.tool_registry.unregister(tool_name)
             self._server_tools.clear()
@@ -106,7 +125,7 @@ class McpServerRegistry:
     def _replace_generation(self, specs: list[McpServerSpec]) -> None:
         """先预热全部候选服务，成功后再替换旧代。"""
         candidates: dict[str, McpClient] = {}
-        candidate_tools: dict[str, list[McpToolInfo]] = {}
+        candidate_tools: dict[str, list[Any]] = {}
         try:
             for spec in specs:
                 client = McpClient(
@@ -125,41 +144,35 @@ class McpServerRegistry:
 
         old_clients = self._clients
         old_tools = self._server_tools
-        for tool_names in old_tools.values():
-            for tool_name in tool_names:
+        old_tool_names = {
+            tool_name
+            for names in old_tools.values()
+            for tool_name in names
+        }
+        new_server_tools: dict[str, list[str]] = {}
+        additions: list[tuple[McpToolWrapper, str]] = []
+        for name, client in candidates.items():
+            wrappers = [
+                McpToolWrapper(client=client, info=info, server_name=name)
+                for info in candidate_tools[name]
+            ]
+            new_server_tools[name] = [wrapper.name for wrapper in wrappers]
+            additions.extend(
+                (wrapper, "external-side-effect") for wrapper in wrappers
+            )
+        if hasattr(self.tool_registry, "replace_many"):
+            self.tool_registry.replace_many(old_tool_names, additions)
+        else:
+            for tool_name in old_tool_names:
                 self.tool_registry.unregister(tool_name)
+            for wrapper, _ in additions:
+                self.tool_registry.register(wrapper)
 
         self._clients = candidates
-        self._server_tools = {}
-        for name, client in candidates.items():
-            self._register_tools(name, client, candidate_tools[name])
+        self._server_tools = new_server_tools
         for client in old_clients.values():
             client.stop()
         logger.info("MCP generation published: servers=%d", len(candidates))
-
-    def _register_tools(
-        self,
-        server_name: str,
-        client: McpClient,
-        tool_infos: list[McpToolInfo],
-    ) -> list[str]:
-        """将 MCP 工具包装并注册到 ToolRegistry（spec 2f）。"""
-        tool_names: list[str] = []
-        for info in tool_infos:
-            wrapper = McpToolWrapper(client=client, info=info, server_name=server_name)
-            # 检查 ToolRegistry 是否有 register_with_meta 方法
-            if hasattr(self.tool_registry, 'register_with_meta'):
-                self.tool_registry.register_with_meta(
-                    wrapper,
-                    risk="external-side-effect",
-                    source_type="mcp",
-                    source_name=server_name,
-                )
-            else:
-                self.tool_registry.register(wrapper)
-            tool_names.append(wrapper.name)
-        self._server_tools[server_name] = tool_names
-        return tool_names
 
     # ── 查询 ──
 

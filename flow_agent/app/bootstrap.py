@@ -2,6 +2,7 @@ from pathlib import Path
 from dataclasses import asdict
 
 from flow_agent.config.settings import settings
+from flow_agent.config.watcher import ConfigWatcher
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.event_bus import EventBus
 from flow_agent.core.agent_loop import AgentLoop
@@ -29,7 +30,12 @@ from flow_agent.memory.maintenance import (
 from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
-from flow_agent.background.store import InMemoryJobStore
+from flow_agent.background.store import SQLiteJobStore
+from flow_agent.background.tools import (
+    ListBackgroundJobsTool,
+    ListBackgroundRunsTool,
+    RunBackgroundJobTool,
+)
 from flow_agent.scheduler.runtime import SchedulerService
 from flow_agent.scheduler.tools import (
     CancelScheduledTaskTool,
@@ -44,6 +50,9 @@ from flow_agent.runtime.workspace import init_workspace
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import build_proactive_runtime
 from flow_agent.proactive.mcp_pool import RegistryMcpPool
+from flow_agent.proactive.gate import ProactiveStateStore
+from flow_agent.proactive.specs import ProactiveSourceSpecImpl, RegisteredProactiveSource
+from flow_agent.proactive.tools import ConfigureProactivePolicyTool, GetProactiveStatusTool
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
@@ -182,6 +191,8 @@ def create_passive_turn_pipeline(
     memory_engine: MemoryEngine | None = None,
     markdown_store=None,
     recorder=None,
+    phase_modules_provider=None,
+    tool_hook_executor=None,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
 
@@ -200,6 +211,8 @@ def create_passive_turn_pipeline(
         delegation_policy=DelegationPolicy(),
         tool_selection_max=cfg.tooling.tool_selection_max,
         enable_thinking=cfg.model.enable_thinking,
+        phase_modules_provider=phase_modules_provider,
+        tool_hook_executor=tool_hook_executor,
     )
 
 
@@ -242,10 +255,14 @@ def create_app_runtime():
     message_bus = create_message_bus()
     event_bus = create_event_bus()
 
+    background_registry = InMemoryJobRegistry()
+    background_store = SQLiteJobStore(WORKSPACE_LAYOUT.background_jobs_db)
+
     plugin_manager = PluginManager(
         WORKSPACE_LAYOUT.plugins_dir,
         event_bus=event_bus,
         tool_registry=tool_registry,
+        background_registry=background_registry,
         workspace=WORKSPACE_LAYOUT.flow_dir,
         plugin_data_dir=WORKSPACE_LAYOUT.plugin_data_dir,
     )
@@ -259,6 +276,13 @@ def create_app_runtime():
             # 声明或连接失败不应阻止被动对话启动；修复声明后重启即可重试。
             import logging
             logging.getLogger(__name__).exception("MCP 服务代际启动失败")
+        else:
+            plugin_manager.set_contributions_callback(
+                lambda: mcp_registry.update_additional_specs(
+                    plugin_manager.get_mcp_servers()
+                )
+            )
+    plugin_manager.start_watcher()
 
     # 创建记忆运行时（双层记忆架构）
     memory_runtime = build_memory_runtime(
@@ -300,6 +324,8 @@ def create_app_runtime():
         memory_engine=memory_runtime.engine,
         markdown_store=memory_runtime.markdown_store,
         recorder=recorder,
+        phase_modules_provider=plugin_manager.get_phase_modules,
+        tool_hook_executor=plugin_manager.tool_hook_executor,
     )
 
     # 创建 Agent 主循环
@@ -308,8 +334,6 @@ def create_app_runtime():
         pipeline=pipeline,
     )
 
-    background_store = InMemoryJobStore()
-    background_registry = InMemoryJobRegistry()
     scheduler = SchedulerService(
         store_path=WORKSPACE_LAYOUT.scheduled_tasks_db,
         inbound_queue=message_bus.inbound,
@@ -320,14 +344,65 @@ def create_app_runtime():
         registry=background_registry,
         store=background_store,
         scheduler=scheduler,
+        max_async_queue=cfg.jobs.max_async_queue,
+        shutdown_timeout_seconds=cfg.jobs.timeout_seconds,
+    )
+    tool_registry.register_with_meta(
+        RunBackgroundJobTool(background_runtime),
+        risk="external-side-effect",
+    )
+    tool_registry.register_with_meta(
+        ListBackgroundJobsTool(background_runtime),
+        risk="read-only",
+    )
+    tool_registry.register_with_meta(
+        ListBackgroundRunsTool(background_runtime),
+        risk="read-only",
     )
     tool_registry.register_with_meta(CurrentTimeTool(), risk="read-only")
     tool_registry.register_with_meta(ScheduleTaskTool(scheduler), risk="write")
     tool_registry.register_with_meta(ListScheduledTasksTool(scheduler), risk="read-only")
     tool_registry.register_with_meta(CancelScheduledTaskTool(scheduler), risk="write")
 
+    proactive_state = ProactiveStateStore(cfg.proactive.state_path)
+    proactive_target = cfg.proactive.telegram_target_user_id or ""
+    if proactive_target:
+        proactive_state.set_policy(
+            proactive_target,
+            enabled=cfg.proactive.idle_enabled,
+            idle_threshold_seconds=cfg.proactive.idle_threshold_minutes * 60,
+            topics=cfg.proactive.interest_topics,
+        )
+    if proactive_target and proactive_state.get_last_user_interaction(proactive_target) <= 0:
+        previous_interaction = proactive_state.get_latest_interaction_event()
+        if previous_interaction > 0:
+            proactive_state.record_user_interaction(
+                proactive_target,
+                timestamp=previous_interaction,
+            )
+    tool_registry.register_with_meta(
+        ConfigureProactivePolicyTool(proactive_state),
+        risk="write",
+    )
+    tool_registry.register_with_meta(
+        GetProactiveStatusTool(proactive_state),
+        risk="read-only",
+    )
+
     # 插件系统暂时禁用，避免异步问题
-    proactive_sources = plugin_manager.get_proactive_sources()
+    proactive_sources = dict(plugin_manager.get_proactive_sources())
+    if cfg.mcp.enabled and "ai-news" in mcp_registry.server_names:
+        proactive_sources.setdefault("builtin", []).append(
+            RegisteredProactiveSource(
+                spec=ProactiveSourceSpecImpl(
+                    id="ai-news",
+                    channels=("content",),
+                    server="ai-news",
+                    fetch_tool="get_ai_news",
+                ),
+                plugin_id="builtin",
+            )
+        )
 
     local_sources = [
         LocalFileSource(WORKSPACE_LAYOUT.proactive_source_file),
@@ -342,7 +417,7 @@ def create_app_runtime():
         proactive_channel = "telegram" if cfg.channels.telegram_enabled else "cli"
         proactive_loop = build_proactive_runtime(
             enabled=True,
-            chat_id=cfg.proactive.telegram_target_user_id or "",
+            chat_id=proactive_target,
             llm_client=OpenAILLMClient(
                 cfg,
                 model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
@@ -359,6 +434,9 @@ def create_app_runtime():
             max_per_day=cfg.proactive.max_per_day,
             min_interval=cfg.proactive.min_interval,
             max_interval=cfg.proactive.max_interval,
+            is_busy_fn=lambda: agent_loop.is_processing(
+                proactive_target
+            ),
             cooldown=cfg.proactive.cooldown,
             drift_enabled=cfg.drift.enabled,
             drift_data_dir=cfg.drift.data_dir,
@@ -374,7 +452,47 @@ def create_app_runtime():
             state_path=cfg.proactive.state_path,
             trace_path=cfg.proactive.trace_path,
             channel=proactive_channel,
+            state_store=proactive_state,
         )
+
+    def apply_runtime_settings(candidate) -> None:
+        """只提交无需重建渠道、模型或存储连接的热更新字段。"""
+
+        import logging
+
+        if proactive_loop is not None:
+            proactive_loop.apply_runtime_config(
+                min_interval=candidate.proactive.min_interval,
+                max_interval=candidate.proactive.max_interval,
+                max_per_day=candidate.proactive.max_per_day,
+                cooldown=candidate.proactive.cooldown,
+                base_intensity=candidate.proactive.hawkes_base_intensity,
+                excitation_alpha=candidate.proactive.hawkes_excitation_alpha,
+                decay_beta=candidate.proactive.hawkes_decay_beta,
+                time_constant=candidate.proactive.hawkes_time_constant,
+                drift_min_interval_hours=candidate.drift.min_interval_hours,
+            )
+        if proactive_target:
+            proactive_state.set_policy(
+                proactive_target,
+                enabled=candidate.proactive.idle_enabled,
+                idle_threshold_seconds=(
+                    candidate.proactive.idle_threshold_minutes * 60
+                ),
+                topics=candidate.proactive.interest_topics,
+            )
+        logging.getLogger().setLevel(candidate.logging.level.upper())
+        pipeline.max_tool_steps = candidate.tooling.max_tool_steps
+        pipeline.tool_selection_max = max(1, candidate.tooling.tool_selection_max)
+        background_runtime.max_async_queue = candidate.jobs.max_async_queue
+        background_runtime.shutdown_timeout_seconds = candidate.jobs.timeout_seconds
+        mcp_registry.startup_timeout = candidate.mcp.startup_timeout_seconds
+        mcp_registry.call_timeout = candidate.mcp.call_timeout_seconds
+
+    background_runtime.config_watcher = ConfigWatcher(
+        PROJECT_ROOT / "config.toml",
+        apply_runtime_settings,
+    )
 
     runtime_service = create_runtime_service(
         proactive_loop=proactive_loop,

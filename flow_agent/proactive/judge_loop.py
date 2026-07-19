@@ -21,6 +21,7 @@ _JUDGE_SYSTEM = """你是一个主动内容评估器。你接收候选项目并�
 
 规则:
 - 根据用户偏好和最近上下文评估每个项目。
+- recall_memory 每轮最多调用一次；得到结果后必须开始分类候选，不能重复查询同类偏好。
 - 稳定用户画像和近期上下文只用于筛选、排序和判断打扰时机，不得据此编造候选内容之外的事实。
 - 保持主动性：如果项目包含重要信息、紧急警报、安全警告或时间敏感更新，将其标记为有趣。
 - 安全警报、紧急系统消息和关键更新应始终标记为有趣。
@@ -54,7 +55,13 @@ class JudgeLoop:
         self._markdown = markdown_store
         self._max_steps = max_steps
 
-    async def evaluate(self, gateway: GatewayResult, chat_id: str = "") -> JudgeResult:
+    async def evaluate(
+        self,
+        gateway: GatewayResult,
+        chat_id: str = "",
+        *,
+        policy_topics: tuple[str, ...] = (),
+    ) -> JudgeResult:
         """运行 judge 循环：LLM 通过工具分类内容。"""
         items = gateway.all_items
         if not items:
@@ -80,6 +87,14 @@ class JudgeLoop:
                     f"{memory_context}"
                 ),
             })
+        if policy_topics:
+            messages.append({
+                "role": "system",
+                "content": (
+                    "用户明确配置的主动关注主题如下；优先挑选与这些主题相关且有新增价值的内容："
+                    + "、".join(policy_topics)
+                ),
+            })
         messages.append({
             "role": "user",
             "content": f"Evaluate these items:\n\n{item_list}",
@@ -90,10 +105,19 @@ class JudgeLoop:
         draft_message = ""
         decision = ""
         finished = False
+        recall_used = False
 
         for step in range(self._max_steps):
             logger.info(f"Judge step {step+1}/{self._max_steps}")
-            response = self._llm.generate(messages=messages, tools=TOOL_SCHEMAS)
+            current_tools = [
+                schema
+                for schema in TOOL_SCHEMAS
+                if not (
+                    recall_used
+                    and schema.get("function", {}).get("name") == "recall_memory"
+                )
+            ]
+            response = self._llm.generate(messages=messages, tools=current_tools)
             logger.info(f"Judge response: {response.content[:200]}, tool_calls: {len(response.tool_calls or [])}")
 
             if not response.tool_calls:
@@ -113,7 +137,26 @@ class JudgeLoop:
             requested_decision = ""
             for tc in response.tool_calls:
                 logger.info(f"Tool call: {tc.name}, args: {tc.arguments}")
-                result_text = self._dispatch_tool(tc, items, interesting, discarded, draft_message)
+                if tc.name == "recall_memory":
+                    if recall_used:
+                        result_text = "本轮已经查询过记忆，请立即分类候选并完成评估。"
+                    else:
+                        recall_used = True
+                        result_text = self._dispatch_tool(
+                            tc,
+                            items,
+                            interesting,
+                            discarded,
+                            draft_message,
+                        )
+                else:
+                    result_text = self._dispatch_tool(
+                        tc,
+                        items,
+                        interesting,
+                        discarded,
+                        draft_message,
+                    )
                 tool_results.append((tc, result_text))
                 if tc.name == "message_push":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
@@ -121,7 +164,15 @@ class JudgeLoop:
                     logger.info(f"Draft message staged: {draft_message[:100]}...")
                 elif tc.name == "finish_turn":
                     args = tc.arguments if isinstance(tc.arguments, dict) else {}
-                    requested_decision = args.get("decision", "skip")
+                    requested = args.get("decision", "skip")
+                    if requested == "reply" and not draft_message:
+                        tool_results[-1] = (
+                            tc,
+                            "不能在没有 message_push 草稿时完成 reply；"
+                            "请先生成真实候选内容对应的消息。",
+                        )
+                    else:
+                        requested_decision = requested
 
             messages.append({"role": "assistant", "content": response.content, "tool_calls": [
                 {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments if isinstance(tc.arguments, dict) else {})}}
@@ -143,7 +194,17 @@ class JudgeLoop:
                 break
 
         if not decision:
-            decision = "reply" if draft_message else "skip"
+            if policy_topics and items:
+                fallback_items = items[:3]
+                interesting.extend(str(index) for index in range(len(fallback_items)))
+                draft_message = _build_policy_fallback_message(fallback_items)
+                decision = "reply"
+                logger.warning(
+                    "Judge 未完成工具协议，按明确兴趣主题生成保守兜底消息: topics=%s",
+                    policy_topics,
+                )
+            else:
+                decision = "reply" if draft_message else "skip"
 
         # 强制分类未分类的项目
         classified = set(interesting) | set(discarded)
@@ -209,3 +270,25 @@ def _resolve_item_ids(references: list[str], items: list[DataItem]) -> list[str]
         if item_id and item_id not in resolved:
             resolved.append(item_id)
     return resolved
+
+
+def _build_policy_fallback_message(items: list[DataItem]) -> str:
+    """模型未完成协议时，用真实候选字段生成不编造的简短推送。"""
+
+    lines = ["你可能会感兴趣的最新内容："]
+    for index, item in enumerate(items, start=1):
+        lines.append(f"\n{index}. {item.title}")
+        summary = item.summary.strip()
+        if summary:
+            lines.append(summary[:240])
+        url = next(
+            (
+                line.strip()
+                for line in item.content.splitlines()
+                if line.strip().startswith(("http://", "https://"))
+            ),
+            "",
+        )
+        if url:
+            lines.append(url)
+    return "\n".join(lines)

@@ -30,6 +30,21 @@ class ToolRegistry:
             if hasattr(self, '_execution_policy'):
                 self._execution_policy.risk_by_tool.pop(tool_name, None)
 
+    def replace_many(
+        self,
+        remove_names: set[str],
+        additions: list[tuple[Any, str]],
+    ) -> None:
+        """在同一个锁内替换一组动态工具及其风险元数据。"""
+
+        with self._lock:
+            for name in remove_names:
+                self._tools.pop(name, None)
+                self._execution_policy.risk_by_tool.pop(name, None)
+            for tool, risk in additions:
+                self._tools[tool.name] = tool
+                self._execution_policy.risk_by_tool[tool.name] = risk
+
     def list_tool_descriptions(self) -> list[dict[str, str]]:
         with self._lock:
             return [
@@ -123,6 +138,17 @@ class ToolRegistry:
         all_tools = self.list_openai_tools()
         if not user_input.strip() or len(all_tools) <= max_tools:
             return all_tools[:max_tools]
+        normalized_input = user_input.lower()
+        explicitly_named = [
+            item
+            for item in all_tools
+            if str(item.get("function", {}).get("name", "")).lower()
+            in normalized_input
+        ]
+        explicitly_named_names = {
+            str(item.get("function", {}).get("name", ""))
+            for item in explicitly_named
+        }
         query_tokens = _tokenize(user_input)
         scored: list[tuple[float, dict[str, Any]]] = []
         for item in all_tools:
@@ -138,7 +164,14 @@ class ToolRegistry:
                 score += 0.05
             scored.append((score, item))
         scored.sort(key=lambda x: x[0], reverse=True)
-        picked = [item for score, item in scored if score > 0][:max_tools]
+        ranked = [
+            item
+            for score, item in scored
+            if score > 0
+            and str(item.get("function", {}).get("name", ""))
+            not in explicitly_named_names
+        ]
+        picked = (explicitly_named + ranked)[:max_tools]
         if picked:
             return picked
         return all_tools[:max_tools]

@@ -73,6 +73,27 @@ class ProactiveTurnPipeline:
 
             tick.phase_trace.append("fetch")
             tick.gateway_result = await self._gateway.run()
+            logger.info(
+                "主动数据采集完成: alerts=%d content=%d context=%d errors=%d",
+                len(tick.gateway_result.alerts),
+                len(tick.gateway_result.content),
+                len(tick.gateway_result.context),
+                len(tick.gateway_result.errors),
+            )
+
+            if not tick.gateway_result.all_items and tick.gateway_result.errors:
+                tick.judge_result = JudgeResult(
+                    decision="skip",
+                    evidence={
+                        "reason": "source_error",
+                        "errors": list(tick.gateway_result.errors),
+                    },
+                )
+                logger.warning(
+                    "主动检查因数据源故障跳过，不进入漂移: errors=%s",
+                    tick.gateway_result.errors,
+                )
+                return tick
 
             drift_pipeline = self._drift
             if (
@@ -80,9 +101,20 @@ class ProactiveTurnPipeline:
                 and drift_pipeline is not None
             ):
                 tick.phase_trace.append("drift")
-                drift_tick = await drift_pipeline.run(connected_mcp=set())
+                connected_mcp = set(
+                    getattr(self._mcp_pool, "connected_names", set())
+                )
+                drift_tick = await drift_pipeline.run(connected_mcp=connected_mcp)
                 tick.drift_tick = drift_tick
-                self._state.mark_drift_run()
+                if drift_tick.finished and drift_tick.runs:
+                    self._state.mark_drift_run()
+                else:
+                    logger.info(
+                        "主动检查未执行漂移任务: skills=%d runs=%d finished=%s",
+                        len(drift_tick.skills),
+                        len(drift_tick.runs),
+                        drift_tick.finished,
+                    )
                 if drift_tick.message:
                     tick.judge_result = JudgeResult(
                         decision="reply",
@@ -92,9 +124,17 @@ class ProactiveTurnPipeline:
                 return tick
 
             tick.phase_trace.append("judge")
+            policy = self._state.get_policy(chat_id)
             tick.judge_result = await self._judge.evaluate(
                 tick.gateway_result,
                 chat_id,
+                policy_topics=policy.topics,
+            )
+            logger.info(
+                "主动内容评估完成: decision=%s cited=%d discarded=%d",
+                tick.judge_result.decision,
+                len(tick.judge_result.cited_item_ids),
+                len(tick.judge_result.discarded_ids),
             )
             await self._resolve_and_deliver(tick)
             return tick
@@ -136,3 +176,10 @@ class ProactiveTurnPipeline:
         if last_run > 0 and (time.time() - last_run) < self._drift_min_interval:
             return False
         return True
+
+    def close(self) -> None:
+        """关闭主动与漂移链路拥有的持久化状态。"""
+
+        if self._drift is not None and hasattr(self._drift, "close"):
+            self._drift.close()
+        self._state.close()

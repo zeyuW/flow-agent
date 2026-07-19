@@ -8,6 +8,7 @@
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -54,6 +55,8 @@ class RecallMemoryTool:
                     "type": "integer",
                     "description": "最大返回条数",
                     "default": 8,
+                    "minimum": 1,
+                    "maximum": 50,
                 },
                 "memory_type": {
                     "type": "string",
@@ -78,14 +81,22 @@ class RecallMemoryTool:
         except json.JSONDecodeError:
             return json.dumps({"error": "invalid JSON payload"}, ensure_ascii=False)
 
+        if not isinstance(args, dict):
+            return json.dumps({"error": "payload must be an object"}, ensure_ascii=False)
+
         query_text = args.get("query", "")
         if not query_text:
             return json.dumps({"error": "query is required"}, ensure_ascii=False)
 
+        try:
+            max_items = _normalize_max_items(args.get("max_items", 8))
+        except ValueError as exc:
+            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
         q = MemoryQuery(
             text=query_text,
             intent=args.get("intent", "answer"),
-            max_items=args.get("max_items", 8),
+            max_items=max_items,
             memory_type=args.get("memory_type"),
         )
 
@@ -165,3 +176,17 @@ def _json_result_ok(content: str) -> bool:
     except json.JSONDecodeError:
         return False
     return not (isinstance(data, dict) and data.get("error"))
+
+
+def _normalize_max_items(value: Any) -> int:
+    """规范化返回条数，确保检索器始终收到有界整数。"""
+
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("max_items must be an integer between 1 and 50")
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        raise ValueError("max_items must be an integer between 1 and 50")
+
+    normalized = int(value)
+    if not 1 <= normalized <= 50:
+        raise ValueError("max_items must be an integer between 1 and 50")
+    return normalized

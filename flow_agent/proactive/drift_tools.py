@@ -1,9 +1,6 @@
 """漂移模式内置工具：read_file, write_file, message_push, finish_drift (spec 3b, 4b, 4d)。"""
 
-import json
-import logging
-
-logger = logging.getLogger(__name__)
+from pathlib import Path
 
 _DRIFT_TOOL_SCHEMAS = [
     {
@@ -88,9 +85,13 @@ def dispatch_drift_tool(tool_name: str, arguments: dict, ctx: dict) -> str:
         - "workspace": str — 工作区根目录
     """
     if tool_name == "read_file":
-        return _read_file(arguments.get("path", ""))
+        return _read_file(arguments.get("path", ""), ctx.get("workspace", ""))
     elif tool_name == "write_file":
-        return _write_file(arguments.get("path", ""), arguments.get("content", ""))
+        return _write_file(
+            arguments.get("path", ""),
+            arguments.get("content", ""),
+            ctx.get("workspace", ""),
+        )
     elif tool_name == "message_push":
         ctx["message"] = arguments.get("text", "")
         ctx["pushed"] = True
@@ -116,6 +117,7 @@ def dispatch_drift_tool(tool_name: str, arguments: dict, ctx: dict) -> str:
             skill_name=skill_name,
             action=summary,
             result="完成",
+            status="completed",
         ))
         ctx["finished"] = True
         return f"漂移完成: {summary}"
@@ -123,20 +125,37 @@ def dispatch_drift_tool(tool_name: str, arguments: dict, ctx: dict) -> str:
         return f"未知工具: {tool_name}"
 
 
-def _read_file(path: str) -> str:
+def _read_file(path: str, workspace: str) -> str:
     try:
-        return Path(path).read_text(encoding="utf-8")[:2000]
+        target = _resolve_workspace_path(path, workspace)
+        return target.read_text(encoding="utf-8")[:4000]
     except Exception as e:
         return f"读取失败: {e}"
 
 
-def _write_file(path: str, content: str) -> str:
+def _write_file(path: str, content: str, workspace: str) -> str:
     try:
-        Path(path).parent.mkdir(parents=True, exist_ok=True)
-        Path(path).write_text(content, encoding="utf-8")
-        return f"写入成功: {path}"
+        target = _resolve_workspace_path(path, workspace)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(target.name + ".tmp")
+        temporary.write_text(content, encoding="utf-8")
+        temporary.replace(target)
+        return f"写入成功: {target}"
     except Exception as e:
         return f"写入失败: {e}"
+
+
+def _resolve_workspace_path(path: str, workspace: str) -> Path:
+    """把漂移文件操作限制在显式工作目录内。"""
+
+    root = Path(workspace).resolve()
+    if not str(path).strip():
+        raise ValueError("路径不能为空")
+    raw = Path(path).expanduser()
+    target = raw.resolve() if raw.is_absolute() else (root / raw).resolve()
+    if not target.is_relative_to(root):
+        raise ValueError("路径越出漂移工作目录")
+    return target
 
 
 import os

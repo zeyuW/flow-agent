@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from flow_agent.background.jobs import JobSpec
 from flow_agent.mcp.config import McpServerSpec
 from flow_agent.plugins.plugin_context import PluginConfig, PluginContext, PluginKVStore
 from flow_agent.plugins.plugin_registry import plugin_registry
@@ -51,6 +52,11 @@ class Plugin:
         """
         return []
 
+    def background_jobs(self) -> list[JobSpec]:
+        """声明由宿主执行并记录历史的后台任务。"""
+
+        return []
+
     @classmethod
     def mcp_servers(cls) -> list[McpServerSpec]:
         """声明插件提供的 MCP 服务，路径相对插件目录解析。"""
@@ -74,4 +80,4 @@ class Plugin:
         if ctx.kv_store is None:
             ctx.kv_store = PluginKVStore(data_dir / ".kv.json")
         if isinstance(ctx.config, PluginConfig) and not ctx.config._values:
-            ctx.config = PluginConfig.load(plugin_dir)
+            ctx.config = PluginConfig.load(plugin_dir, data_dir)

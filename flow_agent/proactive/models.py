@@ -57,6 +57,7 @@ class GatewayResult:
     alerts: list[DataItem] = field(default_factory=list)
     content: list[DataItem] = field(default_factory=list)
     context: list[DataItem] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def all_items(self) -> list[DataItem]:

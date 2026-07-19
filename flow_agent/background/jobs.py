@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Any, Callable, Protocol
 
 
 @dataclass(slots=True)
 class JobSpec:
-    """Job metadata and execution function."""
+    """后台任务元数据和执行函数。"""
 
     name: str
-    func: Callable[[], None]
+    func: Callable[[], Any]
     max_retries: int = 0
 
 
@@ -20,3 +20,5 @@ class JobRegistry(Protocol):
     def get(self, name: str) -> JobSpec | None:
         ...
 
+    def unregister(self, name: str) -> None:
+        ...

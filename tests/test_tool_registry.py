@@ -57,3 +57,26 @@ def test_registry_selects_matching_mcp_tool():
     selected = registry.select_openai_tools("请搜索外部网页资料", max_tools=1)
 
     assert selected[0]["function"]["name"] == "mcp__web__search"
+
+
+def test_registry_always_selects_explicitly_named_tool():
+    class NamedTool(EchoTool):
+        def __init__(self, tool_name: str) -> None:
+            self._tool_name = tool_name
+
+        @property
+        def name(self) -> str:
+            return self._tool_name
+
+    registry = ToolRegistry()
+    for index in range(12):
+        registry.register(NamedTool(f"generic_{index}"))
+    registry.register(NamedTool("runtime_probe"))
+
+    selected = registry.select_openai_tools(
+        "请务必调用 runtime_probe 工具",
+        max_tools=8,
+    )
+
+    names = {item["function"]["name"] for item in selected}
+    assert "runtime_probe" in names

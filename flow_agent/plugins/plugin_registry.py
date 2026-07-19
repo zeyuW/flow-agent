@@ -1,4 +1,4 @@
-"""Global plugin registry with auto-registration via __init_subclass__ (spec 1c)."""
+"""动态导入插件期间使用的临时元数据注册表。"""
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
@@ -6,14 +6,14 @@ from typing import Any, Callable
 
 
 class MetadataKind(Enum):
-    LIFECYCLE = auto()   # EventBus handler
-    TOOL_HOOK = auto()   # @on_tool_pre
-    TOOL = auto()        # @tool
+    LIFECYCLE = auto()   # EventBus 生命周期处理器
+    TOOL_HOOK = auto()   # @on_tool_pre 工具钩子
+    TOOL = auto()        # @tool 动态工具
 
 
 class HandlerType(Enum):
-    GATE = auto()  # Can modify/abort
-    TAP = auto()   # Observe only
+    GATE = auto()  # 可以修改或中止
+    TAP = auto()   # 只观察
 
 
 @dataclass(slots=True)
@@ -23,7 +23,7 @@ class HandlerMeta:
     handler_type: HandlerType = HandlerType.TAP
     event_type: str = ""
     priority: int = 0
-    tool_name: str | None = None  # For TOOL_HOOK
+    tool_name: str | None = None  # 仅供 TOOL_HOOK 使用
 
 
 @dataclass(slots=True)
@@ -36,11 +36,7 @@ class ToolMeta:
 
 @dataclass
 class PluginRegistry:
-    """Global registry for plugin classes and their handler metadata.
-
-    Plugin classes are auto-registered via __init_subclass__.
-    Decorators (@on_before_turn, @on_tool_pre, @tool) append metadata.
-    """
+    """收集动态导入期间产生的插件类、处理器和工具元数据。"""
 
     _classes: dict[str, type] = field(default_factory=dict)
     _handlers: list[HandlerMeta] = field(default_factory=list)
@@ -68,6 +64,13 @@ class PluginRegistry:
         self._tools.clear()
         return tools
 
+    def clear(self) -> None:
+        """清除一次动态导入遗留的临时注册元数据。"""
 
-# Global singleton
+        self._classes.clear()
+        self._handlers.clear()
+        self._tools.clear()
+
+
+# 动态导入期间使用的进程级临时注册表
 plugin_registry = PluginRegistry()

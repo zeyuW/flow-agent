@@ -61,6 +61,7 @@ def build_proactive_runtime(
     trace_path=None,
     local_sources=None,
     channel: str = "cli",
+    state_store: ProactiveStateStore | None = None,
 ) -> ProactiveLoop | None:
     """组装主动链路，并在启用时接入用户回合事件。"""
 
@@ -80,7 +81,7 @@ def build_proactive_runtime(
         local_source_file=local_path,
         local_sources=local_sources,
     )
-    state = ProactiveStateStore(state_path)
+    state = state_store or ProactiveStateStore(state_path)
     judge = JudgeLoop(
         llm_client=llm_client,
         memory_engine=memory_engine,

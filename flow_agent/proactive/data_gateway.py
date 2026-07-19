@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,7 @@ class DataGateway:
         """并行采集已注册数据源，并隔离单个数据源失败。"""
 
         result = GatewayResult()
+        self._run_errors: list[str] = []
         if self._proactive_sources:
             fetched = await asyncio.gather(
                 *[
@@ -71,6 +73,7 @@ class DataGateway:
                         target.extend(items)
 
         result.content.extend(self._fetch_all_local_content())
+        result.errors.extend(self._run_errors)
         return result
 
     def _fetch_local_content(self) -> list[DataItem]:
@@ -98,8 +101,9 @@ class DataGateway:
         for source in self._local_sources:
             try:
                 records.extend(source.fetch_records())
-            except Exception:
+            except Exception as exc:
                 logger.exception("本地主动数据源采集失败: source=%s", source.name)
+                self._run_errors.append(f"local:{source.name}: {exc}")
         return [
             DataItem(
                 source=record.source,
@@ -116,8 +120,9 @@ class DataGateway:
 
         try:
             response = await self._pool.call(server, tool)
-        except Exception:
+        except Exception as exc:
             logger.exception("主动数据源调用失败: server=%s tool=%s", server, tool)
+            self._run_errors.append(f"mcp:{server}/{tool}: {exc}")
             return []
         if response is None:
             return []
@@ -151,19 +156,39 @@ class DataGateway:
             if isinstance(value, list):
                 decoded.extend(item for item in value if isinstance(item, dict))
             elif isinstance(value, dict):
-                decoded.append(value)
+                nested_items = value.get("items")
+                if isinstance(nested_items, list):
+                    decoded.extend(
+                        item for item in nested_items if isinstance(item, dict)
+                    )
+                    provider_errors = value.get("provider_errors")
+                    if isinstance(provider_errors, list) and provider_errors:
+                        logger.warning(
+                            "主动新闻源部分降级: source=%s errors=%s",
+                            source,
+                            provider_errors,
+                        )
+                else:
+                    decoded.append(value)
 
         items: list[DataItem] = []
         for value in decoded:
-            item_id = str(value.get("event_id") or value.get("id") or "").strip()
+            url = str(value.get("url") or value.get("link") or "").strip()
+            item_id = str(value.get("event_id") or value.get("id") or url).strip()
             title = str(value.get("title") or "").strip()
             content = str(value.get("content") or value.get("body") or "").strip()
             summary = str(value.get("summary") or "").strip()
+            if not item_id and title:
+                item_id = hashlib.sha256(
+                    f"{source}:{title}".encode("utf-8")
+                ).hexdigest()[:24]
+            if url:
+                content = f"{content or summary}\n{url}".strip()
             if not item_id and not title and not content and not summary:
                 continue
             items.append(
                 DataItem(
-                    source=source,
+                    source=str(value.get("source") or source),
                     item_id=item_id,
                     title=title,
                     summary=summary,

@@ -4,7 +4,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from flow_agent.mcp import builtin_server
+from flow_agent.mcp.mcp_client import McpClient
 from flow_agent.mcp.config import McpServerSpec, load_project_mcp_specs
 from flow_agent.mcp.server_registry import McpServerRegistry
 from flow_agent.plugins.plugin_loader import PluginManager
@@ -218,3 +221,29 @@ class DemoPlugin(Plugin):
     specs = manager.get_mcp_servers()
     assert specs[0].cwd == str(plugin_dir.resolve())
     assert specs[0].env["FLOW_PLUGIN_DATA_DIR"] == str((data_dir / "demo").resolve())
+
+
+def test_mcp_timeout_marks_client_disconnected(monkeypatch):
+    client = McpClient(name="demo", command=["unused"])
+    client._connected = True
+    client._process = type("Process", (), {"poll": lambda self: None})()
+    monkeypatch.setattr(client, "_send", lambda payload: None)
+    monkeypatch.setattr(
+        client,
+        "_recv",
+        lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutError("timeout")),
+    )
+    stopped = []
+
+    def stop(timeout=10.0):
+        stopped.append(timeout)
+        client._connected = False
+        client._process = None
+
+    monkeypatch.setattr(client, "stop", stop)
+
+    with pytest.raises(TimeoutError):
+        client.call_sync("tool", {})
+
+    assert stopped == [1.0]
+    assert client.is_connected is False

@@ -160,11 +160,16 @@ class McpClient:
                 "method": "tools/call",
                 "params": {"name": tool_name, "arguments": arguments},
             })
-            response = self._recv(
-                call_id,
-                f"tools/call:{tool_name}",
-                timeout=effective_timeout,
-            )
+            try:
+                response = self._recv(
+                    call_id,
+                    f"tools/call:{tool_name}",
+                    timeout=effective_timeout,
+                )
+            except (TimeoutError, ConnectionError):
+                # 超时后的迟到响应会污染下一次 JSON-RPC 调用，直接重启该服务。
+                self.stop(timeout=1.0)
+                raise
             if "error" in response:
                 error = response["error"]
                 message = error.get("message", error) if isinstance(error, dict) else error

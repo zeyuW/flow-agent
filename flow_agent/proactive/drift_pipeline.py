@@ -1,6 +1,5 @@
 """漂移执行管道：扫描 → 准备 → 执行 → 持久化。"""
 
-import asyncio
 import json
 import logging
 
@@ -68,44 +67,87 @@ class DriftTurnPipeline:
             "finished": False,
         }
 
-        for _ in range(self._max_steps):
-            if ctx["finished"]:
-                break
+        try:
+            for _ in range(self._max_steps):
+                if ctx["finished"]:
+                    break
 
-            # 选择工具集：message_push 后受限
-            current_tools = get_post_push_tool_schemas() if ctx["pushed"] else tools
+                # 选择工具集：message_push 后受限
+                current_tools = get_post_push_tool_schemas() if ctx["pushed"] else tools
 
-            response = self._llm.generate(messages=messages, tools=current_tools)
-            if not response.tool_calls:
-                break
+                response = self._llm.generate(messages=messages, tools=current_tools)
+                if not response.tool_calls:
+                    break
+                messages.append({
+                    "role": "assistant",
+                    "content": response.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(
+                                    tc.arguments if isinstance(tc.arguments, dict) else {},
+                                    ensure_ascii=False,
+                                ),
+                            },
+                        }
+                        for tc in response.tool_calls
+                    ],
+                })
 
-            for tc in response.tool_calls:
-                args = tc.arguments if isinstance(tc.arguments, dict) else {}
-                result = dispatch_drift_tool(tc.name, args, ctx)
-                messages.append({"role": "tool", "content": result})
+                for tc in response.tool_calls:
+                    args = tc.arguments if isinstance(tc.arguments, dict) else {}
+                    result = dispatch_drift_tool(tc.name, args, ctx)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": result,
+                    })
 
-            if ctx["finished"]:
-                break
+                if ctx["finished"]:
+                    break
+        except Exception as exc:
+            logger.exception("漂移技能执行失败")
+            tick.runs.append(DriftRun(
+                action="漂移执行异常",
+                result="失败",
+                status="failed",
+                error=str(exc),
+            ))
 
         # 提取暂存消息
         tick.message = ctx.get("message", "")
+
+        if not ctx["finished"] and not any(
+            run.status == "failed" for run in tick.runs
+        ):
+            tick.runs.append(DriftRun(
+                action="漂移执行未完成工具协议",
+                result="未完成",
+                status="incomplete",
+            ))
 
         # 阶段 4: 持久化
         self._store.append_run(tick)
         for skill in tick.skills:
             self._store.save_skill_state(skill)
 
-        tick.finished = True
+        tick.finished = bool(ctx["finished"])
         return tick
 
     def _build_messages(self, skills: list[DriftSkill]) -> list[dict]:
         """构建初始消息：系统提示词 + 技能列表 + 运行历史。"""
-        skill_desc = "\n".join(
-            f"- **{s.name}**: {s.description}"
-            + (f" (需要 MCP: {', '.join(s.requires_mcp)})" if s.requires_mcp else "")
+        skill_desc = "\n\n".join(
+            f"## {s.name}\n{s.description}"
+            + (f"\n需要 MCP: {', '.join(s.requires_mcp)}" if s.requires_mcp else "")
+            + (f"\n技能目录: {s.path}" if s.path else "")
+            + (f"\n执行说明:\n{s.instructions[:4000]}" if s.instructions else "")
+            + (f"\n连续状态: {json.dumps(s.state, ensure_ascii=False)}" if s.state else "")
             for s in skills
         )
-        history = self._store.load_history()
+        history = self._store.load_history(limit=5)
         hist_text = "\n".join(
             f"- [{r.timestamp}] {r.skill_name}: {r.action}" for r in history[-5:]
         ) if history else "无历史记录"
@@ -115,3 +157,8 @@ class DriftTurnPipeline:
             {"role": "user", "content": f"可用技能:\n{skill_desc}\n\n最近运行历史:\n{hist_text}\n\n请选择一个技能并开始执行。"},
         ]
         return messages
+
+    def close(self) -> None:
+        """关闭漂移状态存储。"""
+
+        self._store.close()
