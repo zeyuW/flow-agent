@@ -494,6 +494,7 @@ class PassiveTurnPipeline:
                     "cancel_scheduled_task",
                     "configure_proactive_policy",
                     "get_proactive_status",
+                    "spawn",
                 }:
                     tool_input["__session_id"] = flow.session_id
                     tool_input["__channel"] = flow.channel

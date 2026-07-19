@@ -1,12 +1,8 @@
-"""SpawnTool: creates subagent background tasks (spec 1).
-
-Implements spec 1a-1d: SpawnTool with DelegationPolicy check,
-background spawn (1c) and sync spawn (1d).
-"""
+"""创建子代理后台任务的工具。"""
 
 import asyncio
-import json
 import logging
+import threading
 from typing import Any
 
 from flow_agent.core.delegation import DelegationPolicy
@@ -17,24 +13,34 @@ logger = logging.getLogger(__name__)
 
 
 def _run_async(coro):
+    """在同步工具边界执行协程，兼容当前线程已有事件循环的场景。"""
+
     try:
-        return asyncio.run(coro)
+        asyncio.get_running_loop()
     except RuntimeError:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result(timeout=300)
-        return loop.run_until_complete(coro)
+        return asyncio.run(coro)
+
+    result = []
+    errors = []
+
+    def run_in_thread() -> None:
+        try:
+            result.append(asyncio.run(coro))
+        except BaseException as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=run_in_thread, name="spawn-tool-sync")
+    thread.start()
+    thread.join(timeout=300)
+    if thread.is_alive():
+        raise TimeoutError("spawn execution timed out")
+    if errors:
+        raise errors[0]
+    return result[0]
 
 
 class SpawnTool:
-    """spawn tool: delegates a task to a background subagent (spec 1a).
-
-    The main agent calls this to offload multi-step work. Supports both
-    background mode (returns immediately) and sync mode (blocks for result).
-    """
+    """把复杂任务委派给子代理，支持后台执行和同步等待。"""
 
     def __init__(self, manager=None, policy: DelegationPolicy | None = None) -> None:
         self._manager = manager
@@ -92,7 +98,10 @@ class SpawnTool:
             if isinstance(run_in_background, str):
                 run_in_background = run_in_background.lower() in ("true", "1", "yes")
 
-            # 1b: Delegation policy check
+            origin_channel = tool_input.get("__channel", "cli")
+            origin_chat_id = tool_input.get("__chat_id", "default")
+
+            # 委派策略仍在工具边界执行，避免无意义地创建子代理。
             decision = self._policy.decide(
                 user_input=task,
                 tool_step_budget=10,
@@ -100,25 +109,34 @@ class SpawnTool:
             if decision.action == "reject":
                 return ToolResult(ok=False, content=f"Spawn rejected: {decision.reason}")
 
-            running_count = getattr(self._manager, 'running_count', 0)
             spawn_decision = SpawnDecision(
                 allowed=decision.action in ("spawn_subagent", "background_job"),
                 reason=decision.reason,
                 profile=profile,
             )
 
-            if run_in_background:
-                # 1c: background mode
+            if hasattr(self._manager, "run_spawn_threadsafe"):
+                result_text = self._manager.run_spawn_threadsafe(
+                    run_in_background=run_in_background,
+                    task=task,
+                    label=label,
+                    profile=profile,
+                    origin_channel=origin_channel,
+                    origin_chat_id=origin_chat_id,
+                    decision=spawn_decision,
+                )
+            elif run_in_background:
                 result_text = _run_async(
                     self._manager.spawn(
                         task=task,
                         label=label,
                         profile=profile,
+                        origin_channel=origin_channel,
+                        origin_chat_id=origin_chat_id,
                         decision=spawn_decision,
                     )
                 )
             else:
-                # 1d: sync mode
                 result_text = _run_async(
                     self._manager.spawn_sync(
                         task=task,

@@ -1,8 +1,9 @@
-"""SubagentManager: async spawn, background execution, MessageBus completion (spec 1-5)."""
+"""管理子代理的创建、后台执行、状态记录和完成通知。"""
 
 import asyncio
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,7 +26,7 @@ _SPAWN_MAX_ITERATIONS = 30
 
 
 class SubagentManager:
-    """Manages subagent lifecycle: spawn, background execution, completion notification."""
+    """统一管理子代理生命周期，并为同步工具提供持久事件循环。"""
 
     def __init__(
         self,
@@ -37,8 +38,14 @@ class SubagentManager:
         self.tasks_path = tasks_path
         self._bus = message_bus
         self._llm = llm_client
+        self._persist_lock = threading.Lock()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._running_jobs: dict[str, RunningSubagentJob] = {}
+        self._worker_loop: asyncio.AbstractEventLoop | None = None
+        self._worker_thread: threading.Thread | None = None
+        self._worker_ready = threading.Event()
+        self._worker_stop = threading.Event()
+        self._worker_lock = threading.Lock()
         self.max_concurrency = 2
 
     def create_task(self, kind: str, payload: dict, *, parent_trace_id: str | None = None) -> Any:
@@ -85,25 +92,130 @@ class SubagentManager:
 
     def _persist(self, task) -> None:
         try:
-            self.tasks_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.tasks_path.open("a", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "task_id": task.task_id,
-                    "kind": task.kind,
-                    "payload": task.payload,
-                    "parent_trace_id": task.parent_trace_id,
-                    "status": task.status,
-                    "created_at": task.created_at if isinstance(task.created_at, str) else task.created_at.isoformat(),
-                    "started_at": task.started_at if isinstance(task.started_at, str) else (task.started_at.isoformat() if task.started_at else None),
-                    "finished_at": task.finished_at if isinstance(task.finished_at, str) else (task.finished_at.isoformat() if task.finished_at else None),
-                    "result": task.result,
-                    "error": task.error,
-                }, ensure_ascii=False) + "\n")
+            self._append_record({
+                "task_id": task.task_id,
+                "kind": task.kind,
+                "payload": task.payload,
+                "parent_trace_id": task.parent_trace_id,
+                "status": task.status,
+                "created_at": task.created_at if isinstance(task.created_at, str) else task.created_at.isoformat(),
+                "started_at": task.started_at if isinstance(task.started_at, str) else (task.started_at.isoformat() if task.started_at else None),
+                "finished_at": task.finished_at if isinstance(task.finished_at, str) else (task.finished_at.isoformat() if task.finished_at else None),
+                "result": task.result,
+                "error": task.error,
+            })
         except Exception:
             logger.exception("failed persisting subagent task")
 
+    def _append_record(self, record: dict[str, Any]) -> None:
+        """以线程安全方式追加一条子代理运行记录。"""
 
-    # ── Spawn (spec 1c, 2) ──
+        with self._persist_lock:
+            self.tasks_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.tasks_path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def _trace(self, job_id: str, phase: str, payload: dict[str, Any]) -> None:
+        """记录后台子代理状态，追踪失败不得影响任务本身。"""
+
+        try:
+            self._append_record({
+                "type": "spawn_trace",
+                "job_id": job_id,
+                "phase": phase,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                **payload,
+            })
+        except Exception:
+            logger.exception("记录子代理状态失败: job_id=%s phase=%s", job_id, phase)
+
+    def _ensure_worker_loop(self) -> asyncio.AbstractEventLoop:
+        """按需启动持久事件循环，防止后台任务随临时循环一起被取消。"""
+
+        with self._worker_lock:
+            if (
+                self._worker_loop is not None
+                and not self._worker_loop.is_closed()
+                and self._worker_thread is not None
+                and self._worker_thread.is_alive()
+            ):
+                return self._worker_loop
+
+            self._worker_ready.clear()
+            self._worker_stop.clear()
+
+            def run_loop() -> None:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                self._worker_loop = loop
+                self._worker_ready.set()
+                try:
+                    # 短周期驱动可兼容跨线程唤醒管道失效的运行环境。
+                    while not self._worker_stop.is_set():
+                        loop.run_until_complete(asyncio.sleep(0.05))
+                finally:
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                    loop.close()
+
+            self._worker_thread = threading.Thread(
+                target=run_loop,
+                name="subagent-worker",
+                daemon=True,
+            )
+            self._worker_thread.start()
+
+        if not self._worker_ready.wait(timeout=5):
+            raise RuntimeError("子代理事件循环启动超时")
+        if self._worker_loop is None:
+            raise RuntimeError("子代理事件循环启动失败")
+        return self._worker_loop
+
+    def run_spawn_threadsafe(
+        self,
+        *,
+        run_in_background: bool,
+        task: str,
+        label: str | None,
+        profile: str,
+        origin_channel: str,
+        origin_chat_id: str,
+        decision: SpawnDecision | None = None,
+    ) -> str:
+        """从同步工具线程安全地提交子代理任务。"""
+
+        loop = self._ensure_worker_loop()
+        if run_in_background:
+            coroutine = self.spawn(
+                task=task,
+                label=label,
+                profile=profile,
+                origin_channel=origin_channel,
+                origin_chat_id=origin_chat_id,
+                decision=decision,
+            )
+        else:
+            coroutine = self.spawn_sync(task=task, label=label, profile=profile)
+        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+        return future.result(timeout=300)
+
+    def shutdown(self, timeout: float = 5.0) -> None:
+        """停止子代理工作循环并取消尚未完成的任务。"""
+
+        thread = self._worker_thread
+        self._worker_stop.set()
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout)
+        self._worker_loop = None
+        self._worker_thread = None
+
+
+    # ── 子代理创建 ──
 
     async def spawn(
         self,
@@ -116,14 +228,14 @@ class SubagentManager:
         retry_count: int = 0,
         decision: SpawnDecision | None = None,
     ) -> str:
-        """Create a background subagent task, return immediately (spec 2a-2e)."""
+        """创建后台子代理任务并立即返回确认。"""
         if len(self._running_tasks) >= self.max_concurrency:
             return f"已到达最大并行数 ({self.max_concurrency})，请稍后再试。"
 
         job_id = uuid4().hex[:12]
         display_label = label or task[:40]
 
-        # 2b: tracing
+        # 在创建异步任务前先落盘，便于进程异常时定位未完成任务。
         self._trace(job_id, "started", {
             "label": display_label,
             "origin_channel": origin_channel,
@@ -131,7 +243,7 @@ class SubagentManager:
             "profile": profile,
         })
 
-        # 2c: create async background task
+        # 后台任务必须绑定到管理器的持久事件循环。
         bg_task = asyncio.create_task(
             self._run_subagent(
                 job_id=job_id,
@@ -145,7 +257,7 @@ class SubagentManager:
             name=f"spawn:{job_id}",
         )
 
-        # 2d: register
+        # 注册运行状态，供并发限制和运行中查询使用。
         self._running_tasks[job_id] = bg_task
         self._running_jobs[job_id] = RunningSubagentJob(
             job_id=job_id,
@@ -158,13 +270,13 @@ class SubagentManager:
             retry_count=retry_count,
         )
 
-        # 2e: immediate confirmation
+        # 立即返回确认，不等待子代理执行完成。
         return (
             f"已创建后台任务「{display_label}」（job_id={job_id}）。"
             "不要等待其完成；请直接向用户说明你已开始处理，完成后会继续回复。"
         )
 
-    # ── Sync spawn (spec 1d) ──
+    # ── 同步子代理 ──
 
     async def spawn_sync(
         self,
@@ -173,12 +285,12 @@ class SubagentManager:
         label: str | None = None,
         profile: str = PROFILE_RESEARCH,
     ) -> str:
-        """Spawn a subagent and block until complete (spec 1d)."""
+        """创建子代理并等待执行完成。"""
         spec = build_spawn_spec(profile=profile, max_iterations=_SPAWN_MAX_ITERATIONS)
         agent = spec.build(runtime=self)
         return await agent.run(task)
 
-    # ── Background execution (spec 3) ──
+    # ── 后台执行 ──
 
     async def _run_subagent(
         self,
@@ -191,9 +303,9 @@ class SubagentManager:
         profile: str,
         retry_count: int = 0,
     ) -> None:
-        """Background task: build SubAgent, run, announce result (spec 3a)."""
+        """构建并运行子代理，然后向原会话发布完成通知。"""
         try:
-            # 3b, 3c: build runner with agent factory
+            # 每次任务独立构建执行器，避免不同子代理共享对话状态。
             spec = build_spawn_spec(profile=profile, max_iterations=_SPAWN_MAX_ITERATIONS)
             runner = AgentBackgroundJobRunner(
                 lambda: spec.build(runtime=self)
@@ -206,10 +318,15 @@ class SubagentManager:
                 completion_mode="message_bus",
             )
 
-            # 3d: execute
+            # 执行结果先落盘，再向消息总线发布通知。
             result = await runner.run(job_spec)
 
-            # 5a: announce completion via MessageBus
+            self._trace(job_id, result.status, {
+                "label": label,
+                "exit_reason": result.exit_reason,
+                "result": result.result_summary[:1000],
+            })
+
             await self._announce_result(
                 job_id=job_id,
                 label=label,
@@ -224,6 +341,10 @@ class SubagentManager:
             )
         except Exception as exc:
             logger.exception("[spawn] _run_subagent failed job_id=%s", job_id)
+            self._trace(job_id, "error", {
+                "label": label,
+                "error": str(exc),
+            })
             await self._announce_result(
                 job_id=job_id, label=label, task=task,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
@@ -234,7 +355,7 @@ class SubagentManager:
             self._running_tasks.pop(job_id, None)
             self._running_jobs.pop(job_id, None)
 
-    # ── Completion notification via MessageBus (spec 5) ──
+    # ── 消息总线完成通知 ──
 
     async def _announce_result(
         self,
@@ -251,7 +372,7 @@ class SubagentManager:
         retry_count: int = 0,
         decision: SpawnDecision | None = None,
     ) -> None:
-        """Publish spawn completion event to MessageBus (spec 5a-5c)."""
+        """把子代理完成事件作为原会话的新入站消息发布。"""
         if self._bus is None:
             logger.warning("[spawn] no message bus, cannot announce completion")
             return
@@ -274,7 +395,7 @@ class SubagentManager:
             decision=decision,
         )
 
-        # 5c: publish as inbound message
+        # 完成事件重新进入 AgentLoop，由主代理组织最终用户回复。
         from flow_agent.channels.models import InboundMessage
         msg = InboundMessage(
             channel=origin_channel,
@@ -287,9 +408,15 @@ class SubagentManager:
                 "result": result[:500],
             }, ensure_ascii=False),
         )
-        self._bus.publish_inbound(msg)  # 5d-5e: MessageBus → AgentLoop consumes
+        self._bus.publish_inbound(msg)
         logger.info("[spawn] completion announced: job_id=%s status=%s", job_id, status)
 
     @property
     def running_count(self) -> int:
         return len(self._running_tasks)
+
+    @property
+    def llm_client(self) -> Any:
+        """向子代理构建器公开当前模型客户端。"""
+
+        return self._llm

@@ -197,6 +197,7 @@ def _run_service() -> None:
         if memory_optimizer_loop is not None:
             memory_optimizer_loop.stop()
         background_runtime.stop()
+        subagent_runtime.manager.shutdown()
         mcp_registry.stop_all()
         import asyncio
         asyncio.run(plugin_manager.shutdown_all())
