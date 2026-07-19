@@ -23,7 +23,6 @@ class WorkspaceLayout:
     drift_skills_dir: Path
     plugins_dir: Path
     plugin_data_dir: Path
-    mcp_dir: Path
     sources_dir: Path
     rss_sources_dir: Path
     snapshot_sources_dir: Path
@@ -36,10 +35,11 @@ class WorkspaceLayout:
     memory_vectors_db: Path
     embedding_cache_file: Path
     proactive_state_db: Path
+    scheduled_tasks_db: Path
     trace_file: Path
     proactive_trace_file: Path
     app_log_file: Path
-    mcp_servers_file: Path
+    mcp_config_file: Path
     proactive_source_file: Path
     proactive_todo_file: Path
     proactive_tasks_file: Path
@@ -72,7 +72,6 @@ def build_layout(root: Path) -> WorkspaceLayout:
         drift_skills_dir=drift / "skills",
         plugins_dir=flow / "plugins",
         plugin_data_dir=flow / "plugin-data",
-        mcp_dir=flow / "mcp",
         sources_dir=sources,
         rss_sources_dir=sources / "rss",
         snapshot_sources_dir=sources / "snapshots",
@@ -85,10 +84,11 @@ def build_layout(root: Path) -> WorkspaceLayout:
         memory_vectors_db=data / "memory_vectors.db",
         embedding_cache_file=data / "embedding_cache.json",
         proactive_state_db=data / "proactive.db",
+        scheduled_tasks_db=data / "scheduled_tasks.db",
         trace_file=logs / "trace.jsonl",
         proactive_trace_file=logs / "proactive.jsonl",
         app_log_file=logs / "app.log",
-        mcp_servers_file=flow / "mcp" / "servers.json",
+        mcp_config_file=flow / "mcp.json",
         proactive_source_file=sources / "proactive_items.txt",
         proactive_todo_file=sources / "todo_items.txt",
         proactive_tasks_file=sources / "tasks.txt",
@@ -130,8 +130,6 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
         layout.drift_skills_dir,
         layout.plugins_dir,
         layout.plugin_data_dir,
-        layout.mcp_dir,
-        layout.mcp_dir / "servers",
         layout.sources_dir,
         layout.rss_sources_dir,
         layout.snapshot_sources_dir,
@@ -175,20 +173,16 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
             "# 插件私有数据\n\n按插件名称保存 plugin_config.json、.kv.json 和缓存，不与插件程序文件混放。\n",
         ),
         (
-            layout.mcp_dir / "servers" / "README.md",
-            "# MCP 服务声明\n\n每个 TOML 文件声明一个 stdio MCP 服务，文件名必须与 name 一致。\n",
-        ),
-        (
             layout.sources_dir / "README.md",
             "# 主动数据源\n\nproactive_items.txt、tasks.txt、todo_items.txt 均为一行一项；rss 放 XML，snapshots 放文本快照。\n",
         ),
         (layout.embedding_cache_file, "{}\n"),
-        (layout.mcp_servers_file, '{"servers": {}}\n'),
         (layout.subagent_tasks_file, ""),
         (layout.drift_history_file, '{"recent_runs": []}\n'),
         (layout.trace_file, ""),
         (layout.proactive_trace_file, ""),
         (layout.app_log_file, ""),
+        (layout.mcp_config_file, '{"schemaVersion": 1, "mcpServers": {}}\n'),
     )
 
 

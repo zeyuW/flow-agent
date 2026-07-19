@@ -30,6 +30,13 @@ from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAda
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import InMemoryJobStore
+from flow_agent.scheduler.runtime import SchedulerService
+from flow_agent.scheduler.tools import (
+    CancelScheduledTaskTool,
+    CurrentTimeTool,
+    ListScheduledTasksTool,
+    ScheduleTaskTool,
+)
 from flow_agent.infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
 from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
@@ -130,7 +137,7 @@ def create_core_components():
     # MCP
     mcp_registry = _build_mcp_registry(
         cfg,
-        WORKSPACE_LAYOUT.mcp_servers_file,
+        WORKSPACE_LAYOUT.mcp_config_file,
         tool_registry,
     )
     if cfg.tooling.enabled:
@@ -303,11 +310,21 @@ def create_app_runtime():
 
     background_store = InMemoryJobStore()
     background_registry = InMemoryJobRegistry()
+    scheduler = SchedulerService(
+        store_path=WORKSPACE_LAYOUT.scheduled_tasks_db,
+        inbound_queue=message_bus.inbound,
+        outbound_port=message_bus.outbound_port,
+    )
 
     background_runtime = BackgroundRuntime(
         registry=background_registry,
         store=background_store,
+        scheduler=scheduler,
     )
+    tool_registry.register_with_meta(CurrentTimeTool(), risk="read-only")
+    tool_registry.register_with_meta(ScheduleTaskTool(scheduler), risk="write")
+    tool_registry.register_with_meta(ListScheduledTasksTool(scheduler), risk="read-only")
+    tool_registry.register_with_meta(CancelScheduledTaskTool(scheduler), risk="write")
 
     # 插件系统暂时禁用，避免异步问题
     proactive_sources = plugin_manager.get_proactive_sources()

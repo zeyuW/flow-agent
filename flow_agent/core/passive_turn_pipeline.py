@@ -11,6 +11,7 @@ AfterTurn 阶段顺序（确保正确性）：
 
 import logging
 import time
+from datetime import datetime
 from uuid import uuid4
 from typing import Any
 
@@ -193,12 +194,36 @@ class PassiveTurnPipeline:
             flow.user_input,
             max_tools=self.tool_selection_max,
         )
+        scheduled_execution = bool(flow.inbound_metadata.get("scheduled_task"))
+        if scheduled_execution:
+            blocked = {
+                "schedule_task",
+                "list_scheduled_tasks",
+                "cancel_scheduled_task",
+            }
+            flow.tools = [
+                item
+                for item in flow.tools
+                if item.get("function", {}).get("name") not in blocked
+            ]
 
         names = [t.get("function", {}).get("name", "") for t in flow.tools]
-        tool_instructions = (
-            f"可用工具: {chr(10).join(names) if names else '无'}\n\n"
-            f"当需要获取外部信息时，请使用工具函数调用。"
-        )
+        instructions = [
+            f"当前系统时间: {datetime.now().astimezone().isoformat()}",
+            f"可用工具: {chr(10).join(names) if names else '无'}",
+            "当需要获取外部信息时，请使用工具函数调用。",
+        ]
+        if scheduled_execution:
+            instructions.append(
+                "当前消息是已经到期的定时任务，立即执行任务并报告结果，"
+                "不要再次创建或修改定时任务。"
+            )
+        else:
+            instructions.append(
+                "当用户要求提醒、定时执行或周期任务时，必须调用 schedule_task，"
+                "不得仅写入长期记忆，也不得声称系统无法定时唤醒。"
+            )
+        tool_instructions = "\n\n".join(instructions)
 
         messages = self.agent.build_turn_messages(
             user_input=flow.user_input,
@@ -463,9 +488,21 @@ class PassiveTurnPipeline:
                 "tool_calls": [self._tool_call_to_message_item(tc) for tc in result.tool_calls],
             })
             for tool_call in result.tool_calls:
+                tool_input = dict(tool_call.arguments)
+                if tool_call.name in {
+                    "schedule_task",
+                    "list_scheduled_tasks",
+                    "cancel_scheduled_task",
+                }:
+                    tool_input["__session_id"] = flow.session_id
+                    tool_input["__channel"] = flow.channel
+                    tool_input["__chat_id"] = str(
+                        flow.inbound_metadata.get("telegram_chat_id")
+                        or flow.session_id
+                    )
                 tool_result = self.tool_registry.execute(
                     tool_name=tool_call.name,
-                    tool_input=tool_call.arguments,
+                    tool_input=tool_input,
                 )
                 tool_message = f"Tool `{tool_call.name}` ok={tool_result.ok}: {tool_result.content}"
                 flow.tool_trace.append({

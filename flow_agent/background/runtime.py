@@ -1,6 +1,7 @@
 import logging
 import threading
 from dataclasses import dataclass, field
+from typing import Any
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import InMemoryJobStore, JobRun
@@ -33,11 +34,24 @@ class BackgroundRuntime:
 
     registry: InMemoryJobRegistry
     store: InMemoryJobStore
+    scheduler: Any | None = None
     max_async_queue: int = 64
     _lock: threading.Lock = field(default_factory=threading.Lock)
     reentry_guard: BackgroundReentryGuard = field(default_factory=BackgroundReentryGuard)
     _pending_async: int = 0
     _pending_lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def start(self) -> None:
+        """启动已挂载的持久化调度服务。"""
+
+        if self.scheduler is not None:
+            self.scheduler.start()
+
+    def stop(self) -> None:
+        """停止已挂载的持久化调度服务。"""
+
+        if self.scheduler is not None:
+            self.scheduler.stop()
 
     def run_job(self, job_name: str) -> JobRun:
         """Run a job synchronously with retry and trace."""
@@ -111,4 +125,3 @@ def _utc_now():
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc)
-

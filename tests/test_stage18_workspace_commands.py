@@ -20,8 +20,8 @@ def test_workspace_init_and_detect(tmp_path: Path):
     assert layout.snapshot_sources_dir.is_dir()
     assert layout.inbound_attachments_dir.is_dir()
     assert layout.outbound_attachments_dir.is_dir()
-    assert layout.mcp_servers_file.exists()
     assert layout.proactive_trace_file.exists()
+    assert layout.mcp_config_file.exists()
     detected = detect_workspace(tmp_path / "skills")
     assert detected is not None
     assert detected.root == tmp_path.resolve()

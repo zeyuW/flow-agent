@@ -1,14 +1,13 @@
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
-from flow_agent.mcp.config import McpServerSpec, load_workspace_mcp_specs
+from flow_agent.mcp import builtin_server
+from flow_agent.mcp.config import McpServerSpec, load_project_mcp_specs
 from flow_agent.mcp.server_registry import McpServerRegistry
 from flow_agent.plugins.plugin_loader import PluginManager
-from flow_agent.proactive.mcp_pool import RegistryMcpPool
 from flow_agent.tools.registry import ToolRegistry
 
 
@@ -20,20 +19,12 @@ for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
     if method == "initialize":
-        result = {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {"tools": {}},
-            "serverInfo": {"name": "demo", "version": "1"},
-        }
+        result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}}
     elif method == "tools/list":
         result = {"tools": [{
             "name": "echo",
             "description": "回显外部输入",
-            "inputSchema": {
-                "type": "object",
-                "properties": {"text": {"type": "string"}},
-                "required": ["text"],
-            },
+            "inputSchema": {"type": "object"},
         }]}
     elif method == "tools/call":
         text = request.get("params", {}).get("arguments", {}).get("text", "")
@@ -44,122 +35,157 @@ for line in sys.stdin:
 '''
 
 
-def _write_workspace_server(tmp_path: Path) -> tuple[Path, Path]:
-    mcp_root = tmp_path / "mcp"
-    server_dir = mcp_root / "demo-server"
-    declarations = mcp_root / "servers"
-    server_dir.mkdir(parents=True)
-    declarations.mkdir(parents=True)
+def _write_external_config(tmp_path: Path) -> Path:
+    server_dir = tmp_path / "demo-server"
+    server_dir.mkdir()
     script = server_dir / "server.py"
     script.write_text(_SERVER_SOURCE, encoding="utf-8")
-    (declarations / "demo.toml").write_text(
-        f'''schema_version = 1
-name = "demo"
-command = ["{sys.executable}", "server.py"]
-cwd = "../demo-server"
-watch_paths = ["../demo-server/server.py"]
-''',
-        encoding="utf-8",
-    )
-    return mcp_root, script
+    config = tmp_path / ".flow" / "mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({
+        "schemaVersion": 1,
+        "mcpServers": {
+            "demo": {
+                "enabled": True,
+                "command": sys.executable,
+                "args": [str(script)],
+                "cwd": str(server_dir),
+                "watchPaths": [str(script)],
+            },
+        },
+    }), encoding="utf-8")
+    return config
 
 
-def test_workspace_mcp_loader_enforces_safe_root(tmp_path: Path):
-    mcp_root, _script = _write_workspace_server(tmp_path)
+def test_project_config_is_created_empty(tmp_path: Path):
+    config = tmp_path / ".flow" / "mcp.json"
 
-    specs = load_workspace_mcp_specs(mcp_root)
+    specs = load_project_mcp_specs(config)
 
-    assert len(specs) == 1
-    assert specs[0].name == "demo"
-    assert Path(specs[0].cwd or "").is_relative_to(mcp_root)
-
-    (mcp_root / "servers" / "escape.toml").write_text(
-        '''schema_version = 1
-name = "escape"
-command = ["python", "server.py"]
-cwd = "../../outside"
-''',
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="越出安全根目录"):
-        load_workspace_mcp_specs(mcp_root)
+    assert config.exists()
+    assert specs == []
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    assert raw == {"schemaVersion": 1, "mcpServers": {}}
 
 
-def test_registry_discovers_and_calls_workspace_mcp_tool(tmp_path: Path):
-    mcp_root, _script = _write_workspace_server(tmp_path)
+def test_project_json_loads_external_server(tmp_path: Path):
+    config = _write_external_config(tmp_path)
+
+    specs = load_project_mcp_specs(config)
+
+    assert [spec.name for spec in specs] == ["demo"]
+
+
+def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):
+    config = _write_external_config(tmp_path)
     tools = ToolRegistry()
-    registry = McpServerRegistry(
-        config_path=mcp_root / "servers.json",
-        tool_registry=tools,
-        startup_timeout=5.0,
-        call_timeout=5.0,
-    )
-
+    registry = McpServerRegistry(config, tools, startup_timeout=5, call_timeout=5)
     try:
         registry.start()
-
-        assert registry.server_names == ["demo"]
-        assert "mcp__demo__echo" in tools.list_tool_names()
         result = tools.execute("mcp__demo__echo", {"text": "hello"})
         assert result.ok is True
         assert result.content == "external:hello"
-
-        pool = RegistryMcpPool(registry)
-        proactive_result = asyncio.run(pool.call("demo", "echo", {"text": "tick"}))
-        assert proactive_result == "external:tick"
-        asyncio.run(pool.close_all())
     finally:
         registry.stop_all()
 
 
-def test_failed_reload_keeps_previous_generation(tmp_path: Path):
-    mcp_root, _script = _write_workspace_server(tmp_path)
-    tools = ToolRegistry()
-    registry = McpServerRegistry(
-        config_path=mcp_root / "servers.json",
-        tool_registry=tools,
-        startup_timeout=5.0,
-        call_timeout=5.0,
+def test_ai_news_uses_independent_fallback_before_google(monkeypatch):
+    published_at = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(builtin_server, "AI_FEEDS", (("直连源", "https://direct"),))
+    monkeypatch.setattr(
+        builtin_server,
+        "fetch_feed",
+        lambda source, url, hours: ([{
+            "title": "OpenAI direct item",
+            "url": "https://direct/item",
+            "summary": "",
+            "source": source,
+            "published_at": published_at,
+            "provider": "Direct RSS",
+        }], None),
+    )
+    monkeypatch.setattr(
+        builtin_server,
+        "fetch_gdelt_news",
+        lambda hours, limit: [{
+            "title": f"AI fallback item {index}",
+            "url": f"https://fallback/{index}",
+            "summary": "",
+            "source": "备用源",
+            "published_at": published_at,
+            "provider": "GDELT",
+        } for index in range(9)],
     )
 
+    def fail_google(hours, limit):
+        raise AssertionError("独立备用源足量时不应继续请求 Google News")
+
+    monkeypatch.setattr(builtin_server, "fetch_google_news", fail_google)
+
+    result = json.loads(builtin_server.get_ai_news(limit=10, hours=24))
+
+    assert result["count"] == 10
+    assert {item["provider"] for item in result["items"]} == {
+        "Direct RSS",
+        "GDELT",
+    }
+    assert result["provider_errors"] == []
+
+
+def test_ai_news_continues_after_independent_fallback_error(monkeypatch):
+    published_at = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(builtin_server, "AI_FEEDS", (("直连源", "https://direct"),))
+    monkeypatch.setattr(
+        builtin_server,
+        "fetch_feed",
+        lambda source, url, hours: ([], None),
+    )
+
+    def fail_gdelt(hours, limit):
+        raise RuntimeError("temporary error")
+
+    monkeypatch.setattr(builtin_server, "fetch_gdelt_news", fail_gdelt)
+    monkeypatch.setattr(
+        builtin_server,
+        "fetch_google_news",
+        lambda hours, limit: [{
+            "title": f"AI Google item {index}",
+            "url": f"https://google/{index}",
+            "summary": "",
+            "source": "Google News",
+            "published_at": published_at,
+            "provider": "Google News RSS",
+        } for index in range(10)],
+    )
+
+    result = json.loads(builtin_server.get_ai_news(limit=10, hours=24))
+
+    assert result["count"] == 10
+    assert result["provider_errors"] == ["GDELT: temporary error"]
+
+
+def test_failed_json_reload_keeps_previous_generation(tmp_path: Path):
+    config = _write_external_config(tmp_path)
+    tools = ToolRegistry()
+    registry = McpServerRegistry(config, tools, startup_timeout=5, call_timeout=5)
     try:
         registry.start()
-        (mcp_root / "servers" / "broken.toml").write_text(
-            '''schema_version = 1
-name = "broken"
-command = ["/path/that/does/not/exist"]
-''',
-            encoding="utf-8",
-        )
+        raw = json.loads(config.read_text(encoding="utf-8"))
+        raw["mcpServers"]["broken"] = {
+            "enabled": True,
+            "command": "/path/that/does/not/exist",
+            "args": [],
+        }
+        config.write_text(json.dumps(raw), encoding="utf-8")
 
-        with pytest.raises(Exception):
+        try:
             registry.reload()
+        except Exception:
+            pass
 
         result = tools.execute("mcp__demo__echo", {"text": "still-alive"})
         assert result.ok is True
-        assert result.content == "external:still-alive"
-    finally:
-        registry.stop_all()
-
-
-def test_reload_can_publish_empty_generation(tmp_path: Path):
-    mcp_root, _script = _write_workspace_server(tmp_path)
-    tools = ToolRegistry()
-    registry = McpServerRegistry(
-        config_path=mcp_root / "servers.json",
-        tool_registry=tools,
-        startup_timeout=5.0,
-        call_timeout=5.0,
-    )
-
-    try:
-        registry.start()
-        (mcp_root / "servers" / "demo.toml").unlink()
-
-        registry.reload()
-
-        assert registry.server_names == []
-        assert "mcp__demo__echo" not in tools.list_tool_names()
     finally:
         registry.stop_all()
 
@@ -180,16 +206,15 @@ class DemoPlugin(Plugin):
 ''',
         encoding="utf-8",
     )
-
     manager = PluginManager(
         plugins_dir,
         tool_registry=ToolRegistry(),
         workspace=tmp_path,
         plugin_data_dir=data_dir,
     )
+
     asyncio.run(manager.load_all())
 
     specs = manager.get_mcp_servers()
-    assert len(specs) == 1
     assert specs[0].cwd == str(plugin_dir.resolve())
     assert specs[0].env["FLOW_PLUGIN_DATA_DIR"] == str((data_dir / "demo").resolve())

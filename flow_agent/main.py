@@ -119,6 +119,9 @@ def run_service() -> None:
     # 启动 Agent 主循环（后台线程）
     agent_loop.start_background()
 
+    background_runtime.start()
+    print("scheduler started")
+
     if memory_optimizer_loop is not None:
         memory_optimizer_loop.start()
         print("memory optimizer started")
@@ -169,6 +172,7 @@ def run_service() -> None:
             proactive_runtime.request_stop()
         if memory_optimizer_loop is not None:
             memory_optimizer_loop.stop()
+        background_runtime.stop()
         mcp_registry.stop_all()
         import asyncio
         asyncio.run(plugin_manager.shutdown_all())
