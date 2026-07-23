@@ -63,6 +63,8 @@ case "${PHASE}" in
       flow_agent/messaging/outbox.py
       flow_agent/proactive/deliver.py
       flow_agent/runtime/workspace.py
+      flow_agent/config/loader.py
+      flow_agent/config/settings.py
       flow_agent/subagent/manager.py
       flow_agent/subagent/models.py
       flow_agent/tools/spawn.py
