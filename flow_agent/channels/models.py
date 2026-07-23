@@ -27,10 +27,25 @@ class OutboundMessage:
     channel: str
     session_id: str
     text: str
+    chat_id: str = ""
+    delivery_id: str = ""
     thinking: str | None = None  # 思考过程（用于流式输出）
     media: list[str] = field(default_factory=list)  # 媒体文件路径列表
     sent_at: datetime = field(default_factory=_utc_now)
     metadata: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(slots=True, frozen=True)
+class ChannelDeliveryResult:
+    """渠道适配器返回的单次投递判断。"""
+
+    delivered: bool
+    retryable: bool = True
+    uncertain: bool = False
+    error: str = ""
+
+    def __bool__(self) -> bool:
+        return self.delivered
 
 
 class OutboundSubscriber(Protocol):

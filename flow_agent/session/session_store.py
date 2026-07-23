@@ -180,6 +180,95 @@ class SessionStore:
             )
         return msg_id
 
+
+    def insert_turn(
+        self,
+        session_key: str,
+        user_content: str,
+        assistant_content: str,
+        *,
+        user_extra: dict[str, Any] | None = None,
+        assistant_extra: dict[str, Any] | None = None,
+        user_tool_chain: list | None = None,
+        assistant_tool_chain: list | None = None,
+    ) -> list[dict[str, Any]]:
+        """在单个事务中写入一轮用户消息和助手消息。"""
+
+        now = _utc_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = conn.execute(
+                    "SELECT next_seq FROM sessions WHERE key = ?",
+                    (session_key,),
+                ).fetchone()
+                if row is None:
+                    first_seq = 1
+                    conn.execute(
+                        "INSERT INTO sessions "
+                        "(key, created_at, updated_at, last_consolidated, next_seq, metadata_json) "
+                        "VALUES (?, ?, ?, 0, 1, '{}')",
+                        (session_key, now, now),
+                    )
+                else:
+                    first_seq = int(row["next_seq"])
+
+                values = [
+                    (
+                        first_seq,
+                        "user",
+                        user_content,
+                        user_tool_chain or [],
+                        user_extra or {},
+                    ),
+                    (
+                        first_seq + 1,
+                        "assistant",
+                        assistant_content,
+                        assistant_tool_chain or [],
+                        assistant_extra or {},
+                    ),
+                ]
+                messages: list[dict[str, Any]] = []
+                for seq, role, content, tool_chain, extra in values:
+                    message_id = f"{session_key}:{seq}"
+                    conn.execute(
+                        "INSERT INTO messages_v2 "
+                        "(id, session_key, seq, role, content, tool_chain, extra, ts) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            message_id,
+                            session_key,
+                            seq,
+                            role,
+                            content,
+                            json.dumps(tool_chain, ensure_ascii=False),
+                            json.dumps(extra, ensure_ascii=False),
+                            now,
+                        ),
+                    )
+                    messages.append(
+                        {
+                            "id": message_id,
+                            "session_key": session_key,
+                            "seq": seq,
+                            "role": role,
+                            "content": content,
+                            "tool_chain": tool_chain,
+                            "extra": extra,
+                            "timestamp": now,
+                        }
+                    )
+                conn.execute(
+                    "UPDATE sessions SET next_seq = ?, updated_at = ? WHERE key = ?",
+                    (first_seq + 2, now, session_key),
+                )
+                conn.commit()
+                return messages
+            except Exception:
+                conn.rollback()
+                raise
+
     def get_next_seq(self, key: str) -> int:
         """Get and increment the next_seq counter for a session."""
         import threading

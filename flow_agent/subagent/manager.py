@@ -23,6 +23,7 @@ from flow_agent.subagent.profiles import build_spawn_spec, PROFILE_RESEARCH
 
 logger = logging.getLogger(__name__)
 _SPAWN_MAX_ITERATIONS = 30
+_COMPLETION_RESULT_MAX_CHARS = 12_000
 
 
 class SubagentManager:
@@ -46,6 +47,7 @@ class SubagentManager:
         self._worker_ready = threading.Event()
         self._worker_stop = threading.Event()
         self._worker_lock = threading.Lock()
+        self._announced_job_ids: set[str] = set()
         self.max_concurrency = 2
 
     def create_task(self, kind: str, payload: dict, *, parent_trace_id: str | None = None) -> Any:
@@ -185,6 +187,7 @@ class SubagentManager:
         profile: str,
         origin_channel: str,
         origin_chat_id: str,
+        origin_session_id: str,
         decision: SpawnDecision | None = None,
     ) -> str:
         """从同步工具线程安全地提交子代理任务。"""
@@ -197,6 +200,7 @@ class SubagentManager:
                 profile=profile,
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
+                origin_session_id=origin_session_id,
                 decision=decision,
             )
         else:
@@ -224,6 +228,7 @@ class SubagentManager:
         label: str | None = None,
         origin_channel: str = "cli",
         origin_chat_id: str = "default",
+        origin_session_id: str = "",
         profile: str = PROFILE_RESEARCH,
         retry_count: int = 0,
         decision: SpawnDecision | None = None,
@@ -251,6 +256,7 @@ class SubagentManager:
                 label=display_label,
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
+                origin_session_id=origin_session_id or origin_chat_id,
                 profile=profile,
                 retry_count=retry_count,
             ),
@@ -266,6 +272,7 @@ class SubagentManager:
             profile=profile,
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
+            origin_session_id=origin_session_id or origin_chat_id,
             task_dir=str(self.tasks_path.parent),
             retry_count=retry_count,
         )
@@ -300,6 +307,7 @@ class SubagentManager:
         label: str,
         origin_channel: str,
         origin_chat_id: str,
+        origin_session_id: str,
         profile: str,
         retry_count: int = 0,
     ) -> None:
@@ -333,6 +341,7 @@ class SubagentManager:
                 task=task,
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
+                origin_session_id=origin_session_id,
                 status=result.status,
                 exit_reason=result.exit_reason,
                 result=result.result_summary,
@@ -348,6 +357,7 @@ class SubagentManager:
             await self._announce_result(
                 job_id=job_id, label=label, task=task,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,
+                origin_session_id=origin_session_id,
                 status="error", exit_reason="error",
                 result=f"error: {exc}", profile=profile, retry_count=retry_count,
             )
@@ -365,6 +375,7 @@ class SubagentManager:
         task: str,
         origin_channel: str,
         origin_chat_id: str,
+        origin_session_id: str,
         status: str,
         exit_reason: str,
         result: str,
@@ -376,6 +387,11 @@ class SubagentManager:
         if self._bus is None:
             logger.warning("[spawn] no message bus, cannot announce completion")
             return
+        with self._persist_lock:
+            if job_id in self._announced_job_ids:
+                logger.info("[spawn] duplicate completion ignored: job_id=%s", job_id)
+                return
+            self._announced_job_ids.add(job_id)
 
         event = SpawnCompletionEvent(
             job_id=job_id,
@@ -399,14 +415,22 @@ class SubagentManager:
         from flow_agent.channels.models import InboundMessage
         msg = InboundMessage(
             channel=origin_channel,
-            session_id=origin_chat_id,
+            session_id=origin_session_id or origin_chat_id,
             text=json.dumps({
                 "type": "spawn_completion",
                 "job_id": job_id,
                 "label": label,
                 "status": status,
-                "result": result[:500],
+                "result": result[:_COMPLETION_RESULT_MAX_CHARS],
             }, ensure_ascii=False),
+            metadata={
+                "background_completion": True,
+                **(
+                    {"telegram_chat_id": origin_chat_id}
+                    if origin_channel == "telegram"
+                    else {}
+                ),
+            },
         )
         self._bus.publish_inbound(msg)
         logger.info("[spawn] completion announced: job_id=%s status=%s", job_id, status)

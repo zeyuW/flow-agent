@@ -126,6 +126,33 @@ class SessionManager:
         )
         return message
 
+
+    def append_turn(
+        self,
+        session_key: str,
+        user_content: str,
+        assistant_content: str,
+        *,
+        user_extra: dict[str, Any] | None = None,
+        assistant_extra: dict[str, Any] | None = None,
+        assistant_tool_chain: list | None = None,
+    ) -> list[dict[str, Any]]:
+        """原子持久化完整回合，并同步更新内存缓存。"""
+
+        session = self.get_or_create(session_key)
+        messages = self._store.insert_turn(
+            session_key,
+            user_content,
+            assistant_content,
+            user_extra=user_extra,
+            assistant_extra=assistant_extra,
+            assistant_tool_chain=assistant_tool_chain,
+        )
+        session.messages.extend(messages)
+        session.updated_at = datetime.now(timezone.utc)
+        self._cache[session_key] = session
+        return messages
+
     # ── Message Persistence (spec 2) ──
 
     def _lock(self, key: str) -> asyncio.Lock:

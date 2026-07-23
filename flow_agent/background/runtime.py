@@ -6,6 +6,7 @@ from typing import Any
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import JobRun
 from flow_agent.guard.guards import BackgroundReentryGuard
+from flow_agent.runtime.errors import classify_error
 
 
 logger = logging.getLogger(__name__)
@@ -90,8 +91,11 @@ class BackgroundRuntime:
         if not guard_decision.allowed:
             self._lock.release()
             raise RuntimeError(guard_decision.reason)
-        run = JobRun(job_name=job_name, ok=False, attempts=0, status="running")
-        self.store.append(run)
+        if hasattr(self.store, "start_run"):
+            run = self.store.start_run(job_name)
+        else:
+            run = JobRun(job_name=job_name, ok=False, attempts=0, status="running")
+            self.store.append(run)
         self._record({"type": "job_start", "job": job_name})
         try:
             attempts = 0
@@ -105,11 +109,18 @@ class BackgroundRuntime:
                     run.status = "succeeded"
                     run.result = "" if result is None else str(result)
                     run.error = None
+                    run.error_category = None
                     break
                 except Exception as exc:
                     run.ok = False
-                    run.status = "failed"
-                    run.error = str(exc)
+                    error_info = classify_error(exc)
+                    run.error = error_info.message
+                    run.error_category = error_info.category.value
+                    if attempts < max_attempts:
+                        run.status = "retrying"
+                        self.store.append(run)
+                    else:
+                        run.status = "failed"
                     if attempts >= max_attempts:
                         logger.exception(
                             "后台任务失败: name=%s attempts=%s",

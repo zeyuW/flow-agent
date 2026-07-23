@@ -68,6 +68,7 @@ class RunningSubagentJob:
     profile: str
     origin_channel: str
     origin_chat_id: str
+    origin_session_id: str
     task_dir: str
     retry_count: int = 0
     started_at: str = field(default_factory=_utc_iso)

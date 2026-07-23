@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 提交前只执行验证，不负责自动提交，避免 Git hook 递归调用。
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "${ROOT_DIR}/scripts/verify.sh"

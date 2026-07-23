@@ -3,7 +3,7 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - "**"
   pull_request:
     branches:
       - main
@@ -37,30 +37,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e .
 
-      - name: 编译源码
-        run: python -m compileall -q flow_agent
-
-      - name: 运行核心测试
+      - name: 执行统一验证
         env:
           PYTHONPATH: .
-        run: |
-          python -m pytest -q \
-            tests/test_agent.py \
-            tests/test_chunked_decoder.py \
-            tests/test_drift.py \
-            tests/test_filesystem_tool.py \
-            tests/test_hawkes_proactive.py \
-            tests/test_history_builder.py \
-            tests/test_llm_streaming.py \
-            tests/test_mcp_runtime.py \
-            tests/test_memory.py \
-            tests/test_memory_autowrite.py \
-            tests/test_memory_maintenance.py \
-            tests/test_proactive_tick.py \
-            tests/test_scheduler.py \
-            tests/test_scheduler_tasks.py \
-            tests/test_stage11_external.py \
-            tests/test_stage15_behavior_strategy.py \
-            tests/test_stage16_memory_reasoning.py \
-            tests/test_stage18_workspace_commands.py \
-            tests/test_tool_registry.py
+          TMPDIR: /tmp
+        run: bash scripts/verify.sh

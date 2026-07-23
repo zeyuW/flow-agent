@@ -4,6 +4,7 @@ from dataclasses import asdict
 from flow_agent.config.settings import settings
 from flow_agent.config.watcher import ConfigWatcher
 from flow_agent.messaging.message_bus import MessageBus
+from flow_agent.messaging.outbox import SQLiteOutboxStore
 from flow_agent.messaging.event_bus import EventBus
 from flow_agent.core.agent_loop import AgentLoop
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
@@ -175,7 +176,12 @@ def create_core_components():
 
 def create_message_bus() -> MessageBus:
     """创建消息总线实例。"""
-    return MessageBus()
+    cfg = settings.get()
+    return MessageBus(
+        outbox_store=SQLiteOutboxStore(WORKSPACE_LAYOUT.outbound_messages_db),
+        outbox_recovery_window_s=cfg.storage.outbox_recovery_window_seconds,
+        outbox_recovery_limit=cfg.storage.outbox_recovery_limit,
+    )
 
 
 def create_event_bus() -> EventBus:

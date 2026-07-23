@@ -35,6 +35,9 @@ class EmbeddingSettings(BaseModel):
 
 class StorageSettings(BaseModel):
     memory_db_path: str = ".flow/data/memory.db"
+    # 默认不恢复停止期间的历史出站消息；正数表示显式开启短窗口恢复。
+    outbox_recovery_window_seconds: float = 0.0
+    outbox_recovery_limit: int = 100
 
 
 # ── 日志 ──

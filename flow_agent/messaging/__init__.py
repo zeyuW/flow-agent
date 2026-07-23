@@ -6,7 +6,7 @@ from flow_agent.messaging.message_bus import (
     OutboundPort,
     BusOutboundPort,
 )
-from flow_agent.messaging.event_bus import EventBus, Event, TurnCommitted
+from flow_agent.messaging.event_bus import EventBus, Event, EventSubscription, TurnCommitted
 
 __all__ = [
     "MessageBus",
@@ -16,6 +16,7 @@ __all__ = [
     "OutboundPort",
     "BusOutboundPort",
     "EventBus",
+    "EventSubscription",
     "Event",
     "TurnCommitted",
 ]
