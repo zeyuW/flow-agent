@@ -5,12 +5,46 @@ EventBus 与 MessageBus 完全独立：
 - MessageBus: 消息传输（入站/出站消息），点对点队列
 """
 
+import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol, TypeVar
 
 logger = logging.getLogger(__name__)
+
+EventHandler = TypeVar("EventHandler")
+
+
+class EventSubscription:
+    """有序生命周期处理器的可撤销订阅。"""
+
+    def __init__(
+        self,
+        bus: "EventBus",
+        event_type: type[object],
+        handler: Callable[..., object],
+    ) -> None:
+        self._bus = bus
+        self._event_type = event_type
+        self._handler = handler
+        self._closed = False
+
+    def close(self) -> None:
+        """撤销订阅；重复关闭不会产生副作用。"""
+
+        if self._closed:
+            return
+        self._closed = True
+        self._bus.off(self._event_type, self._handler)
+
+
+def _invoke_result(result: object) -> Awaitable[object] | None:
+    if inspect.isawaitable(result):
+        return result
+
+
 
 
 def _utc_now() -> datetime:
@@ -184,6 +218,97 @@ class EventBus:
     """
 
     _subscribers: list[EventSubscriber] = field(default_factory=list)
+
+    _handlers: dict[type[object], list[Callable[..., object]]] = field(
+        default_factory=dict
+    )
+
+    def on(
+        self,
+        event_type: type[EventHandler],
+        handler: Callable[[EventHandler], object],
+    ) -> EventSubscription:
+        """注册按类型执行的生命周期处理器，并保留注册顺序。"""
+
+        handlers = self._handlers.setdefault(event_type, [])
+        handlers.append(handler)
+        return EventSubscription(self, event_type, handler)
+
+    def on_any(self, handler: Callable[[object], object]) -> EventSubscription:
+        """注册接收所有事件的处理器。"""
+
+        return self.on(object, handler)
+
+    def off(self, event_type: type[object], handler: Callable[..., object]) -> None:
+        """移除一个生命周期处理器。"""
+
+        handlers = self._handlers.get(event_type)
+        if not handlers:
+            return
+        try:
+            handlers.remove(handler)
+        except ValueError:
+            return
+        if not handlers:
+            del self._handlers[event_type]
+
+    @property
+    def handler_count(self) -> int:
+        """返回当前生命周期处理器总数。"""
+
+        return sum(len(handlers) for handlers in self._handlers.values())
+
+    def _handlers_for(self, event: object) -> list[Callable[..., object]]:
+        return [
+            *self._handlers.get(type(event), []),
+            *self._handlers.get(object, []),
+        ]
+
+    async def emit(self, event: Event) -> Event:
+        """按注册顺序执行拦截链，非空返回值替换当前事件。"""
+
+        current = event
+        for handler in self._handlers_for(current):
+            result = handler(current)
+            awaitable = _invoke_result(result)
+            if awaitable is not None:
+                result = await awaitable
+            if result is not None:
+                current = result
+        return current
+
+    async def observe(self, event: Event) -> None:
+        """顺序执行观察处理器，单个处理器失败不影响其他处理器。"""
+
+        for handler in self._handlers_for(event):
+            try:
+                result = handler(event)
+                awaitable = _invoke_result(result)
+                if awaitable is not None:
+                    await awaitable
+            except Exception:
+                logger.exception("event observer failed: %s", type(event).__name__)
+
+    async def fanout(self, event: Event) -> None:
+        """并行执行观察处理器，并隔离单个处理器异常。"""
+
+        handlers = self._handlers_for(event)
+        if not handlers:
+            return
+
+        async def run(handler: Callable[..., object]) -> None:
+            try:
+                result = handler(event)
+                awaitable = _invoke_result(result)
+                if awaitable is not None:
+                    await awaitable
+            except Exception:
+                logger.exception(
+                    "event fanout observer failed: %s", type(event).__name__
+                )
+
+        await asyncio.gather(*(run(handler) for handler in handlers))
+
 
     def subscribe(self, subscriber: EventSubscriber) -> None:
         """订阅事件总线。"""
