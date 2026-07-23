@@ -423,6 +423,12 @@ class PassiveTurnPipeline:
             channel=flow.channel,
             session_id=flow.session_id,
             text=flow.final_output,
+            chat_id=str(
+                flow.inbound_metadata.get("telegram_chat_id")
+                or flow.inbound_metadata.get("qq_group_id")
+                or flow.inbound_metadata.get("qq_user_id")
+                or flow.session_id
+            ),
             metadata=metadata,
         )
 
@@ -446,6 +452,12 @@ class PassiveTurnPipeline:
             channel=flow.channel,
             session_id=flow.session_id,
             text=f"处理消息时出错: {exc}",
+            chat_id=str(
+                flow.inbound_metadata.get("telegram_chat_id")
+                or flow.inbound_metadata.get("qq_group_id")
+                or flow.inbound_metadata.get("qq_user_id")
+                or flow.session_id
+            ),
             metadata=metadata,
         )
         try:

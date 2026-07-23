@@ -54,6 +54,24 @@ class ConversationContext:
         session = self._session if sid == self.session_key else self._manager.get_or_create(sid)
         return get_history(session, max_messages=500, start_index=None)
 
+    def append_turn(
+        self,
+        session_id: str,
+        user_content: str,
+        assistant_content: str,
+        *,
+        assistant_tool_chain: list | None = None,
+    ) -> None:
+        """原子保存完整回合，保证恢复时不会出现半个回合。"""
+
+        sid = session_id or self.session_key
+        self._manager.append_turn(
+            sid,
+            user_content,
+            assistant_content,
+            assistant_tool_chain=assistant_tool_chain,
+        )
+
     def append_user_message(self, session_id: str, content: str) -> None:
         sid = session_id or self.session_key
         self._manager.append_message(sid, "user", content)

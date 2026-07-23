@@ -137,6 +137,7 @@ class ListBackgroundRunsTool:
                             "attempts": run.attempts,
                             "result": run.result,
                             "error": run.error,
+                            "error_category": run.error_category,
                             "started_at": run.started_at.isoformat(),
                             "finished_at": (
                                 run.finished_at.isoformat()

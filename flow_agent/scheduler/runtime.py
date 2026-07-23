@@ -398,6 +398,7 @@ class SchedulerService:
                 channel=task.channel,
                 session_id=task.session_id,
                 text=task.message,
+                chat_id=task.chat_id,
                 metadata=metadata,
             )
         )

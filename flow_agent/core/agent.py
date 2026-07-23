@@ -92,6 +92,18 @@ class Agent:
             return self.llm_router.generate_fast(messages, tools=tools)
         return self.llm_client.generate(messages, tools=tools)
 
-    def commit_turn(self, user_input: str, assistant_output: str) -> None:
-        self.context.append_user_message(self.session_id, user_input)
-        self.context.append_assistant_message(self.session_id, assistant_output)
+    def commit_turn(
+        self,
+        user_input: str,
+        assistant_output: str,
+        *,
+        assistant_tool_chain: list | None = None,
+    ) -> None:
+        """原子提交一轮对话，避免恢复时只看到单侧消息。"""
+
+        self.context.append_turn(
+            self.session_id,
+            user_input,
+            assistant_output,
+            assistant_tool_chain=assistant_tool_chain,
+        )
