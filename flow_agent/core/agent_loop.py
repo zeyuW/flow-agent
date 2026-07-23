@@ -12,6 +12,7 @@ AgentLoop 持续从 MessageBus 阻塞式消费入站消息，
 """
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
@@ -147,10 +148,14 @@ class AgentLoop:
             logger.exception("agent loop error")
         finally:
             self._running = False
-            # 等待所有活跃任务完成
-            if self._active_tasks:
-                logger.info("waiting for %d active tasks to finish", len(self._active_tasks))
-                await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            # 运行器停止后不再等待卡住的回合，自行取消并等待其完成清理。
+            tasks = tuple(self._active_tasks)
+            if tasks:
+                logger.info("cancelling %d active tasks before shutdown", len(tasks))
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
 
     async def stop(self, timeout: float = 5.0) -> None:
         """停止 AgentLoop，并在超时后取消仍未结束的回合任务。"""
@@ -254,7 +259,13 @@ class AgentLoop:
             inbound.session_id,
         )
         try:
-            self._pipeline.process(inbound)
+            process_async = getattr(self._pipeline, "process_async", None)
+            if callable(process_async):
+                result = process_async(inbound)
+                if inspect.isawaitable(result):
+                    await result
+            else:
+                self._pipeline.process(inbound)
         except Exception:
             logger.exception("agent loop async pipeline failed")
 

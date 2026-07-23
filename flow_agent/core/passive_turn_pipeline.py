@@ -9,6 +9,7 @@ AfterTurn 阶段顺序（确保正确性）：
   如果先发送回复再广播事件，一旦发送失败会导致状态不一致。
 """
 
+import inspect
 import logging
 import time
 from datetime import datetime
@@ -102,8 +103,6 @@ class PassiveTurnPipeline:
             trace_id=uuid4().hex[:12],
         )
         flow.extensions["_phase_modules"] = self._phase_module_snapshot()
-        self.agent.set_session(flow.session_id)
-
         turn_started = time.perf_counter()
         self._record_event({
             "type": "turn_start",
@@ -159,6 +158,64 @@ class PassiveTurnPipeline:
             })
             logger.exception("turn error session=%s", flow.session_id)
             # 即使出错也尝试发送错误回复
+            self._send_error_reply(flow, exc)
+
+    async def process_async(self, inbound: InboundMessage) -> None:
+        """异步处理一条入站消息，使模型等待不会阻塞其他会话。"""
+
+        flow = TurnFlow(
+            user_input=inbound.text,
+            session_id=inbound.session_id,
+            channel=inbound.channel,
+            inbound_metadata=inbound.metadata or {},
+            trace_id=uuid4().hex[:12],
+        )
+        flow.extensions["_phase_modules"] = self._phase_module_snapshot()
+        turn_started = time.perf_counter()
+        self._record_event(
+            {
+                "type": "turn_start",
+                "trace_id": flow.trace_id,
+                "session_id": flow.session_id,
+                "user_input": flow.user_input,
+            }
+        )
+        try:
+            self._call_phase_modules(flow, "on_turn_started")
+            flow = self._run_phase(flow, "before_turn", self._before_turn)
+            flow = self._run_phase(flow, "before_reasoning", self._before_reasoning)
+            flow = self._run_phase(flow, "prompt_render", self._prompt_render)
+            flow = await self._reasoner_async(flow)
+            flow = self._run_phase(flow, "after_reasoning", self._after_reasoning)
+            flow = self._run_phase(flow, "after_turn", self._after_turn)
+            self._record_event(
+                {
+                    "type": "turn_end",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "assistant_output": flow.final_output,
+                    "tool_trace": flow.tool_trace,
+                }
+            )
+            self._record_event(
+                {
+                    "type": "turn_perf",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "latency_ms": round((time.perf_counter() - turn_started) * 1000, 2),
+                }
+            )
+        except Exception as exc:
+            self._record_event(
+                {
+                    "type": "turn_error",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
+            logger.exception("async turn error session=%s", flow.session_id)
             self._send_error_reply(flow, exc)
 
     # ── 阶段钩子 ────────────────────────────────────────────
@@ -237,6 +294,7 @@ class PassiveTurnPipeline:
             memory_block=memory_block,
             retrieval_block="",
             tool_instructions=tool_instructions,
+            session_id=flow.session_id,
         )
         flow.messages = messages
         return flow
@@ -333,6 +391,12 @@ class PassiveTurnPipeline:
         # 非思考模式或流式失败，使用正常流程
         return self._run_tool_loop(flow)
 
+    async def _reasoner_async(self, flow: TurnFlow) -> TurnFlow:
+        """通过异步模型接口执行推理与工具循环。"""
+
+        self._call_phase_modules(flow, "on_reasoner")
+        return await self._run_tool_loop_async(flow)
+
     def _after_reasoning(self, flow: TurnFlow) -> TurnFlow:
         self._call_phase_modules(flow, "on_after_reasoning")
         return flow
@@ -350,10 +414,18 @@ class PassiveTurnPipeline:
             logger.error("模型未生成有效回复，使用空回复兜底文案: trace=%s", flow.trace_id)
             flow.final_output = "抱歉，本轮没有生成有效回复，请再试一次。"
         # 写入当前会话历史。
-        self.agent.commit_turn(
-            user_input=flow.user_input,
-            assistant_output=flow.final_output,
-        )
+        commit_turn = self.agent.commit_turn
+        if "session_id" in inspect.signature(commit_turn).parameters:
+            commit_turn(
+                user_input=flow.user_input,
+                assistant_output=flow.final_output,
+                session_id=flow.session_id,
+            )
+        else:
+            commit_turn(
+                user_input=flow.user_input,
+                assistant_output=flow.final_output,
+            )
 
         # ① 先广播 TurnCommitted 事件
         self._broadcast_turn_committed(flow)
@@ -466,6 +538,120 @@ class PassiveTurnPipeline:
             logger.exception("failed to send error reply")
 
     # ── 工具调用循环 ────────────────────────────────────────
+
+    async def _run_tool_loop_async(self, flow: TurnFlow) -> TurnFlow:
+        """执行异步模型工具循环；同步工具保留在受控的单步边界。"""
+
+        current_messages = list(flow.messages)
+        loop_started = time.perf_counter()
+        for step in range(self.max_tool_steps):
+            result = await self.agent.generate_from_messages_async(
+                current_messages,
+                tools=flow.tools if flow.tools else None,
+            )
+            if not result.tool_calls:
+                flow.final_output = result.content or ""
+                self._record_event(
+                    {
+                        "type": "tool_loop_perf",
+                        "trace_id": flow.trace_id,
+                        "session_id": flow.session_id,
+                        "steps": step,
+                        "latency_ms": round(
+                            (time.perf_counter() - loop_started) * 1000,
+                            2,
+                        ),
+                    }
+                )
+                return flow
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": result.content or "",
+                    "tool_calls": [
+                        self._tool_call_to_message_item(tool_call)
+                        for tool_call in result.tool_calls
+                    ],
+                }
+            )
+            for tool_call in result.tool_calls:
+                tool_input = self._tool_input_for_flow(tool_call, flow)
+                if self._tool_hook_executor is not None:
+                    outcome = self._tool_hook_executor.execute_sync(
+                        tool_call.name,
+                        tool_input,
+                        flow.session_id,
+                    )
+                    if outcome.decision == "deny":
+                        tool_message = (
+                            f"Tool {tool_call.name} ok=False: "
+                            f"插件钩子阻止执行: {outcome.reason}"
+                        )
+                        flow.tool_trace.append(
+                            {
+                                "step": str(step + 1),
+                                "tool": tool_call.name,
+                                "status": "blocked",
+                                "arguments": tool_call.arguments_json,
+                            }
+                        )
+                        current_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": tool_message,
+                            }
+                        )
+                        continue
+                    if outcome.modified_args is not None:
+                        tool_input = dict(outcome.modified_args)
+                tool_result = self.tool_registry.execute(
+                    tool_name=tool_call.name,
+                    tool_input=tool_input,
+                )
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": (
+                            f"Tool {tool_call.name} ok={tool_result.ok}: "
+                            f"{tool_result.content}"
+                        ),
+                    }
+                )
+                flow.tool_trace.append(
+                    {
+                        "step": str(step + 1),
+                        "tool": tool_call.name,
+                        "status": "ok" if tool_result.ok else "failed",
+                        "arguments": tool_call.arguments_json,
+                    }
+                )
+        flow.final_output = "工具调用次数超过上限，请调整请求后重试。"
+        return flow
+
+    def _tool_input_for_flow(
+        self,
+        tool_call: LLMToolCall,
+        flow: TurnFlow,
+    ) -> dict[str, str]:
+        """为需要会话上下文的工具补充当前回合身份。"""
+
+        tool_input = dict(tool_call.arguments)
+        if tool_call.name in {
+            "schedule_task",
+            "list_scheduled_tasks",
+            "cancel_scheduled_task",
+            "configure_proactive_policy",
+            "get_proactive_status",
+            "spawn",
+        }:
+            tool_input["__session_id"] = flow.session_id
+            tool_input["__channel"] = flow.channel
+            tool_input["__chat_id"] = str(
+                flow.inbound_metadata.get("telegram_chat_id") or flow.session_id
+            )
+        return tool_input
 
     def _run_tool_loop(
         self,
