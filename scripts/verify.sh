@@ -32,8 +32,36 @@ if rg -n -i 'akashic[-_ ]?agent|/home/roco/akashic-agent|参考项目|参考仓�
 fi
 
 echo "[4/4] 运行测试"
-TEST_TARGET="${FLOW_AGENT_TEST_TARGET:-tests}"
-read -r -a TEST_ARGS <<< "${TEST_TARGET}"
+if [[ -n "${FLOW_AGENT_TEST_TARGET:-}" ]]; then
+  read -r -a TEST_ARGS <<< "${FLOW_AGENT_TEST_TARGET}"
+else
+  TEST_ARGS=(
+    tests/test_agent.py
+    tests/test_chunked_decoder.py
+    tests/test_drift.py
+    tests/test_filesystem_tool.py
+    tests/test_hawkes_proactive.py
+    tests/test_history_builder.py
+    tests/test_llm_streaming.py
+    tests/test_mcp_runtime.py
+    tests/test_memory.py
+    tests/test_memory_autowrite.py
+    tests/test_memory_maintenance.py
+    tests/test_proactive_tick.py
+    tests/test_scheduler.py
+    tests/test_scheduler_tasks.py
+    tests/test_stage11_external.py
+    tests/test_stage15_behavior_strategy.py
+    tests/test_stage16_memory_reasoning.py
+    tests/test_stage18_workspace_commands.py
+    tests/test_tool_registry.py
+    tests/test_event_bus_lifecycle.py
+    tests/test_phase2_state_recovery.py
+    tests/test_phase3_boundaries.py
+    tests/test_reliable_delivery.py
+    tests/test_spawn_runtime.py
+  )
+fi
 "${PYTHON_BIN}" -m pytest -q "${TEST_ARGS[@]}"
 
 echo "验证通过"
