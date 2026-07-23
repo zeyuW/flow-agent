@@ -15,6 +15,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections import deque
 
 from flow_agent.channels.models import InboundMessage
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
@@ -87,6 +88,7 @@ class AgentLoop:
         self._running = False
         self._processing = ProcessingState()
         self._active_tasks: set[asyncio.Task] = set()
+        self._pending_by_session: dict[str, deque[InboundMessage]] = {}
         self._thread: threading.Thread | None = None
 
     def run_once(self) -> bool:
@@ -126,17 +128,19 @@ class AgentLoop:
 
                 # 检查是否已有同一 session 的处理任务
                 if self._processing.is_processing(inbound.session_id):
-                    logger.info(
-                        "session %s already processing, skipping new message",
+                    pending = self._pending_by_session.setdefault(
                         inbound.session_id,
+                        deque(),
+                    )
+                    pending.append(inbound)
+                    logger.info(
+                        "session %s already processing, queued pending=%d",
+                        inbound.session_id,
+                        len(pending),
                     )
                     continue
 
-                # 创建独立任务，实现并发处理
-                task = asyncio.create_task(self._process_async(inbound))
-                self._processing.set_processing(inbound.session_id, task)
-                self._active_tasks.add(task)
-                task.add_done_callback(self._on_task_done)
+                self._start_processing(inbound)
         except asyncio.CancelledError:
             logger.info("agent loop cancelled")
         except Exception:
@@ -148,12 +152,23 @@ class AgentLoop:
                 logger.info("waiting for %d active tasks to finish", len(self._active_tasks))
                 await asyncio.gather(*self._active_tasks, return_exceptions=True)
 
-    async def stop(self) -> None:
-        """停止 AgentLoop。"""
+    async def stop(self, timeout: float = 5.0) -> None:
+        """停止 AgentLoop，并在超时后取消仍未结束的回合任务。"""
+
         self._running = False
-        # 等待活跃任务
         if self._active_tasks:
-            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            tasks = tuple(self._active_tasks)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True),
+                    timeout=max(0.0, timeout),
+                )
+            except asyncio.TimeoutError:
+                logger.warning("AgentLoop 停止等待超时，取消 %d 个活跃任务", len(tasks))
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
         logger.info("agent loop stopped")
 
     def start_background(self) -> None:
@@ -179,14 +194,35 @@ class AgentLoop:
         self._thread.start()
         logger.info("agent loop started in background thread")
 
-    def _on_task_done(self, task: asyncio.Task) -> None:
-        """任务完成回调：清理状态。"""
+    def _start_processing(self, inbound: InboundMessage) -> None:
+        """启动一条消息，并把会话 owner 绑定到该任务。"""
+
+        task = asyncio.create_task(self._process_async(inbound))
+        self._processing.set_processing(inbound.session_id, task)
+        self._active_tasks.add(task)
+        task.add_done_callback(
+            lambda completed, session_id=inbound.session_id: self._on_task_done(
+                completed,
+                session_id,
+            )
+        )
+
+    def _on_task_done(self, task: asyncio.Task, session_id: str) -> None:
+        """释放会话 owner，并按 FIFO 启动下一条待处理消息。"""
+
         self._active_tasks.discard(task)
-        # 清理 processing 状态
-        for session_id, t in list(self._processing._processing.items()):
-            if t is task:
-                self._processing.clear_processing(session_id)
-                break
+        self._processing.clear_processing(session_id)
+        pending = self._pending_by_session.get(session_id)
+        if not pending:
+            self._pending_by_session.pop(session_id, None)
+            return
+        inbound = pending.popleft()
+        if not pending:
+            self._pending_by_session.pop(session_id, None)
+        if self._running:
+            self._start_processing(inbound)
+        else:
+            self._bus.publish_inbound(inbound)
 
     def _process(self, inbound: InboundMessage) -> None:
         """同步处理单条入站消息（兼容旧接口）。
@@ -221,8 +257,6 @@ class AgentLoop:
             self._pipeline.process(inbound)
         except Exception:
             logger.exception("agent loop async pipeline failed")
-        finally:
-            self._processing.clear_processing(inbound.session_id)
 
     def _publish_turn_started(self, inbound: InboundMessage) -> None:
         """发布 TurnStarted 事件，通知插件和观察者新处理周期开始。"""
@@ -244,3 +278,9 @@ class AgentLoop:
     @property
     def active_task_count(self) -> int:
         return len(self._active_tasks)
+
+    @property
+    def pending_message_count(self) -> int:
+        """返回所有会话尚未开始处理的消息总数。"""
+
+        return sum(len(items) for items in self._pending_by_session.values())

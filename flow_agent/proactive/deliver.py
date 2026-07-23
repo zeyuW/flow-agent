@@ -25,6 +25,52 @@ async def deliver_message(
             chat_id=chat_id,
         )
 
+    if outbound_port is None:
+        return DeliverResult(
+            sent=False,
+            message=resolve.message,
+            chat_id=chat_id,
+            error="outbound port unavailable",
+        )
+
+    try:
+        from flow_agent.messaging.message_bus import OutboundDispatch
+
+        metadata = {
+            "proactive": True,
+            "cited": resolve.cited_item_ids,
+        }
+        if channel == "telegram" and chat_id:
+            metadata["telegram_chat_id"] = chat_id
+        dispatch = OutboundDispatch(
+            channel=channel,
+            session_id=chat_id,
+            chat_id=chat_id,
+            delivery_id=resolve.delivery_key,
+            text=resolve.message,
+            metadata=metadata,
+        )
+        if hasattr(outbound_port, "send_and_wait"):
+            receipt = await outbound_port.send_and_wait(dispatch, timeout=30.0)
+            if not receipt.delivered:
+                return DeliverResult(
+                    sent=False,
+                    message=resolve.message,
+                    chat_id=chat_id,
+                    error=receipt.error or "delivery failed",
+                )
+        else:
+            outbound_port.send(dispatch)
+    except Exception as exc:
+        logger.exception("主动消息出站投递失败")
+        return DeliverResult(
+            sent=False,
+            message=resolve.message,
+            chat_id=chat_id,
+            error=str(exc) or "dispatch failed",
+        )
+
+    # 主动消息只有在渠道确认送达后才进入会话历史。
     if session_manager is not None:
         try:
             session = session_manager.get_or_create(chat_id)
@@ -41,33 +87,6 @@ async def deliver_message(
             )
         except Exception:
             logger.exception("主动消息会话持久化失败")
-
-    if outbound_port is not None:
-        try:
-            from flow_agent.messaging.message_bus import OutboundDispatch
-
-            metadata = {
-                "proactive": True,
-                "cited": resolve.cited_item_ids,
-            }
-            if channel == "telegram" and chat_id:
-                metadata["telegram_chat_id"] = chat_id
-            outbound_port.send(
-                OutboundDispatch(
-                    channel=channel,
-                    session_id=chat_id,
-                    text=resolve.message,
-                    metadata=metadata,
-                )
-            )
-        except Exception:
-            logger.exception("主动消息出站投递失败")
-            return DeliverResult(
-                sent=False,
-                message=resolve.message,
-                chat_id=chat_id,
-                error="dispatch failed",
-            )
 
     for effect in resolve.side_effects:
         try:

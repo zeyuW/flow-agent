@@ -123,6 +123,11 @@ def test_resolve_send_when_no_dedup():
 
 
 def test_deliver_sets_sent_flag():
+    class DeliveredPort:
+        async def send_and_wait(self, dispatch, timeout=30.0):
+            del dispatch, timeout
+            return type("Receipt", (), {"delivered": True, "error": ""})()
+
     resolve = ResolveResult(
         decision="send",
         message="hello",
@@ -130,7 +135,9 @@ def test_deliver_sets_sent_flag():
         delivery_key="key1",
     )
     import asyncio
-    result = asyncio.run(deliver_message(resolve, chat_id="test"))
+    result = asyncio.run(
+        deliver_message(resolve, chat_id="test", outbound_port=DeliveredPort())
+    )
     assert isinstance(result, DeliverResult)
     assert result.sent is True
 

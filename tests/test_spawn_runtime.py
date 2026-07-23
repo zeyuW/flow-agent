@@ -1,5 +1,6 @@
 """子代理工具与持久事件循环的回归测试。"""
 
+import asyncio
 import json
 import threading
 import time
@@ -50,6 +51,7 @@ def test_spawn_tool_passes_telegram_context_inside_running_loop():
     assert result.content == "created"
     assert manager.arguments["origin_channel"] == "telegram"
     assert manager.arguments["origin_chat_id"] == "12345"
+    assert manager.arguments["origin_session_id"] == "12345"
 
 
 def test_background_spawn_survives_submission_return(tmp_path, monkeypatch):
@@ -71,6 +73,7 @@ def test_background_spawn_survives_submission_return(tmp_path, monkeypatch):
             profile="research",
             origin_channel="telegram",
             origin_chat_id="12345",
+            origin_session_id="12345",
         )
 
         assert "已创建后台任务" in confirmation
@@ -101,6 +104,7 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
             profile="research",
             origin_channel="telegram",
             origin_chat_id="8706327858",
+            origin_session_id="8706327858",
         )
 
         deadline = time.monotonic() + 2
@@ -113,9 +117,38 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
         assert message is not None
         assert message.channel == "telegram"
         assert message.session_id == "8706327858"
+        assert message.metadata["telegram_chat_id"] == "8706327858"
         payload = json.loads(message.text)
         assert payload["type"] == "spawn_completion"
         assert payload["status"] == "completed"
         assert payload["result"] == "调研完成"
     finally:
         manager.shutdown()
+
+
+def test_background_completion_keeps_long_result_and_chat_metadata(tmp_path):
+    bus = MessageBus()
+    manager = SubagentManager(
+        tasks_path=tmp_path / "tasks.jsonl",
+        message_bus=bus,
+        llm_client=ImmediateLLM(),
+    )
+    long_result = "结果" * 2000
+
+    asyncio.run(manager._announce_result(
+        job_id="job-long",
+        label="长结果",
+        task="整理",
+        origin_channel="telegram",
+        origin_chat_id="8706327858",
+        origin_session_id="8706327858",
+        status="completed",
+        exit_reason="completed",
+        result=long_result,
+        profile="research",
+    ))
+
+    message = bus.consume_inbound()
+    assert message is not None
+    assert message.metadata["telegram_chat_id"] == "8706327858"
+    assert json.loads(message.text)["result"] == long_result

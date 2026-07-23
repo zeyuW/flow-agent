@@ -9,7 +9,11 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
-from flow_agent.channels.models import InboundMessage, OutboundMessage
+from flow_agent.channels.models import (
+    ChannelDeliveryResult,
+    InboundMessage,
+    OutboundMessage,
+)
 from flow_agent.channels.protocol import Channel, ChannelContext, ChannelStatus
 from flow_agent.messaging.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
@@ -41,6 +45,7 @@ class TelegramChannel(Channel, EventSubscriber):
         self._context: ChannelContext | None = None
         self._last_error: str | None = None
         self._pending_messages: dict[str, int] = {}  # session_id -> message_id
+        self._delivery_chunk_progress: dict[str, int] = {}
         
         # 流式输出缓冲区
         self._stream_buffers: dict[str, dict[str, Any]] = {}  # session_id -> {"content": str, "last_sent": str, "last_time": float}
@@ -339,22 +344,46 @@ class TelegramChannel(Channel, EventSubscriber):
         )
         self._context.bus.publish_inbound(inbound)
     
-    def _on_response(self, message: OutboundMessage) -> None:
-        """收到出站回复时的回调"""
+    def _on_response(self, message: OutboundMessage) -> ChannelDeliveryResult:
+        """发送出站回复，并把真实平台结果返回消息总线。"""
         if not message or not message.text:
             logger.warning("telegram outbound: empty message or text")
-            return
-        
-        chat_id = message.metadata.get("telegram_chat_id", 0) if message.metadata else 0
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error="empty outbound message",
+            )
+
+        chat_id = message.chat_id
+        if not chat_id and message.metadata:
+            chat_id = str(message.metadata.get("telegram_chat_id") or "")
         if not chat_id:
-            logger.warning(f"telegram outbound: no telegram_chat_id in metadata: {message.metadata}")
-            return
+            chat_id = message.session_id
+        if not chat_id:
+            logger.warning(
+                "telegram outbound: no chat target delivery_id=%s",
+                message.delivery_id,
+            )
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error="missing telegram chat target",
+            )
+
+        normalized_chat_id = _normalize_telegram_chat_id(str(chat_id))
+        if normalized_chat_id is None:
+            logger.warning("telegram outbound: invalid chat target=%s", chat_id)
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error=f"invalid telegram chat target: {chat_id}",
+            )
         
         # 如果该会话有待编辑的消息，说明启用了思考模式
         # 删除思考消息，发送最终答案
         if message.session_id in self._pending_messages:
             message_id = self._pending_messages[message.session_id]
-            self._delete_message(chat_id=int(chat_id), message_id=message_id)
+            self._delete_message(chat_id=normalized_chat_id, message_id=message_id)
             del self._pending_messages[message.session_id]
             logger.info(f"telegram outbound: deleted thinking message {message_id} for session {message.session_id}")
         
@@ -364,18 +393,39 @@ class TelegramChannel(Channel, EventSubscriber):
         if message.session_id in self._stream_locks:
             del self._stream_locks[message.session_id]
         
-        # 发送最终答案
-        try:
-            self._send_text(chat_id=chat_id, text=message.text)
-        except Exception:
-            logger.exception("telegram outbound send failed")
+        # 长回复按 Telegram 限制分片，任一片失败都返回失败回执。
+        chunks = _split_telegram_text(message.text)
+        progress_key = message.delivery_id or f"{message.session_id}:{hash(message.text)}"
+        start_index = self._delivery_chunk_progress.get(progress_key, 0)
+        for index, chunk in enumerate(chunks[start_index:], start=start_index):
+            result = self._send_text(chat_id=normalized_chat_id, text=chunk)
+            if not result:
+                self._delivery_chunk_progress[progress_key] = index
+                logger.error(
+                    "telegram outbound send failed: delivery_id=%s",
+                    message.delivery_id,
+                )
+                partial = index > 0 or start_index > 0
+                return ChannelDeliveryResult(
+                    delivered=False,
+                    retryable=not partial,
+                    uncertain=partial,
+                    error=(
+                        f"telegram partial delivery stopped at chunk {index + 1}"
+                        if partial
+                        else "telegram delivery failed before first chunk"
+                    ),
+                )
+            self._delivery_chunk_progress[progress_key] = index + 1
+        self._delivery_chunk_progress.pop(progress_key, None)
+        return ChannelDeliveryResult(delivered=True)
     
     def _send_text(self, chat_id: int, text: str, max_retries: int = 3) -> dict:
         """发送文本消息到指定会话，带重试机制，支持HTML格式。"""
         url = f"{_TELEGRAM_API_BASE}/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": chat_id,
-            "text": text[:4096],  # Telegram 消息长度限制
+            "text": text,
             "parse_mode": "HTML",
         }
         
@@ -385,6 +435,8 @@ class TelegramChannel(Channel, EventSubscriber):
                 if result:
                     logger.info(f"telegram send_text succeeded: chat_id={chat_id}, result={result}")
                     return result
+                if payload.get("parse_mode"):
+                    payload["parse_mode"] = None
             except Exception as e:
                 logger.warning(f"telegram send_text attempt {attempt + 1} failed: {e}")
                 # HTML解析失败时降级为纯文本
@@ -417,11 +469,12 @@ class TelegramChannel(Channel, EventSubscriber):
     
     def send(self, *, chat_id: str, text: str) -> None:
         """发送文本消息到指定会话"""
-        if chat_id.startswith("telegram_group_"):
-            group_id = int(chat_id.replace("telegram_group_", ""))
-            self._send_text(group_id, text)
-        else:
-            self._send_text(int(chat_id), text)
+        normalized_chat_id = _normalize_telegram_chat_id(chat_id)
+        if normalized_chat_id is None:
+            raise ValueError(f"无效 Telegram chat_id: {chat_id}")
+        for chunk in _split_telegram_text(text):
+            if not self._send_text(normalized_chat_id, chunk):
+                raise RuntimeError("Telegram 文本发送失败")
     
     def send_file(self, *, chat_id: str, path: str) -> None:
         """发送文件到指定会话"""
@@ -430,3 +483,38 @@ class TelegramChannel(Channel, EventSubscriber):
     def send_image(self, *, chat_id: str, path: str) -> None:
         """发送图片到指定会话"""
         logger.info("telegram send_image: chat=%s path=%s (API 待实现)", chat_id, path)
+
+
+def _normalize_telegram_chat_id(value: str) -> int | None:
+    """把私聊或群聊 session 标识转换为 Telegram chat_id。"""
+
+    raw = value.strip()
+    if raw.startswith("telegram_group_"):
+        raw = raw.removeprefix("telegram_group_")
+    if not raw or raw in {"+", "-"}:
+        return None
+    signed_digits = raw[1:] if raw[0] in {"+", "-"} else raw
+    if not signed_digits.isdigit():
+        return None
+    return int(raw)
+
+
+def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:
+    """按换行优先切分长文本，确保不会静默截断尾部。"""
+
+    remaining = text or ""
+    if not remaining:
+        return []
+    chunks: list[str] = []
+    while len(remaining) > limit:
+        split_at = remaining.rfind("\n", 0, limit + 1)
+        if split_at < max(1, limit // 2):
+            split_at = limit
+        else:
+            split_at += 1
+        chunk = remaining[:split_at]
+        chunks.append(chunk)
+        remaining = remaining[split_at:]
+    if remaining:
+        chunks.append(remaining)
+    return chunks
