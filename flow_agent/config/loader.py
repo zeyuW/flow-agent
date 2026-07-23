@@ -100,6 +100,16 @@ def load_settings(*, force_reload: bool = False) -> Settings:
                 ("storage", "memory_db_path"),
                 str(layout.memory_db),
             ),
+            outbox_recovery_window_seconds=values.get_float(
+                ("storage", "outbox_recovery_window_seconds"),
+                0.0,
+                minimum=0.0,
+            ),
+            outbox_recovery_limit=values.get_int(
+                ("storage", "outbox_recovery_limit"),
+                100,
+                minimum=1,
+            ),
         ),
         logging=LoggingSettings(
             level=values.get_str(("logging", "level"), "INFO"),
