@@ -4,7 +4,7 @@ import logging
 from typing import Any, Callable, Iterator
 from typing import Protocol
 
-from openai import APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
+from openai import AsyncOpenAI, APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
 
 from flow_agent.config.settings import Settings
 from flow_agent.runtime.fallback import with_fallback
@@ -62,6 +62,10 @@ class OpenAILLMClient:
         self.model = model_override or settings.model_name
         # 创建 OpenAI 客户端
         self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url_override or settings.base_url,
+        )
+        self.async_client = AsyncOpenAI(
             api_key=api_key,
             base_url=base_url_override or settings.base_url,
         )
@@ -130,6 +134,58 @@ class OpenAILLMClient:
 
         return LLMResult(content=content, tool_calls=parsed_tool_calls or None)
     
+    async def generate_async(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResult:
+        """通过异步传输生成结果，使取消信号可抵达网络请求。"""
+
+        request_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+        }
+        if tools:
+            request_kwargs["tools"] = tools
+        try:
+            response = await self.async_client.chat.completions.create(
+                **request_kwargs,
+            )
+        except AuthenticationError:
+            logger.exception("LLM authentication failed, please check API key")
+            return LLMResult(content="认证失败：请检查 API Key 是否正确。")
+        except (APIConnectionError, APITimeoutError):
+            logger.exception("LLM network request failed")
+            return LLMResult(content="网络异常：暂时无法连接到模型服务，请稍后重试。")
+        except APIError:
+            logger.exception("LLM API returned an error")
+            return LLMResult(content="模型服务暂时不可用，请稍后重试。")
+        except Exception:
+            logger.exception("Unexpected error during async LLM request")
+            return LLMResult(content="发生未知错误，请稍后重试。")
+
+        if not response.choices:
+            logger.warning("LLM returned no choices")
+            return LLMResult(content="模型没有返回有效内容，请重试一次。")
+
+        message = response.choices[0].message
+        parsed_tool_calls: list[LLMToolCall] = []
+        for tool_call in list(message.tool_calls or []):
+            arguments_json = tool_call.function.arguments
+            parsed_tool_calls.append(
+                LLMToolCall(
+                    id=tool_call.id,
+                    name=tool_call.function.name,
+                    arguments_json=arguments_json,
+                    arguments=self._parse_tool_arguments(arguments_json),
+                )
+            )
+        content = message.content or ""
+        if not parsed_tool_calls and not content.strip():
+            logger.warning("LLM returned empty content")
+            return LLMResult(content="模型返回了空内容，请重试一次。")
+        return LLMResult(content=content, tool_calls=parsed_tool_calls or None)
+
     # 流式生成文本
     def generate_stream(
         self,

@@ -49,8 +49,9 @@ class Agent:
         retrieval_block: str = "",
         tool_instructions: str = "",
         runtime_block: str = "",
+        session_id: str | None = None,
     ) -> list[dict[str, str]]:
-        history = self.context.get_history(self.session_id)
+        history = self.context.get_history(session_id or self.session_id)
         if self.prompt_assembler is None:
             messages: list[dict[str, str]] = [{"role": "system", "content": self.settings.system_prompt}]
             if persona_block:
@@ -83,6 +84,20 @@ class Agent:
             return self.llm_router.generate_main(messages, tools=tools)
         return self.llm_client.generate(messages, tools=tools)
 
+    async def generate_from_messages_async(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ):
+        """异步生成模型结果，禁止在被动回合中退回同步网络调用。"""
+
+        if self.llm_router is not None:
+            return await self.llm_router.generate_main_async(messages, tools=tools)
+        generate_async = getattr(self.llm_client, "generate_async", None)
+        if not callable(generate_async):
+            raise RuntimeError("当前模型客户端不支持异步生成")
+        return await generate_async(messages, tools=tools)
+
     def fast_generate_from_messages(
         self,
         messages: list[dict[str, Any]],
@@ -98,11 +113,12 @@ class Agent:
         assistant_output: str,
         *,
         assistant_tool_chain: list | None = None,
+        session_id: str | None = None,
     ) -> None:
         """原子提交一轮对话，避免恢复时只看到单侧消息。"""
 
         self.context.append_turn(
-            self.session_id,
+            session_id or self.session_id,
             user_input,
             assistant_output,
             assistant_tool_chain=assistant_tool_chain,
