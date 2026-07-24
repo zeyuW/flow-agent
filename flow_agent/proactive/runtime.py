@@ -10,6 +10,7 @@ from flow_agent.proactive.drift_store import DriftStateStore
 from flow_agent.proactive.events import ProactiveEventBridge
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore
 from flow_agent.proactive.judge_loop import JudgeLoop
+from flow_agent.proactive.lifecycle import compile_proactive_lifecycle
 from flow_agent.proactive.mcp_polling import McpPollingModule
 from flow_agent.proactive.mcp_pool import McpClientPool
 from flow_agent.proactive.proactive_loop import HawkesConfig, ProactiveLoop
@@ -56,6 +57,7 @@ def build_proactive_runtime(
     hawkes_decay_beta: float = 0.1,
     hawkes_time_constant: float = 60.0,
     proactive_sources=None,
+    proactive_modules: list[object] | None = None,
     local_source_file: str | Path | None = None,
     state_path=None,
     trace_path=None,
@@ -74,6 +76,10 @@ def build_proactive_runtime(
             pool.add_server(**server)
 
     sources = _flatten_sources(proactive_sources)
+    lifecycle = compile_proactive_lifecycle(
+        proactive_modules or [],
+        initial_slots=("proactive:tick",),
+    )
     local_path = Path(local_source_file) if local_source_file else None
     gateway = DataGateway(
         pool,
@@ -119,6 +125,7 @@ def build_proactive_runtime(
         mcp_pool=pool,
         proactive_sources=sources,
         channel=channel,
+        lifecycle=lifecycle,
     )
 
     polling_module = McpPollingModule(pool, sources) if sources else None

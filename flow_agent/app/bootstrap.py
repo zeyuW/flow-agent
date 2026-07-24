@@ -397,6 +397,7 @@ def create_app_runtime():
 
     # 插件系统暂时禁用，避免异步问题
     proactive_sources = dict(plugin_manager.get_proactive_sources())
+    proactive_modules = plugin_manager.get_proactive_modules()
     if cfg.mcp.enabled and "ai-news" in mcp_registry.server_names:
         proactive_sources.setdefault("builtin", []).append(
             RegisteredProactiveSource(
@@ -454,6 +455,7 @@ def create_app_runtime():
             hawkes_decay_beta=cfg.proactive.hawkes_decay_beta,
             hawkes_time_constant=cfg.proactive.hawkes_time_constant,
             proactive_sources=proactive_sources,
+            proactive_modules=proactive_modules,
             local_sources=local_sources,
             state_path=cfg.proactive.state_path,
             trace_path=cfg.proactive.trace_path,
