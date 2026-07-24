@@ -457,8 +457,6 @@ def test_spawn_tool_preserves_group_session_and_chat_target():
     assert result.ok is True
     assert manager.arguments["origin_chat_id"] == "-100123"
     assert manager.arguments["origin_session_id"] == "telegram_group_-100123"
-
-
 def test_agent_loop_cancellation_cancels_hanging_passive_turn():
     """运行时取消主循环时，必须取消尚未结束的被动回合。"""
 
