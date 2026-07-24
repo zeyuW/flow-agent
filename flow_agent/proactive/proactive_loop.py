@@ -321,10 +321,19 @@ class ProactiveLoop:
                 await self._polling_module.start()
             except Exception:
                 logger.exception("MCP 轮询模块启动失败")
+        start_extensions = getattr(self._pipeline, "start_extensions", None)
+        if callable(start_extensions):
+            await start_extensions()
 
     async def _close_resources(self) -> None:
         """逆序关闭主动链路拥有的外部资源。"""
 
+        stop_extensions = getattr(self._pipeline, "stop_extensions", None)
+        if callable(stop_extensions):
+            try:
+                await stop_extensions()
+            except Exception:
+                logger.exception("主动扩展模块停止失败")
         if self._polling_module is not None:
             try:
                 await self._polling_module.stop()

@@ -7,6 +7,7 @@ from flow_agent.proactive.data_gateway import DataGateway
 from flow_agent.proactive.deliver import deliver_message
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore, check_gate
 from flow_agent.proactive.judge_loop import JudgeLoop
+from flow_agent.proactive.lifecycle import ProactiveLifecycle, ProactiveModuleContext
 from flow_agent.proactive.models import AgentTick, JudgeResult
 from flow_agent.proactive.resolve import resolve_decision
 
@@ -32,6 +33,7 @@ class ProactiveTurnPipeline:
         mcp_pool=None,
         proactive_sources: list | None = None,
         channel: str = "cli",
+        lifecycle: ProactiveLifecycle | None = None,
     ) -> None:
         self._state = state_store
         self._gateway = gateway
@@ -46,6 +48,7 @@ class ProactiveTurnPipeline:
         self._mcp_pool = mcp_pool
         self._proactive_sources = proactive_sources or []
         self._channel = channel
+        self._lifecycle = lifecycle
 
     async def run(
         self,
@@ -69,7 +72,7 @@ class ProactiveTurnPipeline:
             )
             if not tick.gate_result.passed:
                 logger.debug("主动准入阻止本轮检查: %s", tick.gate_result.reason)
-                return tick
+                return await self._finish_tick(tick)
 
             tick.phase_trace.append("fetch")
             tick.gateway_result = await self._gateway.run()
@@ -93,7 +96,7 @@ class ProactiveTurnPipeline:
                     "主动检查因数据源故障跳过，不进入漂移: errors=%s",
                     tick.gateway_result.errors,
                 )
-                return tick
+                return await self._finish_tick(tick)
 
             drift_pipeline = self._drift
             if (
@@ -121,7 +124,7 @@ class ProactiveTurnPipeline:
                         message=drift_tick.message,
                     )
                     await self._resolve_and_deliver(tick)
-                return tick
+                return await self._finish_tick(tick)
 
             tick.phase_trace.append("judge")
             policy = self._state.get_policy(chat_id)
@@ -137,9 +140,20 @@ class ProactiveTurnPipeline:
                 len(tick.judge_result.discarded_ids),
             )
             await self._resolve_and_deliver(tick)
-            return tick
+            return await self._finish_tick(tick)
         finally:
             tick.finished_at = time.time()
+
+    async def _finish_tick(self, tick: AgentTick) -> AgentTick:
+        """默认流程完成后运行扩展模块，不改变默认阶段的决策结果。"""
+
+        if self._lifecycle is not None:
+            context = ProactiveModuleContext(
+                tick=tick,
+                slots={"proactive:tick": tick},
+            )
+            await self._lifecycle.run(context)
+        return tick
 
     async def _resolve_and_deliver(self, tick: AgentTick) -> None:
         """执行发送前解析，并在允许时完成出站投递。"""
@@ -183,3 +197,15 @@ class ProactiveTurnPipeline:
         if self._drift is not None and hasattr(self._drift, "close"):
             self._drift.close()
         self._state.close()
+
+    async def start_extensions(self) -> None:
+        """在外部资源连接完成后启动主动扩展模块。"""
+
+        if self._lifecycle is not None:
+            await self._lifecycle.start()
+
+    async def stop_extensions(self) -> None:
+        """在释放外部资源前停止主动扩展模块。"""
+
+        if self._lifecycle is not None:
+            await self._lifecycle.stop()

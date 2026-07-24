@@ -52,6 +52,11 @@ class Plugin:
         """
         return []
 
+    def proactive_modules(self) -> list:
+        """声明参与主动 tick 的扩展模块。"""
+
+        return []
+
     def background_jobs(self) -> list[JobSpec]:
         """声明由宿主执行并记录历史的后台任务。"""
 

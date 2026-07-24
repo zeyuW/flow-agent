@@ -41,6 +41,7 @@ class _PreparedPlugin:
     handlers: list[HandlerMeta]
     tools: list[ToolMeta]
     phase_modules: list[Any]
+    proactive_modules: list[Any]
     proactive_sources: list[Any]
     mcp_servers: list[McpServerSpec]
     background_jobs: list[JobSpec]
@@ -117,6 +118,16 @@ class PluginManager:
                 for name, active in self._loaded.items()
                 if active.prepared.proactive_sources
             }
+
+    def get_proactive_modules(self) -> list[Any]:
+        """返回当前插件代际声明的主动扩展模块快照。"""
+
+        with self._lock:
+            return [
+                module
+                for active in self._loaded.values()
+                for module in active.prepared.proactive_modules
+            ]
 
     def get_mcp_servers(self) -> list[McpServerSpec]:
         """返回当前插件代际解析后的 MCP 服务声明。"""
@@ -256,6 +267,7 @@ class PluginManager:
                 for spec in instance.mcp_servers()
             ]
             phase_modules = _collect_phase_modules(instance)
+            proactive_modules = _collect_proactive_modules(instance)
             proactive_sources = _collect_proactive_sources(instance, name)
             background_jobs = _collect_background_jobs(instance, name)
             self._validate_names(name, tools, background_jobs)
@@ -269,6 +281,7 @@ class PluginManager:
                 handlers=handlers,
                 tools=tools,
                 phase_modules=phase_modules,
+                proactive_modules=proactive_modules,
                 proactive_sources=proactive_sources,
                 mcp_servers=mcp_servers,
                 background_jobs=background_jobs,
@@ -555,6 +568,12 @@ def _collect_proactive_sources(instance: Plugin, plugin_name: str) -> list[Any]:
         RegisteredProactiveSource(spec=spec, plugin_id=plugin_name)
         for spec in sources
     ]
+
+
+def _collect_proactive_modules(instance: Plugin) -> list[Any]:
+    """读取插件主动模块，具体契约在运行时构建阶段统一校验。"""
+
+    return list(instance.proactive_modules() or [])
 
 
 def _collect_background_jobs(instance: Plugin, plugin_name: str) -> list[JobSpec]:
