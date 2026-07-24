@@ -44,6 +44,7 @@ class DataItem:
     source: str
     item_id: str
     title: str
+    source_key: str = ""
     summary: str = ""
     content: str = ""
     ack_server: str = ""
