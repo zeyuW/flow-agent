@@ -1,4 +1,5 @@
 from pathlib import Path
+import threading
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
@@ -83,3 +84,36 @@ def test_background_tool_suggests_name_for_typo(tmp_path: Path):
     assert result.ok is False
     assert "resume_probe:collect" in result.content
     runtime.stop()
+
+
+def test_different_background_jobs_can_run_with_bounded_parallelism(tmp_path: Path):
+    """不同任务不能因全局运行锁而互相拒绝。"""
+
+    started = []
+    both_started = threading.Event()
+    release = threading.Event()
+    finished = []
+
+    def work(name):
+        started.append(name)
+        if len(started) == 2:
+            both_started.set()
+        release.wait(timeout=1)
+        finished.append(name)
+
+    registry = InMemoryJobRegistry()
+    registry.register(JobSpec(name="first", func=lambda: work("first")))
+    registry.register(JobSpec(name="second", func=lambda: work("second")))
+    runtime = BackgroundRuntime(
+        registry=registry,
+        store=SQLiteJobStore(tmp_path / "background.db"),
+        max_async_queue=2,
+    )
+
+    runtime.run_job_async("first")
+    runtime.run_job_async("second")
+    assert both_started.wait(timeout=1)
+    release.set()
+    runtime.stop()
+
+    assert sorted(finished) == ["first", "second"]

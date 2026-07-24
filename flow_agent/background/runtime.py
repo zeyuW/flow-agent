@@ -5,7 +5,7 @@ from typing import Any
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import JobRun
-from flow_agent.guard.guards import BackgroundReentryGuard
+from flow_agent.background.writer import JobStoreWriter
 from flow_agent.runtime.errors import classify_error
 
 
@@ -46,12 +46,19 @@ class BackgroundRuntime:
     config_watcher: Any | None = None
     max_async_queue: int = 64
     shutdown_timeout_seconds: float = 5.0
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    reentry_guard: BackgroundReentryGuard = field(default_factory=BackgroundReentryGuard)
+    _running_jobs: set[str] = field(default_factory=set)
+    _running_jobs_lock: threading.Lock = field(default_factory=threading.Lock)
     _pending_async: int = 0
     _pending_lock: threading.Lock = field(default_factory=threading.Lock)
     _threads: set[threading.Thread] = field(default_factory=set)
     _threads_lock: threading.Lock = field(default_factory=threading.Lock)
+    _writer: JobStoreWriter | None = field(default=None, init=False)
+
+    def __post_init__(self) -> None:
+        """为可持久化存储创建唯一写入者。"""
+
+        if hasattr(self.store, "start_run"):
+            self._writer = JobStoreWriter(self.store)
 
     def start(self) -> None:
         """启动已挂载的持久化调度服务。"""
@@ -76,6 +83,8 @@ class BackgroundRuntime:
         alive = [thread.name for thread in threads if thread.is_alive()]
         if alive:
             logger.warning("后台任务停止超时，保留状态连接等待进程退出: %s", alive)
+        elif self._writer is not None:
+            self._writer.close()
         elif hasattr(self.store, "close"):
             self.store.close()
 
@@ -85,17 +94,15 @@ class BackgroundRuntime:
         job = self.registry.get(job_name)
         if job is None:
             raise ValueError(f"unknown job: {job_name}")
-        if not self._lock.acquire(blocking=False):
-            raise RuntimeError("background runtime busy")
-        guard_decision = self.reentry_guard.acquire()
-        if not guard_decision.allowed:
-            self._lock.release()
-            raise RuntimeError(guard_decision.reason)
+        with self._running_jobs_lock:
+            if job_name in self._running_jobs:
+                raise RuntimeError("background job already running")
+            self._running_jobs.add(job_name)
         if hasattr(self.store, "start_run"):
-            run = self.store.start_run(job_name)
+            run = self._write(lambda: self.store.start_run(job_name))
         else:
             run = JobRun(job_name=job_name, ok=False, attempts=0, status="running")
-            self.store.append(run)
+            self._write(lambda: self.store.append(run))
         self._record({"type": "job_start", "job": job_name})
         try:
             attempts = 0
@@ -118,7 +125,7 @@ class BackgroundRuntime:
                     run.error_category = error_info.category.value
                     if attempts < max_attempts:
                         run.status = "retrying"
-                        self.store.append(run)
+                        self._write(lambda: self.store.append(run))
                     else:
                         run.status = "failed"
                     if attempts >= max_attempts:
@@ -130,7 +137,7 @@ class BackgroundRuntime:
             return run
         finally:
             run.finished_at = run.finished_at or _utc_now()
-            self.store.append(run)
+            self._write(lambda: self.store.append(run))
             self._record(
                 {
                     "type": "job_end",
@@ -140,8 +147,8 @@ class BackgroundRuntime:
                     "error": run.error,
                 }
             )
-            self.reentry_guard.release()
-            self._lock.release()
+            with self._running_jobs_lock:
+                self._running_jobs.discard(job_name)
 
     def run_job_async(self, job_name: str) -> None:
         with self._pending_lock:
@@ -170,6 +177,13 @@ class BackgroundRuntime:
 
     def _record(self, event: dict[str, object]) -> None:
         pass
+
+    def _write(self, action):
+        """通过唯一写入者执行存储操作。"""
+
+        if self._writer is not None:
+            return self._writer.call(action)
+        return action()
 
 
 def _utc_now():

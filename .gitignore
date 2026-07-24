@@ -33,3 +33,5 @@ AGENTS.md
 config.example.toml
 config.toml
 ARCHITECTURE.md
+# !docs/ARCHITECTURE.md
+scripts
