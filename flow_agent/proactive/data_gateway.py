@@ -191,6 +191,7 @@ class DataGateway:
                     source=str(value.get("source") or source),
                     item_id=item_id,
                     title=title,
+                    source_key=source,
                     summary=summary,
                     content=content,
                     ack_server=str(value.get("ack_server") or ""),

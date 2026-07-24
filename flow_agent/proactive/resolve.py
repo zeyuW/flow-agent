@@ -17,6 +17,7 @@ def resolve_decision(
     chat_id: str = "",
     mcp_pool=None,
     sources: list | None = None,
+    items: list | None = None,
 ) -> ResolveResult:
     """根据评估结果、引用集合和消息内容做最终发送决策。"""
 
@@ -41,6 +42,7 @@ def resolve_decision(
         state_store,
         mcp_pool,
         sources or [],
+        items or [],
     )
     return ResolveResult(
         decision="send",
@@ -74,6 +76,7 @@ def _build_side_effects(
     store: ProactiveStateStore,
     mcp_pool=None,
     sources: list | None = None,
+    items: list | None = None,
 ) -> list:
     """创建只在真实投递成功后执行的状态更新和数据源确认。"""
 
@@ -85,17 +88,20 @@ def _build_side_effects(
 
     effects.append(mark_delivery)
 
-    if cited and mcp_pool is not None and sources:
+    ack_groups = _group_ack_event_ids(cited, items or [], sources or [])
+    if ack_groups and mcp_pool is not None and sources:
 
         async def ack_cited_items() -> None:
-            for source in sources:
-                if not source.spec.ack_tool:
+            sources_by_key = {source.source_key: source for source in sources}
+            for source_key, event_ids in ack_groups.items():
+                source = sources_by_key.get(source_key)
+                if source is None or not source.spec.ack_tool:
                     continue
                 try:
                     await mcp_pool.call(
                         source.spec.server,
                         source.spec.ack_tool,
-                        {"event_ids": cited},
+                        {"event_ids": event_ids},
                     )
                 except Exception:
                     logger.exception(
@@ -106,3 +112,23 @@ def _build_side_effects(
         effects.append(ack_cited_items)
 
     return effects
+
+
+def _group_ack_event_ids(cited: list[str], items: list, sources: list) -> dict[str, list[str]]:
+    """按注册来源分组引用事件；身份不唯一时宁可不确认。"""
+
+    known_sources = {source.source_key for source in sources}
+    groups: dict[str, list[str]] = {}
+    for item_id in cited:
+        matches = [
+            item
+            for item in items
+            if item.item_id == item_id
+            and item.source_key in known_sources
+        ]
+        if len(matches) != 1:
+            logger.warning("主动事件归属不唯一或未知，跳过 ACK: item_id=%s", item_id)
+            continue
+        source_key = matches[0].source_key
+        groups.setdefault(source_key, []).append(item_id)
+    return groups

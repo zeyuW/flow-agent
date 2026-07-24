@@ -167,6 +167,11 @@ class ProactiveTurnPipeline:
             chat_id=tick.chat_id,
             mcp_pool=self._mcp_pool,
             sources=self._proactive_sources,
+            items=(
+                tick.gateway_result.all_items
+                if tick.gateway_result is not None
+                else []
+            ),
         )
         if tick.resolve_result.decision != "send":
             return
