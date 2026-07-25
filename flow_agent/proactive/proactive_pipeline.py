@@ -144,6 +144,13 @@ class ProactiveTurnPipeline:
         finally:
             tick.finished_at = time.time()
 
+    def replace_contributions(self, sources: list, lifecycle: ProactiveLifecycle) -> None:
+        """替换下一代数据源和已编译模块图。"""
+
+        self._gateway.replace_proactive_sources(sources)
+        self._proactive_sources = list(sources)
+        self._lifecycle = lifecycle
+
     async def _finish_tick(self, tick: AgentTick) -> AgentTick:
         """默认流程完成后运行扩展模块，不改变默认阶段的决策结果。"""
 

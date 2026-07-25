@@ -76,6 +76,22 @@ class DataGateway:
         result.errors.extend(self._run_errors)
         return result
 
+    def replace_proactive_sources(self, sources: list) -> None:
+        """原子替换插件数据源快照并重建通道索引。"""
+
+        next_sources = list(sources)
+        next_channel_servers = {
+            "alert": [],
+            "content": [],
+            "context": [],
+        }
+        for source in next_sources:
+            for channel in source.spec.channels:
+                if channel in next_channel_servers:
+                    next_channel_servers[channel].append(source.spec.server)
+        self._proactive_sources = next_sources
+        self._channel_servers = next_channel_servers
+
     def _fetch_local_content(self) -> list[DataItem]:
         """读取显式配置的本地数据文件。"""
 

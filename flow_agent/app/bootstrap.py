@@ -282,12 +282,6 @@ def create_app_runtime():
             # 声明或连接失败不应阻止被动对话启动；修复声明后重启即可重试。
             import logging
             logging.getLogger(__name__).exception("MCP 服务代际启动失败")
-        else:
-            plugin_manager.set_contributions_callback(
-                lambda: mcp_registry.update_additional_specs(
-                    plugin_manager.get_mcp_servers()
-                )
-            )
     plugin_manager.start_watcher()
 
     # 创建记忆运行时（双层记忆架构）
@@ -465,6 +459,23 @@ def create_app_runtime():
             channel=proactive_channel,
             state_store=proactive_state,
         )
+
+    def on_plugin_contributions_changed() -> None:
+        """把插件新一代贡献转交给各运行时。"""
+
+        if cfg.mcp.enabled:
+            mcp_registry.update_additional_specs(plugin_manager.get_mcp_servers())
+        if proactive_loop is not None:
+            proactive_loop.request_contributions_refresh(
+                [
+                    source
+                    for sources in plugin_manager.get_proactive_sources().values()
+                    for source in sources
+                ],
+                plugin_manager.get_proactive_modules(),
+            )
+
+    plugin_manager.set_contributions_callback(on_plugin_contributions_changed)
 
     def apply_runtime_settings(candidate) -> None:
         """只提交无需重建渠道、模型或存储连接的热更新字段。"""

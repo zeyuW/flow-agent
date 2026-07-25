@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from flow_agent.proactive.models import AgentTick
+from flow_agent.proactive.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
+from flow_agent.proactive.mcp_polling import McpPollingModule
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +282,9 @@ class ProactiveLoop:
         self._last_interval: float | None = None
         self._last_tick = None
         self._event_bridge: object | None = None
+        self._refresh_lock: asyncio.Lock | None = None
+        self._refresh_task: asyncio.Task | None = None
+        self._pending_contributions: tuple[list, list[object]] | None = None
 
         config = hawkes_config or HawkesConfig(
             min_interval=min_interval,
@@ -295,10 +300,15 @@ class ProactiveLoop:
         self._running = True
         self._event_loop = asyncio.get_running_loop()
         self._wake_event = asyncio.Event()
+        self._refresh_lock = asyncio.Lock()
         logger.info("主动链路已启动: target=%s", self._chat_id)
 
         try:
             await self._connect_resources()
+            pending = self._pending_contributions
+            self._pending_contributions = None
+            if pending is not None:
+                await self.reconcile_contributions(*pending)
             await self._run_loop()
         finally:
             self._running = False
@@ -306,6 +316,7 @@ class ProactiveLoop:
             await self._close_resources()
             self._event_loop = None
             self._wake_event = None
+            self._refresh_lock = None
             logger.info("主动链路已停止: target=%s", self._chat_id)
 
     async def _connect_resources(self) -> None:
@@ -395,6 +406,14 @@ class ProactiveLoop:
         return False
 
     async def _run_single_tick(self) -> None:
+        lock = self._refresh_lock
+        if lock is None:
+            await self._run_single_tick_unlocked()
+            return
+        async with lock:
+            await self._run_single_tick_unlocked()
+
+    async def _run_single_tick_unlocked(self) -> None:
         """隔离单轮异常，避免一次失败终止整个主动循环。"""
 
         self._is_executing = True
@@ -426,6 +445,65 @@ class ProactiveLoop:
         finally:
             self._last_finished_at = datetime.now(timezone.utc)
             self._is_executing = False
+
+    async def reconcile_contributions(
+        self,
+        sources: list,
+        modules: list[object],
+    ) -> None:
+        """在主动事件循环中准备并原子替换插件贡献。"""
+
+        candidate_lifecycle = compile_proactive_lifecycle(
+            modules,
+            initial_slots=("proactive:tick",),
+        )
+        candidate_polling = (
+            McpPollingModule(self._pool, list(sources)) if sources else None
+        )
+        lock = self._refresh_lock
+        if lock is None:
+            lock = asyncio.Lock()
+            self._refresh_lock = lock
+        async with lock:
+            if self._running and candidate_polling is not None:
+                try:
+                    await candidate_polling.start()
+                except BaseException:
+                    await candidate_polling.stop()
+                    raise
+
+            old_polling = self._polling_module
+            old_lifecycle = getattr(self._pipeline, "_lifecycle", None)
+            if old_lifecycle is not None and self._running:
+                await old_lifecycle.stop()
+            if old_polling is not None:
+                await old_polling.stop()
+            replace = getattr(self._pipeline, "replace_contributions", None)
+            if not callable(replace):
+                raise RuntimeError("主动管道不支持插件贡献刷新")
+            replace(list(sources), candidate_lifecycle)
+            self._polling_module = candidate_polling
+
+    def request_contributions_refresh(self, sources: list, modules: list[object]) -> None:
+        """从插件 watcher 线程安全地请求主动贡献刷新。"""
+
+        loop = self._event_loop
+        if loop is None or loop.is_closed():
+            self._pending_contributions = (list(sources), list(modules))
+            return
+        if not self._running:
+            self._pending_contributions = (list(sources), list(modules))
+            return
+        if self._refresh_task is not None and not self._refresh_task.done():
+            return
+
+        def schedule() -> None:
+            self._refresh_task = asyncio.create_task(
+                self.reconcile_contributions(list(sources), list(modules)),
+                name="proactive_contribution_reconcile",
+            )
+
+        loop.call_soon_threadsafe(schedule)
 
     def _compute_next_interval(self) -> float:
         """根据配置选择霍克斯调度或保守固定调度。"""
