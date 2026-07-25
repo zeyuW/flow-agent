@@ -43,6 +43,7 @@ def retry_call(
     *,
     policy: RetryPolicy,
     should_retry: Callable[[Exception], bool] | None = None,
+    on_retry: Callable[[Exception, int], None] | None = None,
 ) -> T:
     """同步执行函数，并按错误类别决定是否继续重试。"""
 
@@ -59,6 +60,8 @@ def retry_call(
                 exc, policy, should_retry
             ):
                 break
+            if on_retry is not None:
+                on_retry(exc, attempts)
             if delay > 0:
                 time.sleep(delay)
             delay = _next_delay(delay, policy)

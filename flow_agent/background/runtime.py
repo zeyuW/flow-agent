@@ -4,15 +4,24 @@ import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.store import JobRun
 from flow_agent.background.writer import JobStoreWriter
 from flow_agent.runtime.errors import classify_error
+from flow_agent.runtime.retry import RetryPolicy, retry_call
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class _QueuedJobRequest:
+    """保留排队任务的取消状态，避免从线程安全队列中删除元素。"""
+
+    job_name: str
+    cancelled: bool = False
 
 
 class InMemoryJobRegistry:
@@ -57,13 +66,17 @@ class BackgroundRuntime:
     max_async_queue: int = 64
     max_async_workers: int = 4
     shutdown_timeout_seconds: float = 5.0
+    trace_recorder: Any | None = None
     _running_jobs: set[str] = field(default_factory=set)
     _running_jobs_lock: threading.Lock = field(default_factory=threading.Lock)
     _queued_jobs: set[str] = field(default_factory=set)
     _queued_jobs_lock: threading.Lock = field(default_factory=threading.Lock)
     _last_success_at: dict[str, datetime] = field(default_factory=dict)
     _last_success_lock: threading.Lock = field(default_factory=threading.Lock)
-    _execution_queue: queue.Queue[str | None] = field(init=False)
+    _queued_requests: dict[str, list[_QueuedJobRequest]] = field(
+        default_factory=dict
+    )
+    _execution_queue: queue.Queue[_QueuedJobRequest | None] = field(init=False)
     _workers: list[threading.Thread] = field(default_factory=list)
     _workers_lock: threading.Lock = field(default_factory=threading.Lock)
     _interval_thread: threading.Thread | None = field(default=None, init=False)
@@ -139,50 +152,85 @@ class BackgroundRuntime:
         else:
             run = JobRun(job_name=job_name, ok=False, attempts=0, status="running")
             self._write(lambda: self.store.append(run))
-        self._record({"type": "job_start", "job": job_name})
+        self._record(
+            {
+                "type": "background_job_started",
+                "job": job_name,
+                "run_id": run.run_id,
+                "attempts": 0,
+                "status": run.status,
+            }
+        )
         try:
             attempts = 0
-            max_attempts = max(1, job.max_retries + 1)
-            while attempts < max_attempts:
+
+            def invoke() -> Any:
+                nonlocal attempts
                 attempts += 1
                 run.attempts = attempts
-                try:
-                    result = job.func()
-                    run.ok = True
-                    run.status = "succeeded"
-                    run.result = "" if result is None else str(result)
-                    run.error = None
-                    run.error_category = None
-                    with self._last_success_lock:
-                        self._last_success_at[job_name] = _utc_now()
-                    break
-                except Exception as exc:
-                    run.ok = False
-                    error_info = classify_error(exc)
-                    run.error = error_info.message
-                    run.error_category = error_info.category.value
-                    if attempts < max_attempts:
-                        run.status = "retrying"
-                        self._write(lambda: self.store.append(run))
-                    else:
-                        run.status = "failed"
-                    if attempts >= max_attempts:
-                        logger.exception(
-                            "后台任务失败: name=%s attempts=%s",
-                            job_name,
-                            attempts,
-                        )
+                return job.func()
+
+            def on_retry(error: Exception, attempt: int) -> None:
+                error_info = classify_error(error)
+                run.ok = False
+                run.attempts = attempt
+                run.status = "retrying"
+                run.error = error_info.message
+                run.error_category = error_info.category.value
+                self._write(lambda: self.store.append(run))
+                self._record(
+                    {
+                        "type": "background_job_retrying",
+                        "job": job_name,
+                        "run_id": run.run_id,
+                        "attempts": attempt,
+                        "status": run.status,
+                        "error_category": run.error_category,
+                    }
+                )
+
+            try:
+                result = retry_call(
+                    invoke,
+                    policy=RetryPolicy(
+                        max_attempts=max(1, job.max_retries + 1),
+                        delay_seconds=max(0.0, job.retry_delay_seconds),
+                        backoff_factor=max(1.0, job.retry_backoff_factor),
+                        retryable_only=True,
+                    ),
+                    on_retry=on_retry,
+                )
+            except Exception as error:
+                error_info = classify_error(error)
+                run.ok = False
+                run.status = "failed"
+                run.error = error_info.message
+                run.error_category = error_info.category.value
+                logger.exception(
+                    "后台任务失败: name=%s attempts=%s",
+                    job_name,
+                    attempts,
+                )
+            else:
+                run.ok = True
+                run.status = "succeeded"
+                run.result = "" if result is None else str(result)
+                run.error = None
+                run.error_category = None
+                with self._last_success_lock:
+                    self._last_success_at[job_name] = _utc_now()
             return run
         finally:
             run.finished_at = run.finished_at or _utc_now()
             self._write(lambda: self.store.append(run))
             self._record(
                 {
-                    "type": "job_end",
+                    "type": "background_job_finished",
                     "job": job_name,
-                    "ok": run.ok,
+                    "run_id": run.run_id,
                     "attempts": run.attempts,
-                    "error": run.error,
+                    "status": run.status,
+                    "error_category": run.error_category,
                 }
             )
             with self._running_jobs_lock:
@@ -202,14 +250,45 @@ class BackgroundRuntime:
             if job.coalesce and job_name in self._queued_jobs:
                 return False
             try:
-                self._execution_queue.put_nowait(job_name)
+                request = _QueuedJobRequest(job_name=job_name)
+                self._execution_queue.put_nowait(request)
             except queue.Full as error:
                 raise RuntimeError("background_async_queue_full") from error
             if job.coalesce:
                 self._queued_jobs.add(job_name)
+            self._queued_requests.setdefault(job_name, []).append(request)
             pending = self._execution_queue.qsize()
-        self._record({"type": "job_queue", "job": job_name, "pending": pending})
+        self._record(
+            {
+                "type": "background_job_queued",
+                "job": job_name,
+                "attempts": 0,
+                "status": "queued",
+                "pending": pending,
+            }
+        )
         return True
+
+    def cancel_queued_job(self, job_name: str) -> int:
+        """标记尚未开始执行的任务，不影响已经开始的同步任务。"""
+
+        with self._queued_jobs_lock:
+            requests = self._queued_requests.pop(job_name, [])
+            cancelled = [request for request in requests if not request.cancelled]
+            for request in cancelled:
+                request.cancelled = True
+            if cancelled:
+                self._queued_jobs.discard(job_name)
+        for _ in cancelled:
+            self._record(
+                {
+                    "type": "background_job_cancelled",
+                    "job": job_name,
+                    "attempts": 0,
+                    "status": "cancelled",
+                }
+            )
+        return len(cancelled)
 
     def on_event(self, event: object) -> None:
         """接收生命周期事件，并提交精确匹配的声明式任务。"""
@@ -239,17 +318,27 @@ class BackgroundRuntime:
 
     def _worker_loop(self) -> None:
         while True:
-            job_name = self._execution_queue.get()
+            request = self._execution_queue.get()
             try:
-                if job_name is None:
+                if request is None:
                     return
-                self.run_job(job_name)
+                with self._queued_jobs_lock:
+                    requests = self._queued_requests.get(request.job_name, [])
+                    if request in requests:
+                        requests.remove(request)
+                    if not requests:
+                        self._queued_requests.pop(request.job_name, None)
+                if not request.cancelled:
+                    self.run_job(request.job_name)
             except Exception:
-                logger.exception("后台任务执行失败: name=%s", job_name)
+                logger.exception(
+                    "后台任务执行失败: name=%s",
+                    request.job_name if request is not None else "stop",
+                )
             finally:
-                if job_name is not None:
+                if request is not None:
                     with self._queued_jobs_lock:
-                        self._queued_jobs.discard(job_name)
+                        self._queued_jobs.discard(request.job_name)
                 self._execution_queue.task_done()
 
     def _bind_event_triggers(self) -> None:
@@ -300,7 +389,12 @@ class BackgroundRuntime:
         return (_utc_now() - last_success).total_seconds() < job.debounce_seconds
 
     def _record(self, event: dict[str, object]) -> None:
-        pass
+        if self.trace_recorder is None:
+            return
+        try:
+            self.trace_recorder.record(dict(event))
+        except Exception:
+            logger.exception("后台任务观测记录失败")
 
     def _write(self, action):
         """通过唯一写入者执行存储操作。"""

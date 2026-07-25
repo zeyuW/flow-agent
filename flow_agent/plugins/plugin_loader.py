@@ -445,6 +445,8 @@ class PluginManager:
                 event_type=spec.event_type,
                 debounce_seconds=spec.debounce_seconds,
                 coalesce=spec.coalesce,
+                retry_delay_seconds=spec.retry_delay_seconds,
+                retry_backoff_factor=spec.retry_backoff_factor,
             ))
             names.append(qualified)
         return names

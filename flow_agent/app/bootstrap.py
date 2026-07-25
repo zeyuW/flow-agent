@@ -354,6 +354,7 @@ def create_app_runtime():
         max_async_queue=cfg.jobs.max_async_queue,
         max_async_workers=cfg.jobs.max_async_workers,
         shutdown_timeout_seconds=cfg.jobs.timeout_seconds,
+        trace_recorder=recorder,
     )
     tool_registry.register_with_meta(
         RunBackgroundJobTool(background_runtime),

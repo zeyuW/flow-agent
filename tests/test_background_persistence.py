@@ -54,7 +54,7 @@ def test_background_runtime_persists_real_retry_count(tmp_path: Path):
     def flaky():
         attempts["count"] += 1
         if attempts["count"] < 3:
-            raise RuntimeError("暂时失败")
+            raise TimeoutError("暂时失败")
         return "恢复"
 
     registry = InMemoryJobRegistry()

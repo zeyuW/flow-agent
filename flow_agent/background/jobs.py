@@ -19,6 +19,8 @@ class JobSpec:
     event_type: type[object] | None = None
     debounce_seconds: float = 0.0
     coalesce: bool = True
+    retry_delay_seconds: float = 0.0
+    retry_backoff_factor: float = 1.5
 
 
 class JobRegistry(Protocol):
