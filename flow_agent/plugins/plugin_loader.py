@@ -441,6 +441,10 @@ class PluginManager:
                 name=qualified,
                 func=spec.func,
                 max_retries=spec.max_retries,
+                interval_seconds=spec.interval_seconds,
+                event_type=spec.event_type,
+                debounce_seconds=spec.debounce_seconds,
+                coalesce=spec.coalesce,
             ))
             names.append(qualified)
         return names

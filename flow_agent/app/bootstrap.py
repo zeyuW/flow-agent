@@ -350,7 +350,9 @@ def create_app_runtime():
         registry=background_registry,
         store=background_store,
         scheduler=scheduler,
+        event_bus=event_bus,
         max_async_queue=cfg.jobs.max_async_queue,
+        max_async_workers=cfg.jobs.max_async_workers,
         shutdown_timeout_seconds=cfg.jobs.timeout_seconds,
     )
     tool_registry.register_with_meta(

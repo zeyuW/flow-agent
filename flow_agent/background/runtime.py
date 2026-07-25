@@ -1,6 +1,9 @@
 import logging
+import queue
 import threading
+import time
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from flow_agent.background.jobs import JobSpec
@@ -35,6 +38,12 @@ class InMemoryJobRegistry:
         with self._lock:
             return sorted(self._jobs.keys())
 
+    def list_jobs(self) -> list[JobSpec]:
+        """返回当前任务快照，供触发器遍历。"""
+
+        with self._lock:
+            return list(self._jobs.values())
+
 
 @dataclass(slots=True)
 class BackgroundRuntime:
@@ -44,14 +53,23 @@ class BackgroundRuntime:
     store: Any
     scheduler: Any | None = None
     config_watcher: Any | None = None
+    event_bus: Any | None = None
     max_async_queue: int = 64
+    max_async_workers: int = 4
     shutdown_timeout_seconds: float = 5.0
     _running_jobs: set[str] = field(default_factory=set)
     _running_jobs_lock: threading.Lock = field(default_factory=threading.Lock)
-    _pending_async: int = 0
-    _pending_lock: threading.Lock = field(default_factory=threading.Lock)
-    _threads: set[threading.Thread] = field(default_factory=set)
-    _threads_lock: threading.Lock = field(default_factory=threading.Lock)
+    _queued_jobs: set[str] = field(default_factory=set)
+    _queued_jobs_lock: threading.Lock = field(default_factory=threading.Lock)
+    _last_success_at: dict[str, datetime] = field(default_factory=dict)
+    _last_success_lock: threading.Lock = field(default_factory=threading.Lock)
+    _execution_queue: queue.Queue[str | None] = field(init=False)
+    _workers: list[threading.Thread] = field(default_factory=list)
+    _workers_lock: threading.Lock = field(default_factory=threading.Lock)
+    _interval_thread: threading.Thread | None = field(default=None, init=False)
+    _interval_stop: threading.Event = field(default_factory=threading.Event)
+    _started: bool = field(default=False, init=False)
+    _started_lock: threading.Lock = field(default_factory=threading.Lock)
     _writer: JobStoreWriter | None = field(default=None, init=False)
 
     def __post_init__(self) -> None:
@@ -59,10 +77,18 @@ class BackgroundRuntime:
 
         if hasattr(self.store, "start_run"):
             self._writer = JobStoreWriter(self.store)
+        self._execution_queue = queue.Queue(maxsize=max(1, self.max_async_queue))
 
     def start(self) -> None:
         """启动已挂载的持久化调度服务。"""
 
+        with self._started_lock:
+            if self._started:
+                return
+            self._started = True
+        self._start_workers()
+        self._bind_event_triggers()
+        self._start_interval_loop()
         if self.scheduler is not None:
             self.scheduler.start()
         if self.config_watcher is not None:
@@ -71,22 +97,31 @@ class BackgroundRuntime:
     def stop(self) -> None:
         """停止已挂载的持久化调度服务。"""
 
+        self._unbind_event_triggers()
+        self._interval_stop.set()
+        if self._interval_thread is not None:
+            self._interval_thread.join(timeout=max(0.1, self.shutdown_timeout_seconds))
+            self._interval_thread = None
         if self.scheduler is not None:
             self.scheduler.stop()
         if self.config_watcher is not None:
             self.config_watcher.stop()
-        with self._threads_lock:
-            threads = list(self._threads)
-        for thread in threads:
-            if thread is not threading.current_thread():
-                thread.join(timeout=max(0.1, self.shutdown_timeout_seconds))
-        alive = [thread.name for thread in threads if thread.is_alive()]
+        with self._workers_lock:
+            workers = list(self._workers)
+        for _ in workers:
+            self._execution_queue.put(None)
+        for worker in workers:
+            if worker is not threading.current_thread():
+                worker.join(timeout=max(0.1, self.shutdown_timeout_seconds))
+        alive = [worker.name for worker in workers if worker.is_alive()]
         if alive:
             logger.warning("后台任务停止超时，保留状态连接等待进程退出: %s", alive)
         elif self._writer is not None:
             self._writer.close()
         elif hasattr(self.store, "close"):
             self.store.close()
+        with self._started_lock:
+            self._started = False
 
     def run_job(self, job_name: str) -> JobRun:
         """同步执行任务，并记录重试和终态。"""
@@ -95,9 +130,10 @@ class BackgroundRuntime:
         if job is None:
             raise ValueError(f"unknown job: {job_name}")
         with self._running_jobs_lock:
-            if job_name in self._running_jobs:
+            if job.coalesce and job_name in self._running_jobs:
                 raise RuntimeError("background job already running")
-            self._running_jobs.add(job_name)
+            if job.coalesce:
+                self._running_jobs.add(job_name)
         if hasattr(self.store, "start_run"):
             run = self._write(lambda: self.store.start_run(job_name))
         else:
@@ -117,6 +153,8 @@ class BackgroundRuntime:
                     run.result = "" if result is None else str(result)
                     run.error = None
                     run.error_category = None
+                    with self._last_success_lock:
+                        self._last_success_at[job_name] = _utc_now()
                     break
                 except Exception as exc:
                     run.ok = False
@@ -148,32 +186,118 @@ class BackgroundRuntime:
                 }
             )
             with self._running_jobs_lock:
-                self._running_jobs.discard(job_name)
+                if job.coalesce:
+                    self._running_jobs.discard(job_name)
 
-    def run_job_async(self, job_name: str) -> None:
-        with self._pending_lock:
-            if self._pending_async >= max(1, self.max_async_queue):
-                raise RuntimeError("background_async_queue_full")
-            self._pending_async += 1
-        self._record({"type": "job_queue", "job": job_name, "pending": self._pending_async})
+    def run_job_async(self, job_name: str) -> bool:
+        """将任务提交到有界 worker 队列；合并时返回 False。"""
 
-        def _run() -> None:
+        job = self.registry.get(job_name)
+        if job is None:
+            raise ValueError(f"unknown job: {job_name}")
+        self._start_workers()
+        if self._is_debounced(job):
+            return False
+        with self._queued_jobs_lock:
+            if job.coalesce and job_name in self._queued_jobs:
+                return False
             try:
-                self.run_job(job_name)
-            finally:
-                with self._pending_lock:
-                    self._pending_async = max(0, self._pending_async - 1)
-                with self._threads_lock:
-                    self._threads.discard(threading.current_thread())
+                self._execution_queue.put_nowait(job_name)
+            except queue.Full as error:
+                raise RuntimeError("background_async_queue_full") from error
+            if job.coalesce:
+                self._queued_jobs.add(job_name)
+            pending = self._execution_queue.qsize()
+        self._record({"type": "job_queue", "job": job_name, "pending": pending})
+        return True
 
-        thread = threading.Thread(
-            target=_run,
-            name=f"background-job:{job_name}",
+    def on_event(self, event: object) -> None:
+        """接收生命周期事件，并提交精确匹配的声明式任务。"""
+
+        for job in self.registry.list_jobs():
+            if job.event_type is not None and type(event) is job.event_type:
+                try:
+                    self.run_job_async(job.name)
+                except Exception:
+                    logger.exception("事件触发后台任务失败: job=%s", job.name)
+
+    def _start_workers(self) -> None:
+        with self._workers_lock:
+            alive = [worker for worker in self._workers if worker.is_alive()]
+            if alive:
+                self._workers = alive
+                return
+            self._workers = []
+            for index in range(max(1, self.max_async_workers)):
+                worker = threading.Thread(
+                    target=self._worker_loop,
+                    name=f"background-worker:{index + 1}",
+                    daemon=True,
+                )
+                self._workers.append(worker)
+                worker.start()
+
+    def _worker_loop(self) -> None:
+        while True:
+            job_name = self._execution_queue.get()
+            try:
+                if job_name is None:
+                    return
+                self.run_job(job_name)
+            except Exception:
+                logger.exception("后台任务执行失败: name=%s", job_name)
+            finally:
+                if job_name is not None:
+                    with self._queued_jobs_lock:
+                        self._queued_jobs.discard(job_name)
+                self._execution_queue.task_done()
+
+    def _bind_event_triggers(self) -> None:
+        if self.event_bus is not None:
+            self.event_bus.subscribe(self)
+
+    def _unbind_event_triggers(self) -> None:
+        if self.event_bus is not None:
+            self.event_bus.unsubscribe(self)
+
+    def _start_interval_loop(self) -> None:
+        self._interval_stop.clear()
+        self._interval_thread = threading.Thread(
+            target=self._interval_loop,
+            name="background-job-intervals",
             daemon=True,
         )
-        with self._threads_lock:
-            self._threads.add(thread)
-        thread.start()
+        self._interval_thread.start()
+
+    def _interval_loop(self) -> None:
+        next_due: dict[str, float] = {}
+        while not self._interval_stop.is_set():
+            now = time.monotonic()
+            active: set[str] = set()
+            for job in self.registry.list_jobs():
+                if job.interval_seconds is None:
+                    continue
+                interval = max(0.01, float(job.interval_seconds))
+                active.add(job.name)
+                due = next_due.setdefault(job.name, now + interval)
+                if now >= due:
+                    try:
+                        self.run_job_async(job.name)
+                    except Exception:
+                        logger.exception("间隔触发后台任务失败: job=%s", job.name)
+                    next_due[job.name] = now + interval
+            for name in set(next_due) - active:
+                del next_due[name]
+            self._interval_stop.wait(0.01)
+
+    def _is_debounced(self, job: JobSpec) -> bool:
+        if job.debounce_seconds <= 0:
+            return False
+        with self._last_success_lock:
+            last_success = self._last_success_at.get(job.name)
+        if last_success is None:
+            return False
+        return (_utc_now() - last_success).total_seconds() < job.debounce_seconds
 
     def _record(self, event: dict[str, object]) -> None:
         pass

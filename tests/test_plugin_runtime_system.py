@@ -132,6 +132,45 @@ def test_lifecycle_subscriber_only_receives_matching_event(tmp_path: Path):
     asyncio.run(manager.shutdown_all())
 
 
+def test_plugin_background_job_keeps_trigger_declaration(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins" / "triggered"
+    plugin_dir.mkdir(parents=True)
+    (plugin_dir / "plugin.py").write_text(
+        '''from flow_agent.background.jobs import JobSpec
+from flow_agent.messaging.event_bus import TurnCommitted
+from flow_agent.plugins.plugin_base import Plugin
+
+class TriggeredPlugin(Plugin):
+    def background_jobs(self):
+        return [JobSpec(
+            name="refresh",
+            func=lambda: None,
+            interval_seconds=30,
+            event_type=TurnCommitted,
+            debounce_seconds=5,
+            coalesce=False,
+        )]
+''',
+        encoding="utf-8",
+    )
+    jobs = InMemoryJobRegistry()
+    manager = PluginManager(
+        tmp_path / "plugins",
+        background_registry=jobs,
+        workspace=tmp_path,
+    )
+
+    asyncio.run(manager.load_all())
+
+    job = jobs.get("triggered:refresh")
+    assert job is not None
+    assert job.interval_seconds == 30
+    assert job.event_type.__name__ == "TurnCommitted"
+    assert job.debounce_seconds == 5
+    assert job.coalesce is False
+    asyncio.run(manager.shutdown_all())
+
+
 def test_plugin_hot_reload_uses_fresh_relative_imports(tmp_path: Path):
     plugin_dir = tmp_path / "plugins" / "relative"
     plugin_dir.mkdir(parents=True)

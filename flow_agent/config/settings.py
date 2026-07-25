@@ -161,6 +161,7 @@ class ChannelsSettings(BaseModel):
 
 class JobsSettings(BaseModel):
     max_async_queue: int = 10
+    max_async_workers: int = 4
     timeout_seconds: float = 30.0
 
 

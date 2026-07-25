@@ -317,6 +317,9 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             max_async_queue=values.get_int(
                 ("jobs", "max_async_queue"), 64, minimum=1
             ),
+            max_async_workers=values.get_int(
+                ("jobs", "max_async_workers"), 4, minimum=1
+            ),
             timeout_seconds=values.get_float(
                 ("jobs", "timeout_seconds"), 30.0, minimum=0.1
             ),

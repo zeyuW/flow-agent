@@ -58,7 +58,10 @@ class Plugin:
         return []
 
     def background_jobs(self) -> list[JobSpec]:
-        """声明由宿主执行并记录历史的后台任务。"""
+        """声明由宿主执行并记录历史的后台任务。
+
+        任务可选声明事件或固定间隔触发器；未声明触发器的任务仍可由工具手动提交。
+        """
 
         return []
 
