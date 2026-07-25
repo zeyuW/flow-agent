@@ -33,7 +33,6 @@ from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.tools.base import ToolResult
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.dashboard.store import InMemoryDashboardStore
 
 
 # ── 测试用 LLM 客户端 ──────────────────────────────────────
@@ -279,19 +278,22 @@ def test_turn_committed_event():
 def test_processing_state_tracks_sessions():
     """测试 ProcessingState 正确追踪会话处理状态。"""
     import asyncio
-    state = ProcessingState()
-    assert not state.is_processing("s1")
 
     async def dummy():
         await asyncio.sleep(0.01)
 
-    task = asyncio.ensure_future(dummy())
-    state.set_processing("s1", task)
-    assert state.is_processing("s1")
-    assert not state.is_processing("s2")
+    async def verify() -> None:
+        state = ProcessingState()
+        assert not state.is_processing("s1")
+        task = asyncio.create_task(dummy())
+        state.set_processing("s1", task)
+        assert state.is_processing("s1")
+        assert not state.is_processing("s2")
+        state.clear_processing("s1")
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
-    state.clear_processing("s1")
-    assert not state.is_processing("s1")
+    asyncio.run(verify())
 
 
 # ── TurnFlow 测试 ────────────────────────────────────────
