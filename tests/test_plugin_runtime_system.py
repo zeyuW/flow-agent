@@ -45,6 +45,21 @@ class DemoPlugin(Plugin):
     )
 
 
+def _write_versioned_plugin(path: Path, name: str, version: str) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "plugin.py").write_text(
+        f'''from flow_agent.plugins.plugin_base import Plugin
+from flow_agent.plugins.plugin_decorators import tool
+
+class VersionedPlugin(Plugin):
+    @tool(name="{name}_value", description="版本值")
+    def value(self):
+        return "{version}"
+''',
+        encoding="utf-8",
+    )
+
+
 def test_plugin_reconcile_updates_runtime_contributions_and_keeps_old_on_failure(
     tmp_path: Path,
 ):
@@ -130,8 +145,6 @@ def test_lifecycle_subscriber_only_receives_matching_event(tmp_path: Path):
     kv = json.loads((data_dir / "demo" / ".kv.json").read_text(encoding="utf-8"))
     assert kv["after_turn"] == 1
     asyncio.run(manager.shutdown_all())
-
-
 def test_plugin_background_job_keeps_trigger_declaration(tmp_path: Path):
     plugin_dir = tmp_path / "plugins" / "triggered"
     plugin_dir.mkdir(parents=True)
@@ -199,4 +212,27 @@ class RelativePlugin(Plugin):
     (plugin_dir / "helper.py").write_text('VALUE = "version-two"\n', encoding="utf-8")
     assert asyncio.run(manager.reconcile()) is True
     assert tools.execute("relative_value", {}).content == "version-two"
+    asyncio.run(manager.shutdown_all())
+
+
+def test_reconcile_does_not_publish_any_candidate_when_another_candidate_fails(
+    tmp_path: Path,
+):
+    plugins_dir = tmp_path / "plugins"
+    _write_versioned_plugin(plugins_dir / "alpha", "alpha", "v1")
+    _write_versioned_plugin(plugins_dir / "beta", "beta", "v1")
+    tools = ToolRegistry()
+    manager = PluginManager(plugins_dir, tool_registry=tools, workspace=tmp_path)
+    asyncio.run(manager.load_all())
+
+    _write_versioned_plugin(plugins_dir / "alpha", "alpha", "v2")
+    (plugins_dir / "beta" / "plugin.py").write_text(
+        "this is not valid Python",
+        encoding="utf-8",
+    )
+
+    assert asyncio.run(manager.reconcile()) is False
+    assert tools.execute("alpha_value", {}).content == "v1"
+    assert tools.execute("beta_value", {}).content == "v1"
+
     asyncio.run(manager.shutdown_all())

@@ -167,7 +167,7 @@ class PluginManager:
         """使用单个发现快照执行一轮串行代际协调。"""
 
         snapshot = {item["name"]: Path(item["path"]) for item in self.discover()}
-        changed = False
+        candidates: list[_PreparedPlugin] = []
         for name in sorted(snapshot):
             plugin_dir = snapshot[name]
             data_dir = self._plugin_data_dir / name if self._plugin_data_dir else None
@@ -178,11 +178,27 @@ class PluginManager:
                 continue
             try:
                 candidate = await self._prepare(name, plugin_dir, revision)
-                await self._publish(candidate)
-                changed = True
+                candidates.append(candidate)
             except Exception:
-                plugin_registry.clear()
-                logger.exception("插件候选加载失败，继续使用上一代: %s", name)
+                # 同一轮中任一候选失败时，不能让前面的候选形成半代发布。
+                for prepared in reversed(candidates):
+                    await self._discard_prepared(prepared)
+                logger.exception("插件候选加载失败，保留当前完整运行时: %s", name)
+                return False
+
+        changed = False
+        published: set[str] = set()
+        try:
+            for candidate in candidates:
+                await self._publish(candidate)
+                published.add(candidate.name)
+                changed = True
+        except Exception:
+            # 发布期异常不应让尚未发布的候选泄漏模块或资源。
+            for candidate in reversed(candidates):
+                if candidate.name not in published:
+                    await self._discard_prepared(candidate)
+            raise
 
         with self._lock:
             removed = sorted(set(self._loaded) - set(snapshot))
@@ -193,6 +209,15 @@ class PluginManager:
         if changed and self._on_contributions_changed is not None:
             self._on_contributions_changed()
         return changed
+
+    async def _discard_prepared(self, prepared: _PreparedPlugin) -> None:
+        """释放本轮未发布候选，保持当前已发布插件不变。"""
+
+        try:
+            await prepared.instance.shutdown()
+        except Exception:
+            logger.exception("插件候选清理失败: %s", prepared.name)
+        _discard_modules(prepared.module_name)
 
     async def shutdown_all(self) -> None:
         """停止 watcher，并按加载逆序关闭全部插件。"""
