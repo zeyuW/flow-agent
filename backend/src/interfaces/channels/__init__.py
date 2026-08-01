@@ -7,7 +7,8 @@ MessageBus 后台 dispatch_outbound 任务调用回调发送消息。
 from typing import TYPE_CHECKING
 
 from interfaces.channels.base import Channel, ChannelStatus, MessageBusChannel
-from flow_agent.channels.models import InboundMessage, OutboundMessage
+from modules.conversation.domain.channel_message import InboundMessage
+from modules.delivery.domain.messages import OutboundMessage
 
 if TYPE_CHECKING:
     from interfaces.channels.cli import CLIChannel

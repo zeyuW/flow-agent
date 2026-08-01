@@ -8,7 +8,8 @@ from typing import Callable
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
-from flow_agent.channels.models import InboundMessage, OutboundMessage
+from modules.conversation.domain.channel_message import InboundMessage
+from modules.delivery.domain.messages import OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
 
 

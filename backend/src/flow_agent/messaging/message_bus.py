@@ -16,11 +16,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 from uuid import uuid4
 
-from flow_agent.channels.models import (
-    ChannelDeliveryResult,
-    InboundMessage,
-    OutboundMessage,
-)
+from modules.conversation.domain.channel_message import InboundMessage
+from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
 from flow_agent.messaging.outbox import SQLiteOutboxStore
 
 logger = logging.getLogger(__name__)

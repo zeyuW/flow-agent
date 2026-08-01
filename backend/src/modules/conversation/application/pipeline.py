@@ -20,7 +20,6 @@ from collections.abc import Callable
 from modules.conversation.application.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
 from modules.conversation.application.phase import PhaseModule, TurnFlow
-from flow_agent.channels.models import OutboundMessage
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.memory_engine import MemoryEngine

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from flow_agent.channels.models import InboundMessage, OutboundMessage
+from modules.conversation.domain.channel_message import InboundMessage
+from modules.delivery.domain.messages import OutboundMessage
 
 
 OutboundSender = Callable[[OutboundMessage], None]
