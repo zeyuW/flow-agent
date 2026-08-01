@@ -3,5 +3,14 @@
 from modules.proactive.infra.data_gateway import DataGateway
 from modules.proactive.infra.drift_store import DriftStateStore
 from modules.proactive.infra.mcp_pool import McpClientPool, RegistryMcpPool
+from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore, check_gate
 
-__all__ = ["DataGateway", "DriftStateStore", "McpClientPool", "RegistryMcpPool"]
+__all__ = [
+    "AnyActionGate",
+    "DataGateway",
+    "DriftStateStore",
+    "McpClientPool",
+    "ProactiveStateStore",
+    "RegistryMcpPool",
+    "check_gate",
+]
