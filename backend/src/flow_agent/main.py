@@ -2,29 +2,24 @@
 
 from __future__ import annotations
 
-import argparse
 import logging
-from pathlib import Path
-from typing import Sequence
 
 from flow_agent.app.bootstrap import create_app_runtime
-from flow_agent.config.settings import settings
 from flow_agent.infra.logging import configure_logging
 from flow_agent.channels.http import HTTPChannel
 from flow_agent.infra.paths import WORKSPACE_LAYOUT
-from flow_agent.runtime.workspace import init_workspace
 from flow_agent.channels.telegram import TelegramChannel
 from flow_agent.tools.message_push import MessagePushTool
 from flow_agent.runtime.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
 )
-
+from infra.config.schema import AppConfig
 
 logger = logging.getLogger(__name__)
 
 
-def run_service() -> None:
+def run_service(config: AppConfig) -> None:
     """获取工作区唯一所有权后启动完整服务。"""
 
     lock = WorkspaceProcessLock(WORKSPACE_LAYOUT.flow_dir / "runtime.lock")
@@ -34,13 +29,13 @@ def run_service() -> None:
         print(f"启动失败：{exc}")
         return
     try:
-        _run_service()
+        _run_service(config)
     finally:
         lock.release()
 
 
-def _run_service() -> None:
-    cfg = settings.get()
+def _run_service(config: AppConfig) -> None:
+    cfg = config
     configure_logging(cfg.logging.level, WORKSPACE_LAYOUT.app_log_file)
     print(
         "Config summary: "
@@ -64,7 +59,7 @@ def _run_service() -> None:
             memory_optimizer_loop,
             mcp_registry,
             plugin_manager,
-        ) = create_app_runtime()
+        ) = create_app_runtime(cfg)
     except ValueError:
         logger.exception("Failed to initialize agent due to invalid configuration")
         print("初始化失败：请检查config.toml中的配置。")
@@ -86,10 +81,18 @@ def _run_service() -> None:
         allowed_users = set()
         allowed_groups = set()
         if cfg.channels.telegram_allowed_users:
-            allowed_users = {u.strip() for u in cfg.channels.telegram_allowed_users.split(",") if u.strip()}
+            allowed_users = {
+                u.strip()
+                for u in cfg.channels.telegram_allowed_users.split(",")
+                if u.strip()
+            }
         if cfg.channels.telegram_allowed_groups:
-            allowed_groups = {int(g.strip()) for g in cfg.channels.telegram_allowed_groups.split(",") if g.strip().isdigit()}
-        
+            allowed_groups = {
+                int(g.strip())
+                for g in cfg.channels.telegram_allowed_groups.split(",")
+                if g.strip().isdigit()
+            }
+
         telegram = TelegramChannel(
             bot_token=cfg.channels.telegram_bot_token,
             allowed_users=list(allowed_users),
@@ -108,20 +111,21 @@ def _run_service() -> None:
 
     # 启动渠道（先启动渠道，让它们订阅 MessageBus）
     from flow_agent.channels.protocol import ChannelContext
-    
+
     # 创建渠道上下文
     channel_ctx = ChannelContext(
         bus=message_bus,
         event_bus=event_bus,
         log=logger,
     )
-    
+
     # 启动 Telegram 渠道（使用新协议，在后台线程运行）
     telegram_thread = None
     telegram_loop_holder: dict[str, object] = {}
     if cfg.channels.telegram_enabled and telegram:
         import threading
         import asyncio
+
         def run_telegram():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -132,10 +136,11 @@ def _run_service() -> None:
             finally:
                 telegram_loop_holder.pop("loop", None)
                 loop.close()
+
         telegram_thread = threading.Thread(target=run_telegram, daemon=True)
         telegram_thread.start()
         print("telegram channel started")
-    
+
     # 启动其他渠道
     if cfg.channels.http_enabled:
         http.start()
@@ -170,24 +175,28 @@ def _run_service() -> None:
 
     # 等待 Telegram 渠道完成订阅（延迟启动 MessageBus 分发任务）
     import time
+
     time.sleep(1.0)  # 等待 1 秒确保渠道订阅完成
 
     # 启动 MessageBus 后台分发任务（后台线程）- 确保在所有渠道订阅后启动
     import threading
     import asyncio
+
     def run_dispatch():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         loop.run_until_complete(message_bus.start_dispatch_task())
+
     dispatch_thread = threading.Thread(target=run_dispatch, daemon=True)
     dispatch_thread.start()
     print("MessageBus dispatch task started")
 
     print("All services started. Press Ctrl+C to stop.")
-    
+
     # 保持主线程运行
     try:
         import time
+
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
@@ -200,6 +209,7 @@ def _run_service() -> None:
         subagent_runtime.manager.shutdown()
         mcp_registry.stop_all()
         import asyncio
+
         asyncio.run(plugin_manager.shutdown_all())
         if proactive_thread is not None:
             proactive_thread.join(timeout=5.0)
@@ -214,32 +224,3 @@ def _run_service() -> None:
             if telegram_thread is not None:
                 telegram_thread.join(timeout=8.0)
         print("Shutdown complete.")
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    """构建命令行参数解析器。"""
-
-    parser = argparse.ArgumentParser(prog="flow-agent")
-    commands = parser.add_subparsers(dest="command")
-    init_parser = commands.add_parser("init", help="初始化 .flow 运行时工作区")
-    init_parser.add_argument("--workspace", default=".", help="项目根目录")
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """执行命令；无子命令时直接启动服务。"""
-
-    parser = _build_parser()
-    args = parser.parse_args(list(argv) if argv is not None else None)
-    if args.command == "init":
-        workspace = Path(args.workspace).expanduser().resolve()
-        layout = init_workspace(workspace)
-        print(f"工作区已初始化：{layout.flow_dir}")
-        return 0
-
-    run_service()
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

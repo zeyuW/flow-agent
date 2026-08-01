@@ -1,7 +1,6 @@
 from importlib.util import find_spec
 from pathlib import Path
 
-
 REPOSITORY_ROOT = next(
     parent for parent in Path(__file__).resolve().parents if (parent / ".git").exists()
 )
@@ -20,3 +19,9 @@ def test_python_packages_resolve_from_backend_src():
 
 def test_legacy_python_package_is_not_at_repository_root():
     assert not (REPOSITORY_ROOT / "flow_agent").exists()
+
+
+def test_runtime_workspace_stays_at_repository_root():
+    from flow_agent.infra.paths import PROJECT_ROOT
+
+    assert PROJECT_ROOT == REPOSITORY_ROOT

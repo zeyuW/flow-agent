@@ -1,8 +1,18 @@
 from pathlib import Path
 from dataclasses import asdict
 
-from flow_agent.config.settings import settings
-from flow_agent.config.watcher import ConfigWatcher
+from infra.config.schema import (
+    AppConfig,
+    McpConfig,
+    ModelEndpointConfig,
+    StorageConfig,
+    ToolingConfig,
+)
+from infra.config.watcher import (
+    ConfigWatchLoop,
+    ConfigWatcher,
+    PreparedConfigChange,
+)
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.outbox import SQLiteOutboxStore
 from flow_agent.messaging.event_bus import EventBus
@@ -52,8 +62,14 @@ from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
 from flow_agent.proactive.runtime import build_proactive_runtime
 from flow_agent.proactive.mcp_pool import RegistryMcpPool
 from flow_agent.proactive.gate import ProactiveStateStore
-from flow_agent.proactive.specs import ProactiveSourceSpecImpl, RegisteredProactiveSource
-from flow_agent.proactive.tools import ConfigureProactivePolicyTool, GetProactiveStatusTool
+from flow_agent.proactive.specs import (
+    ProactiveSourceSpecImpl,
+    RegisteredProactiveSource,
+)
+from flow_agent.proactive.tools import (
+    ConfigureProactivePolicyTool,
+    GetProactiveStatusTool,
+)
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from flow_agent.skills.loader import SkillLoader
 from flow_agent.skills.registry import SkillRegistry
@@ -61,7 +77,15 @@ from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.spawn import SpawnTool
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.plugins.plugin_loader import PluginManager
-from flow_agent.proactive.sources import LocalFileSource, LocalTaskSource, LocalTodoSource, RSSFeedSource, WebSnapshotSource
+from flow_agent.proactive.sources import (
+    LocalFileSource,
+    LocalTaskSource,
+    LocalTodoSource,
+    RSSFeedSource,
+    WebSnapshotSource,
+)
+
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
 
 
 """新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
@@ -72,13 +96,13 @@ from flow_agent.proactive.sources import LocalFileSource, LocalTaskSource, Local
 """
 
 
-def create_core_components():
+def create_core_components(config: AppConfig):
     """创建核心组件：Agent, ToolRegistry, LLM 客户端等。
 
     返回组装好的组件字典，供 create_app_runtime 使用。
     """
     init_workspace(PROJECT_ROOT)
-    cfg = settings.get()
+    cfg = config
 
     # 会话上下文
     session_store = SessionStore(Path(cfg.storage.memory_db_path))
@@ -93,27 +117,9 @@ def create_core_components():
     )
 
     # LLM 客户端
-    llm_client = OpenAILLMClient(cfg)
-    fast_client = (
-        OpenAILLMClient(
-            cfg,
-            model_override=cfg.provider.fast_model,
-            api_key_override=cfg.provider.fast_api_key,
-            base_url_override=cfg.provider.fast_base_url,
-        )
-        if cfg.provider.fast_model
-        else None
-    )
-    vision_client = (
-        OpenAILLMClient(
-            cfg,
-            model_override=cfg.vision.model,
-            api_key_override=cfg.vision.api_key or cfg.provider.fast_api_key,
-            base_url_override=cfg.vision.base_url,
-        )
-        if cfg.vision.model
-        else None
-    )
+    llm_client = OpenAILLMClient(cfg.llm.main)
+    fast_client = OpenAILLMClient(cfg.llm.fast) if cfg.llm.fast else None
+    vision_client = OpenAILLMClient(cfg.llm.vision) if cfg.llm.vision else None
     llm_router = LLMRouter(main_client=llm_client, fast_client=fast_client)
 
     # 提示词组装器
@@ -138,6 +144,7 @@ def create_core_components():
 
     # 工具注册表
     tool_registry = ToolRegistry()
+    spawn_tool: SpawnTool | None = None
     tool_registry.set_guard(
         ToolGuard(
             # 只有已注册的内置、插件或声明式 MCP 工具才能进入执行路径。
@@ -156,7 +163,7 @@ def create_core_components():
 
     # MCP
     mcp_registry = _build_mcp_registry(
-        cfg,
+        cfg.mcp,
         WORKSPACE_LAYOUT.mcp_config_file,
         tool_registry,
     )
@@ -165,7 +172,7 @@ def create_core_components():
 
     # Agent
     agent = Agent(
-        settings=cfg,
+        system_prompt=cfg.llm.main.system_prompt,
         llm_client=llm_client,
         context=context,
         llm_router=llm_router,
@@ -180,18 +187,17 @@ def create_core_components():
         "recorder": recorder,
         "session_manager": session_manager,
         "llm_client": llm_client,
-        "spawn_tool": spawn_tool if cfg.tooling.enabled else None,
+        "spawn_tool": spawn_tool,
         "mcp_registry": mcp_registry,
     }
 
 
-def create_message_bus() -> MessageBus:
+def create_message_bus(storage: StorageConfig) -> MessageBus:
     """创建消息总线实例。"""
-    cfg = settings.get()
     return MessageBus(
         outbox_store=SQLiteOutboxStore(WORKSPACE_LAYOUT.outbound_messages_db),
-        outbox_recovery_window_s=cfg.storage.outbox_recovery_window_seconds,
-        outbox_recovery_limit=cfg.storage.outbox_recovery_limit,
+        outbox_recovery_window_s=storage.outbox_recovery_window_seconds,
+        outbox_recovery_limit=storage.outbox_recovery_limit,
     )
 
 
@@ -210,12 +216,14 @@ def create_passive_turn_pipeline(
     recorder=None,
     phase_modules_provider=None,
     tool_hook_executor=None,
+    *,
+    tooling: ToolingConfig,
+    enable_thinking: bool,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
 
     六个阶段：BeforeTurn → BeforeReasoning → PromptRender → Reasoner → AfterReasoning → AfterTurn
     """
-    cfg = settings.get()
     return PassiveTurnPipeline(
         agent=agent,
         tool_registry=tool_registry,
@@ -223,11 +231,11 @@ def create_passive_turn_pipeline(
         event_bus=event_bus,
         memory_engine=memory_engine,
         markdown_store=markdown_store,
-        max_tool_steps=cfg.tooling.max_tool_steps,
+        max_tool_steps=tooling.max_tool_steps,
         recorder=recorder,
         delegation_policy=DelegationPolicy(),
-        tool_selection_max=cfg.tooling.tool_selection_max,
-        enable_thinking=cfg.model.enable_thinking,
+        tool_selection_max=tooling.tool_selection_max,
+        enable_thinking=enable_thinking,
         phase_modules_provider=phase_modules_provider,
         tool_hook_executor=tool_hook_executor,
     )
@@ -245,7 +253,7 @@ def create_agent_loop(
     )
 
 
-def create_app_runtime():
+def create_app_runtime(config: AppConfig):
     """组装完整应用运行时。
 
     返回:
@@ -254,12 +262,12 @@ def create_app_runtime():
          tool_registry, memory_runtime, memory_optimizer_loop,
          mcp_registry, plugin_manager)
     """
-    cfg = settings.get()
-    
+    cfg = config
+
     # MCP 服务器配置
     mcp_servers = []  # 主动数据源仅连接已显式组装的 MCP
-    
-    components = create_core_components()
+
+    components = create_core_components(cfg)
     agent = components["agent"]
     tool_registry = components["tool_registry"]
     recorder = components["recorder"]
@@ -269,7 +277,7 @@ def create_app_runtime():
     mcp_registry = components["mcp_registry"]
 
     # 创建总线
-    message_bus = create_message_bus()
+    message_bus = create_message_bus(cfg.storage)
     event_bus = create_event_bus()
 
     background_registry = InMemoryJobRegistry()
@@ -284,6 +292,7 @@ def create_app_runtime():
         plugin_data_dir=WORKSPACE_LAYOUT.plugin_data_dir,
     )
     import asyncio
+
     asyncio.run(plugin_manager.load_all())
 
     if cfg.mcp.enabled:
@@ -292,6 +301,7 @@ def create_app_runtime():
         except Exception:
             # 声明或连接失败不应阻止被动对话启动；修复声明后重启即可重试。
             import logging
+
             logging.getLogger(__name__).exception("MCP 服务代际启动失败")
     plugin_manager.start_watcher()
 
@@ -301,11 +311,11 @@ def create_app_runtime():
         memory_dir=WORKSPACE_LAYOUT.memory_dir,
         vector_db_path=WORKSPACE_LAYOUT.memory_vectors_db,
         embedding_cache_path=WORKSPACE_LAYOUT.embedding_cache_file,
-        api_key=cfg.embedding.api_key or cfg.api_key,
-        base_url=cfg.embedding.base_url or cfg.base_url,
+        api_key=cfg.embedding.api_key or cfg.llm.main.api_key,
+        base_url=cfg.embedding.base_url or cfg.llm.main.base_url,
         embedding_model=cfg.embedding.model,
         llm_client=llm_client,
-        llm_model=cfg.model.model,
+        llm_model=cfg.llm.main.model,
     )
     consolidator = None
     if cfg.memory.enabled:
@@ -337,6 +347,8 @@ def create_app_runtime():
         recorder=recorder,
         phase_modules_provider=plugin_manager.get_phase_modules,
         tool_hook_executor=plugin_manager.tool_hook_executor,
+        tooling=cfg.tooling,
+        enable_thinking=cfg.llm.main.enable_thinking,
     )
 
     # 创建 Agent 主循环
@@ -375,7 +387,9 @@ def create_app_runtime():
     )
     tool_registry.register_with_meta(CurrentTimeTool(), risk="read-only")
     tool_registry.register_with_meta(ScheduleTaskTool(scheduler), risk="write")
-    tool_registry.register_with_meta(ListScheduledTasksTool(scheduler), risk="read-only")
+    tool_registry.register_with_meta(
+        ListScheduledTasksTool(scheduler), risk="read-only"
+    )
     tool_registry.register_with_meta(CancelScheduledTaskTool(scheduler), risk="write")
 
     proactive_state = ProactiveStateStore(cfg.proactive.state_path)
@@ -387,7 +401,10 @@ def create_app_runtime():
             idle_threshold_seconds=cfg.proactive.idle_threshold_minutes * 60,
             topics=cfg.proactive.interest_topics,
         )
-    if proactive_target and proactive_state.get_last_user_interaction(proactive_target) <= 0:
+    if (
+        proactive_target
+        and proactive_state.get_last_user_interaction(proactive_target) <= 0
+    ):
         previous_interaction = proactive_state.get_latest_interaction_event()
         if previous_interaction > 0:
             proactive_state.record_user_interaction(
@@ -433,12 +450,7 @@ def create_app_runtime():
         proactive_loop = build_proactive_runtime(
             enabled=True,
             chat_id=proactive_target,
-            llm_client=OpenAILLMClient(
-                cfg,
-                model_override=cfg.proactive.judge_model or cfg.provider.fast_model,
-                api_key_override=cfg.provider.fast_api_key,
-                base_url_override=cfg.provider.fast_base_url,
-            ),
+            llm_client=OpenAILLMClient(_proactive_model_config(cfg)),
             memory_engine=memory_runtime.engine,
             markdown_store=memory_runtime.markdown_store,
             session_manager=session_manager,
@@ -449,9 +461,7 @@ def create_app_runtime():
             max_per_day=cfg.proactive.max_per_day,
             min_interval=cfg.proactive.min_interval,
             max_interval=cfg.proactive.max_interval,
-            is_busy_fn=lambda: agent_loop.is_processing(
-                proactive_target
-            ),
+            is_busy_fn=lambda: agent_loop.is_processing(proactive_target),
             cooldown=cfg.proactive.cooldown,
             drift_enabled=cfg.drift.enabled,
             drift_data_dir=cfg.drift.data_dir,
@@ -488,43 +498,20 @@ def create_app_runtime():
 
     plugin_manager.set_contributions_callback(on_plugin_contributions_changed)
 
-    def apply_runtime_settings(candidate) -> None:
-        """只提交无需重建渠道、模型或存储连接的热更新字段。"""
-
-        import logging
-
-        if proactive_loop is not None:
-            proactive_loop.apply_runtime_config(
-                min_interval=candidate.proactive.min_interval,
-                max_interval=candidate.proactive.max_interval,
-                max_per_day=candidate.proactive.max_per_day,
-                cooldown=candidate.proactive.cooldown,
-                base_intensity=candidate.proactive.hawkes_base_intensity,
-                excitation_alpha=candidate.proactive.hawkes_excitation_alpha,
-                decay_beta=candidate.proactive.hawkes_decay_beta,
-                time_constant=candidate.proactive.hawkes_time_constant,
-                drift_min_interval_hours=candidate.drift.min_interval_hours,
-            )
-        if proactive_target:
-            proactive_state.set_policy(
-                proactive_target,
-                enabled=candidate.proactive.idle_enabled,
-                idle_threshold_seconds=(
-                    candidate.proactive.idle_threshold_minutes * 60
-                ),
-                topics=candidate.proactive.interest_topics,
-            )
-        logging.getLogger().setLevel(candidate.logging.level.upper())
-        pipeline.max_tool_steps = candidate.tooling.max_tool_steps
-        pipeline.tool_selection_max = max(1, candidate.tooling.tool_selection_max)
-        background_runtime.max_async_queue = candidate.jobs.max_async_queue
-        background_runtime.shutdown_timeout_seconds = candidate.jobs.timeout_seconds
-        mcp_registry.startup_timeout = candidate.mcp.startup_timeout_seconds
-        mcp_registry.call_timeout = candidate.mcp.call_timeout_seconds
-
-    background_runtime.config_watcher = ConfigWatcher(
-        PROJECT_ROOT / "config.toml",
-        apply_runtime_settings,
+    runtime_config_applier = _RuntimeConfigApplier(
+        proactive_loop=proactive_loop,
+        proactive_target=proactive_target,
+        proactive_state=proactive_state,
+        pipeline=pipeline,
+        background_runtime=background_runtime,
+        mcp_registry=mcp_registry,
+    )
+    background_runtime.config_watcher = ConfigWatchLoop(
+        ConfigWatcher(
+            BACKEND_ROOT / "config.toml",
+            current=cfg,
+            appliers=(runtime_config_applier,),
+        )
     )
 
     runtime_service = create_runtime_service(
@@ -583,8 +570,12 @@ def create_runtime_service(
     runtime_service.register(
         RuntimeUnit(
             name="turn",
-            health_fn=lambda: RuntimeHealth(name="turn", ok=True, detail="agent loop ready"),
-            snapshot_fn=lambda: RuntimeUnitSnapshot(name="turn", running=True, details={}),
+            health_fn=lambda: RuntimeHealth(
+                name="turn", ok=True, detail="agent loop ready"
+            ),
+            snapshot_fn=lambda: RuntimeUnitSnapshot(
+                name="turn", running=True, details={}
+            ),
         )
     )
 
@@ -621,9 +612,7 @@ def create_runtime_service(
         RuntimeUnit(
             name="proactive",
             stop_fn=(
-                proactive_loop.request_stop
-                if proactive_loop is not None
-                else None
+                proactive_loop.request_stop if proactive_loop is not None else None
             ),
             health_fn=_proactive_health,
             snapshot_fn=_proactive_snapshot,
@@ -643,7 +632,9 @@ def create_runtime_service(
     runtime_service.register(
         RuntimeUnit(
             name="subagent",
-            health_fn=lambda: RuntimeHealth(name="subagent", ok=True, detail="manager ready"),
+            health_fn=lambda: RuntimeHealth(
+                name="subagent", ok=True, detail="manager ready"
+            ),
             snapshot_fn=lambda: RuntimeUnitSnapshot(
                 name="subagent",
                 running=True,
@@ -654,11 +645,172 @@ def create_runtime_service(
     return runtime_service
 
 
-def _build_mcp_registry(settings, config_path, tool_registry) -> McpServerRegistry:
+class _RuntimeConfigApplier:
+    """把无需重建外部连接的配置变更提交到现有运行时。"""
+
+    def __init__(
+        self,
+        *,
+        proactive_loop,
+        proactive_target: str,
+        proactive_state,
+        pipeline,
+        background_runtime,
+        mcp_registry,
+    ) -> None:
+        self.proactive_loop = proactive_loop
+        self.proactive_target = proactive_target
+        self.proactive_state = proactive_state
+        self.pipeline = pipeline
+        self.background_runtime = background_runtime
+        self.mcp_registry = mcp_registry
+
+    def prepare(
+        self,
+        current: AppConfig,
+        candidate: AppConfig,
+    ) -> PreparedConfigChange:
+        """校验热更新边界，并生成仅含已验证赋值的提交动作。"""
+
+        if candidate != _reloadable_projection(current, candidate):
+            raise ValueError("当前配置变更需要重启服务后生效")
+
+        import logging
+
+        level = candidate.logging.level.upper()
+        valid_levels = {
+            "CRITICAL",
+            "FATAL",
+            "ERROR",
+            "WARN",
+            "WARNING",
+            "INFO",
+            "DEBUG",
+            "NOTSET",
+        }
+        if level not in valid_levels:
+            raise ValueError(f"无效日志级别: {candidate.logging.level}")
+
+        if self.proactive_loop is not None:
+            from flow_agent.proactive.proactive_loop import HawkesConfig
+
+            HawkesConfig(
+                base_intensity=candidate.proactive.hawkes_base_intensity,
+                excitation_alpha=candidate.proactive.hawkes_excitation_alpha,
+                decay_beta=candidate.proactive.hawkes_decay_beta,
+                time_constant=candidate.proactive.hawkes_time_constant,
+                min_interval=candidate.proactive.min_interval,
+                max_interval=candidate.proactive.max_interval,
+            )
+
+        def commit() -> None:
+            if self.proactive_target:
+                self.proactive_state.set_policy(
+                    self.proactive_target,
+                    enabled=candidate.proactive.idle_enabled,
+                    idle_threshold_seconds=(
+                        candidate.proactive.idle_threshold_minutes * 60
+                    ),
+                    topics=candidate.proactive.interest_topics,
+                )
+            if self.proactive_loop is not None:
+                self.proactive_loop.apply_runtime_config(
+                    min_interval=candidate.proactive.min_interval,
+                    max_interval=candidate.proactive.max_interval,
+                    max_per_day=candidate.proactive.max_per_day,
+                    cooldown=candidate.proactive.cooldown,
+                    base_intensity=candidate.proactive.hawkes_base_intensity,
+                    excitation_alpha=candidate.proactive.hawkes_excitation_alpha,
+                    decay_beta=candidate.proactive.hawkes_decay_beta,
+                    time_constant=candidate.proactive.hawkes_time_constant,
+                    drift_min_interval_hours=candidate.drift.min_interval_hours,
+                )
+            logging.getLogger().setLevel(level)
+            self.pipeline.max_tool_steps = candidate.tooling.max_tool_steps
+            self.pipeline.tool_selection_max = candidate.tooling.tool_selection_max
+            self.background_runtime.shutdown_timeout_seconds = (
+                candidate.jobs.timeout_seconds
+            )
+            self.mcp_registry.startup_timeout = candidate.mcp.startup_timeout_seconds
+            self.mcp_registry.call_timeout = candidate.mcp.call_timeout_seconds
+
+        return PreparedConfigChange(commit=commit, discard=lambda: None)
+
+
+def _reloadable_projection(
+    current: AppConfig,
+    candidate: AppConfig,
+) -> AppConfig:
+    """把候选中的可热更新字段投影到当前快照。"""
+
+    return current.model_copy(
+        update={
+            "logging": candidate.logging,
+            "tooling": current.tooling.model_copy(
+                update={
+                    "max_tool_steps": candidate.tooling.max_tool_steps,
+                    "tool_selection_max": candidate.tooling.tool_selection_max,
+                }
+            ),
+            "mcp": current.mcp.model_copy(
+                update={
+                    "startup_timeout_seconds": candidate.mcp.startup_timeout_seconds,
+                    "call_timeout_seconds": candidate.mcp.call_timeout_seconds,
+                }
+            ),
+            "jobs": current.jobs.model_copy(
+                update={"timeout_seconds": candidate.jobs.timeout_seconds}
+            ),
+            "proactive": current.proactive.model_copy(
+                update={
+                    "max_per_day": candidate.proactive.max_per_day,
+                    "min_interval": candidate.proactive.min_interval,
+                    "max_interval": candidate.proactive.max_interval,
+                    "cooldown": candidate.proactive.cooldown,
+                    "hawkes_base_intensity": (
+                        candidate.proactive.hawkes_base_intensity
+                    ),
+                    "hawkes_excitation_alpha": (
+                        candidate.proactive.hawkes_excitation_alpha
+                    ),
+                    "hawkes_decay_beta": candidate.proactive.hawkes_decay_beta,
+                    "hawkes_time_constant": (candidate.proactive.hawkes_time_constant),
+                    "idle_enabled": candidate.proactive.idle_enabled,
+                    "idle_threshold_minutes": (
+                        candidate.proactive.idle_threshold_minutes
+                    ),
+                    "interest_topics": candidate.proactive.interest_topics,
+                }
+            ),
+            "drift": current.drift.model_copy(
+                update={
+                    "min_interval_hours": candidate.drift.min_interval_hours,
+                }
+            ),
+        }
+    )
+
+
+def _build_mcp_registry(
+    config: McpConfig,
+    config_path,
+    tool_registry,
+) -> McpServerRegistry:
     mcp_registry = McpServerRegistry(
         config_path=config_path,
         tool_registry=tool_registry,
-        startup_timeout=settings.mcp.startup_timeout_seconds,
-        call_timeout=settings.mcp.call_timeout_seconds,
+        startup_timeout=config.startup_timeout_seconds,
+        call_timeout=config.call_timeout_seconds,
     )
     return mcp_registry
+
+
+def _proactive_model_config(config: AppConfig) -> ModelEndpointConfig:
+    endpoint = config.llm.fast or config.llm.main
+    if not config.proactive.judge_model:
+        return endpoint
+    return ModelEndpointConfig(
+        model=config.proactive.judge_model,
+        api_key=endpoint.api_key,
+        base_url=endpoint.base_url,
+    )

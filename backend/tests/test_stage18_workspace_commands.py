@@ -1,9 +1,13 @@
 import json
 from pathlib import Path
 
-from flow_agent.main import main as cli_main
+from bootstrap.cli import main as cli_main
 from flow_agent.plugins.manager import PluginManager
-from flow_agent.runtime.workspace import detect_workspace, init_workspace, persist_workspace_profile
+from flow_agent.runtime.workspace import (
+    detect_workspace,
+    init_workspace,
+    persist_workspace_profile,
+)
 from flow_agent.skills.manager import SkillManager
 
 
@@ -87,10 +91,12 @@ def test_cli_init_command(tmp_path: Path):
 
 def test_cli_without_subcommand_starts_service(monkeypatch):
     calls = []
-    monkeypatch.setattr("flow_agent.main.run_service", lambda: calls.append(True))
+    config = object()
+    monkeypatch.setattr("bootstrap.cli.load_application_config", lambda _: config)
+    monkeypatch.setattr("bootstrap.cli.run_service", lambda value: calls.append(value))
 
     assert cli_main([]) == 0
-    assert calls == [True]
+    assert calls == [config]
 
 
 def test_persist_workspace_profile_is_noop(tmp_path: Path):

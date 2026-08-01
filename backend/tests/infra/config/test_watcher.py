@@ -1,7 +1,8 @@
 from pathlib import Path
+import threading
 
 from infra.config.schema import AppConfig
-from infra.config.watcher import ConfigWatcher, PreparedConfigChange
+from infra.config.watcher import ConfigWatchLoop, ConfigWatcher, PreparedConfigChange
 
 
 def config(model: str) -> AppConfig:
@@ -105,3 +106,19 @@ def test_invalid_revision_is_attempted_only_once(tmp_path: Path):
     assert watcher.reload_once() is False
     assert watcher.reload_once() is False
     assert attempts == 1
+
+
+def test_watch_loop_starts_and_stops_polling():
+    reloaded = threading.Event()
+
+    class Watcher:
+        def reload_once(self) -> bool:
+            reloaded.set()
+            return True
+
+    loop = ConfigWatchLoop(Watcher(), interval_seconds=0.01)
+
+    loop.start()
+    assert reloaded.wait(timeout=0.5)
+    loop.stop()
+    assert loop.is_running is False

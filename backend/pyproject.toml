@@ -28,7 +28,7 @@ where = ["src"]
 include = ["flow_agent*", "modules*", "interfaces*", "infra*", "bootstrap*"]
 
 [project.scripts]
-flow-agent = "flow_agent.main:main"
+flow-agent = "bootstrap.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

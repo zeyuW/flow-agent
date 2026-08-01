@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 ImportGraph = dict[str, set[str]]
 
 
