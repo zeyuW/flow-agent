@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 
-from flow_agent.background.jobs import JobSpec
-from flow_agent.background.store import JobRun
+from modules.jobs.domain.models import JobSpec, JobRun
 from flow_agent.background.writer import JobStoreWriter
 from flow_agent.runtime.errors import classify_error
 from flow_agent.runtime.retry import RetryPolicy, retry_call
