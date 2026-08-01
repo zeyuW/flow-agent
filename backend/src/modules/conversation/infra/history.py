@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flow_agent.session.session_models import Session
+from modules.conversation.domain.session import Session
 
 logger = logging.getLogger(__name__)
 

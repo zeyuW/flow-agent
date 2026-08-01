@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flow_agent.session.session_models import SessionMeta
+from modules.conversation.domain.session import SessionMeta
 
 logger = logging.getLogger(__name__)
 

@@ -5,8 +5,8 @@ from flow_agent.memory.maintenance import ConversationConsolidator, MemoryOptimi
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.memory.memorizer import Memorizer
 from flow_agent.memory.vector_store import MemoryStore
-from flow_agent.session.session_manager import SessionManager
-from flow_agent.session.session_store import SessionStore
+from modules.conversation.infra.session_manager import SessionManager
+from modules.conversation.infra.session_store import SessionStore
 
 
 class FixedEmbedder:

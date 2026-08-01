@@ -18,8 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from flow_agent.session.session_models import Session
-from flow_agent.session.session_store import SessionStore
+from modules.conversation.domain.session import Session
+from modules.conversation.infra.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 

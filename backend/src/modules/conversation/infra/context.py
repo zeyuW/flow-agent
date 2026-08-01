@@ -3,10 +3,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from flow_agent.session.session_manager import SessionManager
-from flow_agent.session.session_store import SessionStore
-from flow_agent.session.session_models import Session
-from flow_agent.session.history_builder import get_history
+from modules.conversation.infra.session_manager import SessionManager
+from modules.conversation.infra.session_store import SessionStore
+from modules.conversation.domain.session import Session
+from modules.conversation.infra.history import get_history
 
 
 class ConversationContext:

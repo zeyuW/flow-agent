@@ -1,5 +1,5 @@
-from flow_agent.session.history_builder import get_history
-from flow_agent.session.session_models import Session
+from modules.conversation.infra.history import get_history
+from modules.conversation.domain.session import Session
 
 
 def test_history_returns_empty_when_cursor_reaches_end():

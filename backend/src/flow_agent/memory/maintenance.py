@@ -16,7 +16,7 @@ from typing import Any
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.memory.memorizer import Memorizer
 from flow_agent.memory.profile_extractor import ExtractedProfileItem, ProfileExtractor
-from flow_agent.session.session_manager import SessionManager
+from modules.conversation.infra.session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 
