@@ -49,9 +49,10 @@
 
 **Files:**
 - Create: `backend/README.md`
-- Create: `backend/tests/architecture/test_source_layout.py`
+- Create before move: `tests/architecture/test_source_layout.py`
 - Move: `flow_agent/` → `backend/src/flow_agent/`
 - Move: `tests/` → `backend/tests/`
+- Move: `manual/` → `backend/manual/`
 - Move: `pyproject.toml` → `backend/pyproject.toml`
 - Move: `uv.lock` → `backend/uv.lock`
 - Create: `backend/src/modules/__init__.py`
@@ -59,6 +60,10 @@
 - Create: `backend/src/infra/__init__.py`
 - Create: `backend/src/bootstrap/__init__.py`
 - Modify: `backend/pyproject.toml`
+- Modify: `.github/workflows/ci.yml`
+- Modify: `docker/Dockerfile`
+- Modify: `scripts/verify.sh`
+- Modify: `README.md`
 
 **Interfaces:**
 - Consumes: 当前 `flow_agent` 包、测试套件和 `flow_agent.main:main` CLI 入口。
@@ -71,9 +76,11 @@ from importlib.util import find_spec
 from pathlib import Path
 
 
-BACKEND_ROOT = Path(__file__).parents[2]
+REPOSITORY_ROOT = next(
+    parent for parent in Path(__file__).resolve().parents if (parent / ".git").exists()
+)
+BACKEND_ROOT = REPOSITORY_ROOT / "backend"
 SOURCE_ROOT = BACKEND_ROOT / "src"
-REPOSITORY_ROOT = BACKEND_ROOT.parent
 
 
 def test_python_packages_resolve_from_backend_src():
@@ -91,7 +98,7 @@ def test_legacy_python_package_is_not_at_repository_root():
 
 - [ ] **Step 2: Run the test and verify it fails**
 
-Run: `.venv/bin/python -m pytest backend/tests/architecture/test_source_layout.py -q`
+Run: `${PYTHON_BIN:-python} -m pytest tests/architecture/test_source_layout.py -q`
 
 Expected: FAIL because the `backend/` Python project boundary does not exist.
 
@@ -101,6 +108,7 @@ Expected: FAIL because the `backend/` Python project boundary does not exist.
 mkdir -p backend/src
 git mv flow_agent backend/src/flow_agent
 git mv tests backend/tests
+git mv manual backend/manual
 git mv pyproject.toml backend/pyproject.toml
 git mv uv.lock backend/uv.lock
 ```
@@ -149,20 +157,29 @@ Create `backend/README.md` with the exact development commands:
 从仓库根目录执行：
 
 ```bash
-.venv/bin/python -m pip install -e backend
-.venv/bin/python -m pytest backend/tests -q
+python -m pip install -e backend
+python -m pytest backend/tests -q
 ```
 ````
+
+Update the existing engineering entry points in the same mechanical move:
+
+```text
+.github/workflows/ci.yml  : install with `python -m pip install -e backend` and set `PYTHONPATH=backend/src`
+docker/Dockerfile         : install `/app/backend`, set `PYTHONPATH=/app/backend/src`, keep `python -m flow_agent.main`
+scripts/verify.sh         : compile `backend/src`, scan `backend/src backend/tests`, test `backend/tests`
+README.md                 : use `python -m pip install -e backend` for backend installation
+```
 
 - [ ] **Step 5: Verify imports and behavior**
 
 Run:
 
 ```bash
-.venv/bin/python -m pip install -e backend
-.venv/bin/python -m pytest backend/tests/architecture/test_source_layout.py -q
-.venv/bin/python -c "import bootstrap, flow_agent, infra, interfaces, modules"
-.venv/bin/python -m pytest backend/tests -q
+${PYTHON_BIN:-python} -m pip wheel --no-deps backend -w /tmp/flow-agent-phase-1-wheel
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_source_layout.py -q
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -c "import bootstrap, flow_agent, infra, interfaces, modules"
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 ```
 
 Expected: layout tests PASS, imports exit 0, full suite reports 238 passed.
@@ -208,7 +225,7 @@ def test_import_graph_finds_cycle(tmp_path):
 
 - [ ] **Step 2: Run the test and verify it fails**
 
-Run: `.venv/bin/python -m pytest backend/tests/architecture/test_import_graph.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_import_graph.py -q`
 
 Expected: FAIL because `tests.architecture.import_graph` does not exist.
 
@@ -262,7 +279,7 @@ Add `_resolve_from_import` for relative imports and `_resolve_module` for longes
 
 - [ ] **Step 4: Run analyzer tests**
 
-Run: `.venv/bin/python -m pytest backend/tests/architecture/test_import_graph.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_import_graph.py -q`
 
 Expected: PASS.
 
@@ -320,7 +337,7 @@ def test_enabled_telegram_requires_credentials():
 
 - [ ] **Step 2: Run tests and verify they fail**
 
-Run: `.venv/bin/python -m pytest backend/tests/infra/config/test_schema.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_schema.py -q`
 
 Expected: FAIL because `infra.config.schema` does not exist.
 
@@ -356,22 +373,36 @@ class LLMConfig(FrozenConfig):
     fallback_enabled: bool = True
 ```
 
-Implement the remaining sections with these stable defaults:
+Implement the remaining sections without dropping any currently available setting. Keep the
+existing field names where they already express the product concept; only the three LLM
+endpoints are grouped under `llm`:
 
 | 类型 | 字段与默认值 |
 | --- | --- |
 | `EmbeddingConfig` | `provider="qwen"`, `model="text-embedding-v3"`, `api_key=None`, `base_url=None` |
 | `StorageConfig` | `memory_db_path=".flow/data/memory.db"`, `outbox_recovery_window_seconds=0.0`, `outbox_recovery_limit=100` |
-| `SessionConfig` | `default_id="default"`, `max_history_messages=500`, `cache_size=64`, `undo_enabled=True` |
-| `ToolingConfig` | `enabled=True`, `max_steps=5`, `selection_limit=8` |
-| `MemoryConfig` | `enabled=True`, `max_messages=100`, `deduplicate=True`, `recent_turn_limit=8` |
-| `ProactiveConfig` | `enabled=False`, `target_user_id=None`, `max_per_day=10`, `min_interval_seconds=60.0`, `max_interval_seconds=600.0`, `cooldown_seconds=60.0` |
-| `ChannelsConfig` | `telegram_enabled=False`, `telegram_bot_token=None`, `telegram_allowed_users=()` |
-| `JobsConfig` | `max_queue_size=64`, `max_workers=4`, `shutdown_timeout_seconds=30.0` |
-| `DelegationConfig` | `enabled=True`, `max_concurrency=2`, `tasks_file=".flow/sessions/subagent_tasks.jsonl"` |
-| `ObservabilityConfig` | `enabled=True`, `trace_path=".flow/logs/trace.jsonl"` |
+| `LoggingConfig` | `level="INFO"` |
+| `SessionConfig` | `default_session_id="default"`, `max_history_messages=500`, `cache_size=64`, `undo_enabled=True`, `tool_result_max_chars=10000` |
+| `ToolingConfig` | `enabled=True`, `max_tool_steps=5`, `tool_selection_max=8` |
+| `McpConfig` | `enabled=True`, `startup_timeout_seconds=30.0`, `call_timeout_seconds=60.0` |
+| `RetrievalConfig` | `enabled=True`, `max_items=5`, `min_score=0.18` |
+| `ObserveConfig` | `enabled=True`, `trace_path=".flow/logs/trace.jsonl"` |
+| `MemoryPolicyConfig` | `enabled=True`, `max_messages=100`, `dedupe=True` |
+| `MemoryMaintenanceConfig` | `enabled=True`, `consolidation_min_new_messages=5`, `recent_turns_limit=8`, `optimizer_enabled=True`, `optimizer_interval_seconds=64800` |
+| `ProactiveConfig` | `enabled=False`, interval, judge model, five Hawkes fields, target, idle fields, topics, state path and trace path with current defaults |
+| `DriftConfig` | `enabled=True`, `data_dir=".flow/drift"`, `min_interval_hours=24.0`, `max_steps=50` |
+| `ChannelsConfig` | dashboard, HTTP and Telegram enable/host/port/token/allowlist fields with current defaults |
+| `JobsConfig` | `max_async_queue=64`, `max_async_workers=4`, `timeout_seconds=30.0` |
+| `SubagentConfig` | `max_concurrency=2`, `tasks_file=".flow/sessions/subagent_tasks.jsonl"` |
+| `PersonaConfig` | `name="FlowAgent"`, both tone fields and `style="structured"` |
+| `PromptBudgetConfig` | `max_chars=8000`, `history_chars=3000`, `memory_chars=1500`, `tool_trace_chars=1000` |
+| `DelegationPolicyConfig` | `max_local_chars=500`, `enabled=True` |
 
-Use `Field` to enforce positive queue, worker, timeout and limit values. `ChannelsConfig` validates Telegram credentials when enabled. `ProactiveConfig` validates a non-empty target when enabled and `min_interval_seconds <= max_interval_seconds`.
+Use `Field` to preserve the current effective minimum/maximum constraints from the old loader.
+`ChannelsConfig` validates the Telegram token and allowed users when Telegram is enabled.
+`ProactiveConfig` validates a non-empty target when enabled and `min_interval <= max_interval`.
+Ports must be in `1..65535`; comma-delimited channel allowlists remain strings in Phase 1 so
+runtime behavior is not silently changed.
 
 - [ ] **Step 4: Implement the top-level schema**
 
@@ -380,15 +411,29 @@ class AppConfig(FrozenConfig):
     llm: LLMConfig
     embedding: EmbeddingConfig = Field(default_factory=EmbeddingConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     session: SessionConfig = Field(default_factory=SessionConfig)
     tooling: ToolingConfig = Field(default_factory=ToolingConfig)
-    memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    mcp: McpConfig = Field(default_factory=McpConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
+    observe: ObserveConfig = Field(default_factory=ObserveConfig)
+    memory_policy: MemoryPolicyConfig = Field(default_factory=MemoryPolicyConfig)
+    memory: MemoryMaintenanceConfig = Field(default_factory=MemoryMaintenanceConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
+    drift: DriftConfig = Field(default_factory=DriftConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
     jobs: JobsConfig = Field(default_factory=JobsConfig)
-    delegation: DelegationConfig = Field(default_factory=DelegationConfig)
-    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
+    subagent: SubagentConfig = Field(default_factory=SubagentConfig)
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    prompt_budget: PromptBudgetConfig = Field(default_factory=PromptBudgetConfig)
+    delegation_policy: DelegationPolicyConfig = Field(
+        default_factory=DelegationPolicyConfig
+    )
 ```
+
+Add one regression test that validates a fully populated mapping containing every field listed
+above. This is the Phase 1 capability-retention contract and must fail if any existing setting is
+omitted or renamed accidentally.
 
 Export configuration types from `infra.config.__init__` without importing Loader or Watcher.
 
@@ -397,8 +442,8 @@ Export configuration types from `infra.config.__init__` without importing Loader
 Run:
 
 ```bash
-.venv/bin/python -m pytest backend/tests/infra/config/test_schema.py -q
-.venv/bin/python -m pyright --pythonpath .venv/bin/python backend/src/infra/config/schema.py backend/tests/infra/config/test_schema.py
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_schema.py -q
+${PYTHON_BIN:-python} -m pyright --pythonpath ${PYTHON_BIN:-python} backend/src/infra/config/schema.py backend/tests/infra/config/test_schema.py
 ```
 
 Expected: tests PASS and scoped Pyright reports 0 errors.
@@ -460,7 +505,7 @@ def test_load_config_does_not_read_environment(monkeypatch, tmp_path: Path):
 
 - [ ] **Step 2: Run tests and verify they fail**
 
-Run: `.venv/bin/python -m pytest backend/tests/infra/config/test_loader.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_loader.py -q`
 
 Expected: FAIL because `infra.config.loader` does not exist.
 
@@ -505,15 +550,15 @@ backend/config.toml
 !backend/config.example.toml
 ```
 
-Create `backend/config.example.toml` with `[llm.main]`、`[channels]`、`[proactive]`、`[jobs]` and `[delegation]` sections. Required credentials use `replace-me`，中文注释解释字段，不得包含真实凭据。
+Create `backend/config.example.toml` with `[llm.main]`、`[channels]`、`[proactive]`、`[jobs]`、`[subagent]` and `[delegation_policy]` sections. Required credentials use `replace-me`，中文注释解释字段，不得包含真实凭据。
 
 - [ ] **Step 5: Verify loader and example**
 
 Run:
 
 ```bash
-.venv/bin/python -m pytest backend/tests/infra/config/test_loader.py -q
-.venv/bin/python -c "from pathlib import Path; from infra.config.loader import load_config; load_config(Path('backend/config.example.toml'))"
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_loader.py -q
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -c "from pathlib import Path; from infra.config.loader import load_config; load_config(Path('backend/config.example.toml'))"
 ```
 
 Expected: tests PASS and example loading exits 0.
@@ -584,7 +629,7 @@ def test_prepare_failure_discards_candidates_and_keeps_current(tmp_path: Path):
 
 - [ ] **Step 2: Run tests and verify they fail**
 
-Run: `.venv/bin/python -m pytest backend/tests/infra/config/test_watcher.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_watcher.py -q`
 
 Expected: FAIL because `infra.config.watcher` does not exist.
 
@@ -623,8 +668,8 @@ class ConfigApplier(Protocol):
 Run:
 
 ```bash
-.venv/bin/python -m pytest backend/tests/infra/config/test_watcher.py -q
-.venv/bin/python -m pyright --pythonpath .venv/bin/python backend/src/infra/config backend/tests/infra/config
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_watcher.py -q
+${PYTHON_BIN:-python} -m pyright --pythonpath ${PYTHON_BIN:-python} backend/src/infra/config backend/tests/infra/config
 ```
 
 Expected: tests PASS and scoped Pyright reports 0 errors.
@@ -648,6 +693,7 @@ git commit -m "feat: add transactional config reload"
 - Modify: `backend/src/flow_agent/app/bootstrap.py`
 - Modify: `backend/src/flow_agent/core/agent.py`
 - Modify: `backend/src/flow_agent/llm/client.py`
+- Modify every test and runtime consumer found by the zero-consumer search in Step 6
 - Replace: `backend/tests/test_config.py`
 - Delete: `backend/src/flow_agent/config/`
 - Delete: `backend/src/flow_agent/llm/config.py`
@@ -677,7 +723,7 @@ def test_bootstrap_loads_only_backend_config(tmp_path: Path):
 
 - [ ] **Step 2: Run the focused tests and verify they fail**
 
-Run: `.venv/bin/python -m pytest backend/tests/test_config.py backend/tests/test_agent.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/test_config.py backend/tests/test_agent.py -q`
 
 Expected: FAIL because Bootstrap and explicit constructor signatures do not exist.
 
@@ -705,7 +751,7 @@ flow-agent = "bootstrap.cli:main"
 
 `bootstrap.cli.main` parses CLI arguments, loads `AppConfig` once and calls `flow_agent.main.run_service(config)`。Bootstrap must not create network clients at import time.
 
-- [ ] **Step 4: Make runtime dependencies explicit**
+- [ ] **Step 4: Make leaf runtime dependencies explicit**
 
 Apply these exact constructor transformations:
 
@@ -762,7 +808,19 @@ class OpenAILLMClient:
 
 Replace `self.settings.system_prompt` with `self.system_prompt` in Agent. Replace every `settings.get()` and module-level configuration read in the construction path with values passed from `create_app_runtime(config)`。No downstream object may retain the complete `AppConfig` unless it applies configuration changes.
 
-- [ ] **Step 5: Remove old configuration modules only after consumers are gone**
+- [ ] **Step 5: Thread one immutable snapshot through composition**
+
+Change every `flow_agent.app.bootstrap` factory that currently calls `settings.get()` to accept
+either the precise section it consumes or the already loaded `AppConfig` at the composition
+boundary. `create_app_runtime(config)` is the only old-runtime composition function allowed to
+retain the complete snapshot. Preserve the current thirteen-part runtime return contract during
+Phase 1; changing that contract belongs to the later business-module migration.
+
+Adapt configuration reload through concrete `ConfigApplier` objects. Preparation may allocate or
+validate candidate resources; commit only performs non-failing reference swaps. The process entry
+owns `ConfigWatcher`; ordinary services must never import it or read a global cache.
+
+- [ ] **Step 6: Prove zero consumers, then remove the old configuration modules**
 
 Run:
 
@@ -770,20 +828,23 @@ Run:
 rg -n 'flow_agent\.config|flow_agent\.llm\.config|settings\.get' backend/src backend/tests
 ```
 
-Expected before deletion: no active consumers outside the files scheduled for deletion. Then delete the legacy configuration directory and LLM Builder file with `git rm`.
+Expected before deletion: no active consumers outside the files scheduled for deletion. Also run
+`rg -n '\bSettings\b|\bsettings\b' backend/src backend/tests` and classify every result; no result
+may refer to the old aggregate or proxy. Then delete the legacy configuration directory and LLM
+Builder file with `git rm`.
 
-- [ ] **Step 6: Verify the migrated runtime**
+- [ ] **Step 7: Verify the migrated runtime**
 
 Run:
 
 ```bash
-.venv/bin/python -m pytest backend/tests/test_config.py backend/tests/test_agent.py backend/tests/test_message_bus_architecture.py backend/tests/test_passive_turn_concurrency.py backend/tests/test_telegram_multimodal.py -q
-.venv/bin/python -m pytest backend/tests -q
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/test_config.py backend/tests/test_agent.py backend/tests/test_message_bus_architecture.py backend/tests/test_passive_turn_concurrency.py backend/tests/test_telegram_multimodal.py -q
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 ```
 
 Expected: focused tests PASS and full suite reports 238 passed.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add backend
@@ -885,7 +946,7 @@ flow_agent                  !-> interfaces | bootstrap
 
 - [ ] **Step 2: Run tests and verify violations are reported**
 
-Run: `.venv/bin/python -m pytest backend/tests/architecture/test_project_dependencies.py -q`
+Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_project_dependencies.py -q`
 
 Expected: FAIL until the source layout and configuration cycle migrations from previous tasks are complete.
 
@@ -895,10 +956,11 @@ Expected: FAIL until the source layout and configuration cycle migrations from p
 #!/usr/bin/env bash
 set -euo pipefail
 
-.venv/bin/python -m compileall -q backend/src
-.venv/bin/python -m pytest backend/tests -q
-.venv/bin/python -m pyright --pythonpath .venv/bin/python backend/src/infra/config backend/tests/architecture backend/tests/infra/config
-.venv/bin/python -m black --check --target-version py310 --fast backend/src backend/tests
+PYTHON_BIN="${PYTHON_BIN:-python}"
+"$PYTHON_BIN" -m compileall -q backend/src
+PYTHONPATH=backend/src "$PYTHON_BIN" -m pytest backend/tests -q
+"$PYTHON_BIN" -m pyright --pythonpath "$PYTHON_BIN" backend/src/infra/config backend/tests/architecture backend/tests/infra/config
+"$PYTHON_BIN" -m black --check --target-version py310 --fast backend/src backend/tests
 git diff --check
 ```
 
