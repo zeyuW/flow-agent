@@ -21,7 +21,7 @@ from collections import deque
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from flow_agent.messaging.message_bus import MessageBus
-from flow_agent.messaging.event_bus import EventBus, Event
+from infra.messaging.event_bus import EventBus, Event
 
 logger = logging.getLogger(__name__)
 

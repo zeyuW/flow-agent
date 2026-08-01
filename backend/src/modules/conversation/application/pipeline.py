@@ -25,7 +25,7 @@ from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.messaging.event_bus import (
+from infra.messaging.event_bus import (
     Event,
     EventBus,
     TurnCommitted,

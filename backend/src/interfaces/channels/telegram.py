@@ -13,7 +13,7 @@ from typing import Any
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
 from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
-from flow_agent.messaging.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
+from infra.messaging.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
 logger = logging.getLogger(__name__)
 

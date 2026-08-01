@@ -169,7 +169,7 @@ def wire_memory_events(
         event_bus: EventBus 实例。
         consolidator: 可选的回合后对话归档器。
     """
-    from flow_agent.messaging.event_bus import EventSubscriber, TurnCommitted
+    from infra.messaging.event_bus import EventSubscriber, TurnCommitted
 
     class MemoryEventSubscriber:
         """记忆事件订阅者：监听 TurnCommitted 事件。"""

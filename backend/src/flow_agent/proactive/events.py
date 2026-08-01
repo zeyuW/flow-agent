@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from flow_agent.messaging.event_bus import Event
+from infra.messaging.event_bus import Event
 from flow_agent.proactive.proactive_loop import ProactiveLoop
 
 

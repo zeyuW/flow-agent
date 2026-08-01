@@ -15,7 +15,7 @@ from infra.config.watcher import (
 )
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.outbox import SQLiteOutboxStore
-from flow_agent.messaging.event_bus import EventBus
+from infra.messaging.event_bus import EventBus
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.runner import ConversationRunner
 from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
