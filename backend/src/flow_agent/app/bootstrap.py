@@ -62,7 +62,7 @@ from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.runtime.workspace import init_workspace
 from flow_agent.subagent.runtime import SubagentRuntime, create_subagent_runtime
-from flow_agent.proactive.runtime import build_proactive_runtime
+from modules.proactive.application.runtime import build_proactive_runtime
 from flow_agent.proactive.mcp_pool import RegistryMcpPool
 from flow_agent.proactive.gate import ProactiveStateStore
 from flow_agent.proactive.specs import (
