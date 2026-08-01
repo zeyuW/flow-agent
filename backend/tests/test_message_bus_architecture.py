@@ -14,7 +14,7 @@ from flow_agent.messaging.message_bus import (
     BusOutboundPort,
 )
 from flow_agent.messaging.event_bus import EventBus, Event, TurnCommitted
-from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+from modules.conversation.application.pipeline import PassiveTurnPipeline
 from flow_agent.core.agent_loop import AgentLoop, ProcessingState
 from flow_agent.core.phase_module import PhaseModule, TurnFlow
 from flow_agent.channels.models import InboundMessage, OutboundMessage

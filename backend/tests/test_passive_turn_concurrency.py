@@ -137,7 +137,7 @@ def test_passive_pipeline_allows_other_session_while_async_model_waits():
 
     from types import SimpleNamespace
 
-    from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+    from modules.conversation.application.pipeline import PassiveTurnPipeline
     from flow_agent.llm.client import LLMResult
     from flow_agent.tools.registry import ToolRegistry
 
@@ -198,7 +198,7 @@ def test_cancelled_async_passive_turn_does_not_commit_reply():
 
     from types import SimpleNamespace
 
-    from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+    from modules.conversation.application.pipeline import PassiveTurnPipeline
     from flow_agent.tools.registry import ToolRegistry
 
     async def scenario():
@@ -247,7 +247,7 @@ def test_async_pipeline_applies_tool_hook_before_execution():
 
     from types import SimpleNamespace
 
-    from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+    from modules.conversation.application.pipeline import PassiveTurnPipeline
     from flow_agent.llm.client import LLMResult, LLMToolCall
     from flow_agent.plugins.tool_hooks import HookOutcome, ToolHookExecutor
     from flow_agent.tools.base import ToolResult

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import deque
-from collections.abc import Awaitable
 from typing import Protocol
 
 from modules.conversation.domain.messages import IncomingMessage
@@ -14,15 +13,19 @@ from modules.conversation.domain.messages import IncomingMessage
 class IncomingMessageSource(Protocol):
     """向对话应用提供已完成协议适配的入站消息。"""
 
-    def receive(self, poll_interval_ms: int) -> Awaitable[IncomingMessage]:
+    async def receive(self, poll_interval_ms: int) -> IncomingMessage:
         """等待下一条入站消息。"""
+
+        ...
 
 
 class ConversationProcessor(Protocol):
     """执行单个对话回合的应用端口。"""
 
-    def process(self, message: IncomingMessage) -> Awaitable[None]:
+    async def process(self, message: IncomingMessage) -> None:
         """处理一条消息直到回合终态。"""
+
+        ...
 
 
 class ConversationRunner:

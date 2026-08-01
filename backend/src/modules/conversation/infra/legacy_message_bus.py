@@ -14,6 +14,8 @@ class LegacyMessageBusSource:
         """等待一条旧总线消息，再消除旧字段命名。"""
 
         inbound = await self._bus.consume_inbound_async(poll_interval_ms)
+        if inbound is None:
+            raise RuntimeError("消息总线在等待期间未返回入站消息")
         return IncomingMessage(
             channel=inbound.channel,
             conversation_id=inbound.session_id,

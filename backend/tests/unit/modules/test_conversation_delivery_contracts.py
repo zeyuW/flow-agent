@@ -111,40 +111,6 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
     asyncio.run(scenario())
 
 
-def test_legacy_pipeline_adapter_translates_the_new_conversation_contract():
-    """迁移适配器必须完整转换新入站协议，避免旧字段泄漏到应用层。"""
-
-    from modules.conversation.domain.messages import IncomingMessage
-    from modules.conversation.infra.legacy_pipeline import LegacyPipelineProcessor
-
-    received = []
-
-    class Pipeline:
-        async def process_async(self, message) -> None:
-            received.append(message)
-
-    async def scenario() -> None:
-        adapter = LegacyPipelineProcessor(Pipeline())
-        await adapter.process(
-            IncomingMessage(
-                channel="telegram",
-                conversation_id="telegram:42",
-                text="你好",
-                sender_id="42",
-                media=("/tmp/image.png",),
-                metadata={"chat_id": "42"},
-            )
-        )
-
-    asyncio.run(scenario())
-
-    assert received[0].channel == "telegram"
-    assert received[0].session_id == "telegram:42"
-    assert received[0].sender == "42"
-    assert received[0].media == ["/tmp/image.png"]
-    assert received[0].metadata == {"chat_id": "42"}
-
-
 def test_legacy_message_bus_source_translates_channel_input_to_conversation_input():
     """现有消息总线进入新应用层前必须完成协议转换。"""
 
@@ -234,7 +200,7 @@ def test_passive_pipeline_submits_reply_through_the_delivery_port():
 
     from types import SimpleNamespace
 
-    from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+    from modules.conversation.application.pipeline import PassiveTurnPipeline
     from flow_agent.tools.registry import ToolRegistry
     from modules.delivery.application.ports import DeliveryRequest
 

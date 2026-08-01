@@ -19,7 +19,7 @@ import time
 from collections import deque
 
 from flow_agent.channels.models import InboundMessage
-from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+from modules.conversation.application.pipeline import PassiveTurnPipeline
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.event_bus import EventBus, Event
 

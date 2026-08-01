@@ -53,6 +53,8 @@ class DeliveryPort(Protocol):
     def submit(self, request: DeliveryRequest) -> DeliverySubmission:
         """可靠接收一条请求，后续结果由回执或等待接口提供。"""
 
+        ...
+
     async def send_and_wait(
         self,
         request: DeliveryRequest,
@@ -60,3 +62,5 @@ class DeliveryPort(Protocol):
         timeout: float,
     ) -> DeliveryReceipt:
         """提交请求并等待渠道返回可确认的投递结果。"""
+
+        ...

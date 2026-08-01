@@ -20,17 +20,40 @@ from collections.abc import Callable
 from flow_agent.core.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
 from flow_agent.core.phase_module import PhaseModule, TurnFlow
-from flow_agent.channels.models import InboundMessage, OutboundMessage
+from flow_agent.channels.models import OutboundMessage
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
 from flow_agent.memory.memory_engine import MemoryEngine
 from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.messaging.event_bus import Event, EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
-from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
+from flow_agent.messaging.event_bus import (
+    Event,
+    EventBus,
+    TurnCommitted,
+    StreamDeltaReady,
+    ToolCallStarted,
+    ToolCallCompleted,
+)
+from flow_agent.messaging.message_bus import (
+    MessageBus,
+    OutboundDispatch,
+    OutboundPort,
+    BusOutboundPort,
+)
 from modules.delivery.application.ports import DeliveryPort, DeliveryRequest
+from modules.conversation.domain.messages import IncomingMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _conversation_id_of(inbound: IncomingMessage) -> str:
+    """读取新协议的会话标识，并暂时接住尚未迁移的旧运行单元。"""
+
+    conversation_id = getattr(inbound, "conversation_id", None)
+    if isinstance(conversation_id, str):
+        return conversation_id
+    # 旧 AgentLoop 尚未删除前仍可能直连该管道；此分支不向新模块暴露旧字段。
+    return getattr(inbound, "session_id")
 
 
 class PassiveTurnPipeline:
@@ -88,7 +111,7 @@ class PassiveTurnPipeline:
             self._phase_modules.append(module)
             logger.info("phase module registered: %s", module.name)
 
-    def process(self, inbound: InboundMessage) -> None:
+    def process(self, inbound: IncomingMessage) -> None:
         """处理一条入站消息，执行完整的六阶段管道。
 
         这是 AgentLoop 调用的入口。
@@ -100,20 +123,22 @@ class PassiveTurnPipeline:
         """
         flow = TurnFlow(
             user_input=inbound.text,
-            session_id=inbound.session_id,
+            session_id=_conversation_id_of(inbound),
             channel=inbound.channel,
-            inbound_metadata=inbound.metadata or {},  # 保存入站 metadata
+            inbound_metadata=dict(inbound.metadata),  # 保存入站 metadata
             trace_id=uuid4().hex[:12],
         )
         flow.inbound_metadata["media"] = list(inbound.media)
         flow.extensions["_phase_modules"] = self._phase_module_snapshot()
         turn_started = time.perf_counter()
-        self._record_event({
-            "type": "turn_start",
-            "trace_id": flow.trace_id,
-            "session_id": flow.session_id,
-            "user_input": flow.user_input,
-        })
+        self._record_event(
+            {
+                "type": "turn_start",
+                "trace_id": flow.trace_id,
+                "session_id": flow.session_id,
+                "user_input": flow.user_input,
+            }
+        )
         logger.info("turn start session=%s", flow.session_id)
 
         try:
@@ -138,40 +163,46 @@ class PassiveTurnPipeline:
             # Phase 6: AfterTurn — ① 广播事件 ② 发送回复
             flow = self._run_phase(flow, "after_turn", self._after_turn)
 
-            self._record_event({
-                "type": "turn_end",
-                "trace_id": flow.trace_id,
-                "session_id": flow.session_id,
-                "assistant_output": flow.final_output,
-                "tool_trace": flow.tool_trace,
-            })
+            self._record_event(
+                {
+                    "type": "turn_end",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "assistant_output": flow.final_output,
+                    "tool_trace": flow.tool_trace,
+                }
+            )
             logger.info("turn end session=%s", flow.session_id)
-            self._record_event({
-                "type": "turn_perf",
-                "trace_id": flow.trace_id,
-                "session_id": flow.session_id,
-                "latency_ms": round((time.perf_counter() - turn_started) * 1000, 2),
-            })
+            self._record_event(
+                {
+                    "type": "turn_perf",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "latency_ms": round((time.perf_counter() - turn_started) * 1000, 2),
+                }
+            )
         except Exception as exc:
-            self._record_event({
-                "type": "turn_error",
-                "trace_id": flow.trace_id,
-                "session_id": flow.session_id,
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-            })
+            self._record_event(
+                {
+                    "type": "turn_error",
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                }
+            )
             logger.exception("turn error session=%s", flow.session_id)
             # 即使出错也尝试发送错误回复
             self._send_error_reply(flow, exc)
 
-    async def process_async(self, inbound: InboundMessage) -> None:
+    async def process_async(self, inbound: IncomingMessage) -> None:
         """异步处理一条入站消息，使模型等待不会阻塞其他会话。"""
 
         flow = TurnFlow(
             user_input=inbound.text,
-            session_id=inbound.session_id,
+            session_id=_conversation_id_of(inbound),
             channel=inbound.channel,
-            inbound_metadata=inbound.metadata or {},
+            inbound_metadata=dict(inbound.metadata),
             trace_id=uuid4().hex[:12],
         )
         flow.inbound_metadata["media"] = list(inbound.media)
@@ -354,30 +385,39 @@ class PassiveTurnPipeline:
     def _reasoner(self, flow: TurnFlow) -> TurnFlow:
         self._call_phase_modules(flow, "on_reasoner")
         # 如果启用思考模式，使用流式生成
-        if self.enable_thinking and self.event_bus:
-            chat_id = flow.inbound_metadata.get("telegram_chat_id") if flow.inbound_metadata else ""
+        event_bus = self.event_bus
+        if self.enable_thinking and event_bus:
+            chat_id = (
+                flow.inbound_metadata.get("telegram_chat_id")
+                if flow.inbound_metadata
+                else ""
+            )
             if chat_id:
                 # 发送初始状态
-                self.event_bus.publish(StreamDeltaReady(
-                    trace_id=flow.trace_id,
-                    session_id=flow.session_id,
-                    delta="🤔 正在思考...",
-                    channel=flow.channel,
-                    chat_id=str(chat_id),
-                ))
-                
-                # 定义流式回调函数
-                def on_delta(delta: str) -> None:
-                    self.event_bus.publish(StreamDeltaReady(
+                event_bus.publish(
+                    StreamDeltaReady(
                         trace_id=flow.trace_id,
                         session_id=flow.session_id,
-                        delta=delta,
+                        delta="🤔 正在思考...",
                         channel=flow.channel,
                         chat_id=str(chat_id),
-                    ))
-                
+                    )
+                )
+
+                # 定义流式回调函数
+                def on_delta(delta: str) -> None:
+                    event_bus.publish(
+                        StreamDeltaReady(
+                            trace_id=flow.trace_id,
+                            session_id=flow.session_id,
+                            delta=delta,
+                            channel=flow.channel,
+                            chat_id=str(chat_id),
+                        )
+                    )
+
                 # 使用流式生成（如果有流式方法）
-                if hasattr(self.agent.llm_client, 'generate_stream'):
+                if hasattr(self.agent.llm_client, "generate_stream"):
                     # 复用提示词渲染阶段的结果，避免流式分支丢失长期记忆和工具说明。
                     result = self.agent.llm_client.generate_stream(
                         messages=flow.messages,
@@ -393,7 +433,7 @@ class PassiveTurnPipeline:
                         flow.final_output = content
                         return flow
                     logger.warning("流式推理返回空内容，改用普通工具循环")
-        
+
         # 非思考模式或流式失败，使用正常流程
         return self._run_tool_loop(flow)
 
@@ -415,9 +455,14 @@ class PassiveTurnPipeline:
         - 再通过 OutboundPort 发送回复，确保回复发送的可靠性
         - 如果先发送后广播，发送失败会导致状态不一致
         """
-        logger.info("after_turn: final_output=%s", flow.final_output[:100] if flow.final_output else "EMPTY")
+        logger.info(
+            "after_turn: final_output=%s",
+            flow.final_output[:100] if flow.final_output else "EMPTY",
+        )
         if not flow.final_output.strip():
-            logger.error("模型未生成有效回复，使用空回复兜底文案: trace=%s", flow.trace_id)
+            logger.error(
+                "模型未生成有效回复，使用空回复兜底文案: trace=%s", flow.trace_id
+            )
             flow.final_output = "抱歉，本轮没有生成有效回复，请再试一次。"
         # 写入当前会话历史。
         commit_turn = self.agent.commit_turn
@@ -453,7 +498,8 @@ class PassiveTurnPipeline:
         - tool_trace: 工具调用链
         - token 统计等
         """
-        if self.event_bus is None:
+        event_bus = self.event_bus
+        if event_bus is None:
             return
 
         event = TurnCommitted(
@@ -470,7 +516,7 @@ class PassiveTurnPipeline:
         }
 
         try:
-            self.event_bus.publish(event)
+            event_bus.publish(event)
             logger.debug("turn_committed event broadcast: trace=%s", flow.trace_id)
         except Exception:
             logger.exception("failed to broadcast TurnCommitted event")
@@ -482,12 +528,18 @@ class PassiveTurnPipeline:
         通过 outbound_port.send() 投递到 MessageBus 出站队列。
         MessageBus 后台 dispatch_outbound 任务会分发给对应渠道。
         """
-        if self.delivery_port is None and self.outbound_port is None:
+        delivery_port = self.delivery_port
+        outbound_port = self.outbound_port
+        if delivery_port is None and outbound_port is None:
             logger.warning("no outbound_port configured, cannot send reply")
             return
 
-        logger.info("sending outbound reply: channel=%s, text=%s", flow.channel, flow.final_output[:100])
-        
+        logger.info(
+            "sending outbound reply: channel=%s, text=%s",
+            flow.channel,
+            flow.final_output[:100],
+        )
+
         # 合并入站 metadata 和管道 metadata
         metadata = {
             "trace_id": flow.trace_id,
@@ -496,7 +548,7 @@ class PassiveTurnPipeline:
         # 添加渠道特定的 metadata（如 telegram_chat_id）
         if flow.inbound_metadata:
             metadata.update(flow.inbound_metadata)
-        
+
         request = DeliveryRequest(
             channel=flow.channel,
             conversation_id=flow.session_id,
@@ -511,10 +563,11 @@ class PassiveTurnPipeline:
         )
 
         try:
-            if self.delivery_port is not None:
-                self.delivery_port.submit(request)
+            if delivery_port is not None:
+                delivery_port.submit(request)
             else:
-                self.outbound_port.send(
+                assert outbound_port is not None
+                outbound_port.send(
                     OutboundDispatch(
                         channel=request.channel,
                         session_id=request.conversation_id,
@@ -523,13 +576,20 @@ class PassiveTurnPipeline:
                         metadata=dict(request.metadata),
                     )
                 )
-            logger.debug("outbound reply dispatched: channel=%s session=%s metadata=%s", flow.channel, flow.session_id, list(metadata.keys()))
+            logger.debug(
+                "outbound reply dispatched: channel=%s session=%s metadata=%s",
+                flow.channel,
+                flow.session_id,
+                list(metadata.keys()),
+            )
         except Exception:
             logger.exception("failed to dispatch outbound reply")
 
     def _send_error_reply(self, flow: TurnFlow, exc: Exception) -> None:
         """发送错误回复。"""
-        if self.delivery_port is None and self.outbound_port is None:
+        delivery_port = self.delivery_port
+        outbound_port = self.outbound_port
+        if delivery_port is None and outbound_port is None:
             return
         metadata: dict[str, object] = {
             "trace_id": flow.trace_id,
@@ -550,10 +610,11 @@ class PassiveTurnPipeline:
             metadata=metadata,
         )
         try:
-            if self.delivery_port is not None:
-                self.delivery_port.submit(request)
+            if delivery_port is not None:
+                delivery_port.submit(request)
             else:
-                self.outbound_port.send(
+                assert outbound_port is not None
+                outbound_port.send(
                     OutboundDispatch(
                         channel=request.channel,
                         session_id=request.conversation_id,
@@ -708,19 +769,27 @@ class PassiveTurnPipeline:
                 )
             if not result.tool_calls:
                 flow.final_output = result.content or ""
-                self._record_event({
-                    "type": "tool_loop_perf",
-                    "trace_id": flow.trace_id,
-                    "session_id": flow.session_id,
-                    "steps": step,
-                    "latency_ms": round((time.perf_counter() - loop_started) * 1000, 2),
-                })
+                self._record_event(
+                    {
+                        "type": "tool_loop_perf",
+                        "trace_id": flow.trace_id,
+                        "session_id": flow.session_id,
+                        "steps": step,
+                        "latency_ms": round(
+                            (time.perf_counter() - loop_started) * 1000, 2
+                        ),
+                    }
+                )
                 return flow
-            current_messages.append({
-                "role": "assistant",
-                "content": result.content or "",
-                "tool_calls": [self._tool_call_to_message_item(tc) for tc in result.tool_calls],
-            })
+            current_messages.append(
+                {
+                    "role": "assistant",
+                    "content": result.content or "",
+                    "tool_calls": [
+                        self._tool_call_to_message_item(tc) for tc in result.tool_calls
+                    ],
+                }
+            )
             for tool_call in result.tool_calls:
                 tool_input = self._tool_input_for_flow(tool_call, flow)
                 if self._tool_hook_executor is not None:
@@ -734,17 +803,21 @@ class PassiveTurnPipeline:
                             f"Tool `{tool_call.name}` ok=False: "
                             f"插件钩子阻止执行: {outcome.reason}"
                         )
-                        flow.tool_trace.append({
-                            "step": str(step + 1),
-                            "tool": tool_call.name,
-                            "status": "blocked",
-                            "arguments": tool_call.arguments_json,
-                        })
-                        current_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": tool_message,
-                        })
+                        flow.tool_trace.append(
+                            {
+                                "step": str(step + 1),
+                                "tool": tool_call.name,
+                                "status": "blocked",
+                                "arguments": tool_call.arguments_json,
+                            }
+                        )
+                        current_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": tool_message,
+                            }
+                        )
                         continue
                     if outcome.modified_args is not None:
                         tool_input = dict(outcome.modified_args)
@@ -753,25 +826,31 @@ class PassiveTurnPipeline:
                     tool_input=tool_input,
                 )
                 tool_message = f"Tool `{tool_call.name}` ok={tool_result.ok}: {tool_result.content}"
-                flow.tool_trace.append({
-                    "step": str(step + 1),
-                    "tool": tool_call.name,
-                    "status": "ok" if tool_result.ok else "failed",
-                    "arguments": tool_call.arguments_json,
-                })
-                current_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": tool_message,
-                })
+                flow.tool_trace.append(
+                    {
+                        "step": str(step + 1),
+                        "tool": tool_call.name,
+                        "status": "ok" if tool_result.ok else "failed",
+                        "arguments": tool_call.arguments_json,
+                    }
+                )
+                current_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_message,
+                    }
+                )
         flow.final_output = "工具调用次数超过上限，请调整请求后重试。"
-        self._record_event({
-            "type": "tool_loop_perf",
-            "trace_id": flow.trace_id,
-            "session_id": flow.session_id,
-            "steps": self.max_tool_steps,
-            "latency_ms": round((time.perf_counter() - loop_started) * 1000, 2),
-        })
+        self._record_event(
+            {
+                "type": "tool_loop_perf",
+                "trace_id": flow.trace_id,
+                "session_id": flow.session_id,
+                "steps": self.max_tool_steps,
+                "latency_ms": round((time.perf_counter() - loop_started) * 1000, 2),
+            }
+        )
         return flow
 
     def _phase_module_snapshot(self) -> list[Any]:
@@ -817,35 +896,41 @@ class PassiveTurnPipeline:
         started = time.perf_counter()
         if not phase.startswith("after_"):
             self._publish_phase_event(flow, phase)
-        self._record_event({
-            "type": "turn_phase_start",
-            "phase": phase,
-            "trace_id": flow.trace_id,
-            "session_id": flow.session_id,
-        })
+        self._record_event(
+            {
+                "type": "turn_phase_start",
+                "phase": phase,
+                "trace_id": flow.trace_id,
+                "session_id": flow.session_id,
+            }
+        )
         try:
             result = fn(flow)
             if phase.startswith("after_"):
                 self._publish_phase_event(result, phase)
-            self._record_event({
-                "type": "turn_phase_end",
-                "phase": phase,
-                "trace_id": flow.trace_id,
-                "session_id": flow.session_id,
-                "status": "ok",
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            })
+            self._record_event(
+                {
+                    "type": "turn_phase_end",
+                    "phase": phase,
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "status": "ok",
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
             return result
         except Exception as exc:
-            self._record_event({
-                "type": "turn_phase_error",
-                "phase": phase,
-                "trace_id": flow.trace_id,
-                "session_id": flow.session_id,
-                "error": str(exc),
-                "error_type": type(exc).__name__,
-                "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-            })
+            self._record_event(
+                {
+                    "type": "turn_phase_error",
+                    "phase": phase,
+                    "trace_id": flow.trace_id,
+                    "session_id": flow.session_id,
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                    "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                }
+            )
             raise
 
     def _publish_phase_event(self, flow: TurnFlow, phase: str) -> None:
@@ -853,17 +938,19 @@ class PassiveTurnPipeline:
 
         if self.event_bus is None:
             return
-        self.event_bus.publish(Event(
-            event_type=phase,
-            trace_id=flow.trace_id,
-            session_id=flow.session_id,
-            payload={
-                "user_input": flow.user_input,
-                "assistant_output": flow.final_output,
-                "channel": flow.channel,
-                "flow": flow,
-            },
-        ))
+        self.event_bus.publish(
+            Event(
+                event_type=phase,
+                trace_id=flow.trace_id,
+                session_id=flow.session_id,
+                payload={
+                    "user_input": flow.user_input,
+                    "assistant_output": flow.final_output,
+                    "channel": flow.channel,
+                    "flow": flow,
+                },
+            )
+        )
 
     def _record_event(self, event: dict[str, Any]) -> None:
         if self.recorder is not None:

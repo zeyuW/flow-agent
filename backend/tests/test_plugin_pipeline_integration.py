@@ -2,7 +2,7 @@ import asyncio
 from types import SimpleNamespace
 
 from flow_agent.channels.models import InboundMessage
-from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+from modules.conversation.application.pipeline import PassiveTurnPipeline
 from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.plugins.tool_hooks import HookOutcome, ToolHookExecutor, _PluginToolHook
 from flow_agent.tools.base import ToolResult

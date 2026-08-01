@@ -16,10 +16,9 @@ from infra.config.watcher import (
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.outbox import SQLiteOutboxStore
 from flow_agent.messaging.event_bus import EventBus
-from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.runner import ConversationRunner
 from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
-from modules.conversation.infra.legacy_pipeline import LegacyPipelineProcessor
 from modules.delivery.application.ports import DeliveryPort
 from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
 from flow_agent.mcp.server_registry import McpServerRegistry
@@ -254,7 +253,7 @@ def create_agent_loop(
     """创建新的对话应用运行器，并隔离迁移期旧实现。"""
     return ConversationRunner(
         source=LegacyMessageBusSource(message_bus),
-        processor=LegacyPipelineProcessor(pipeline),
+        processor=pipeline,
         poll_interval_ms=100,
     )
 
