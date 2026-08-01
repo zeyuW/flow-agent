@@ -28,6 +28,7 @@ from flow_agent.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
 from flow_agent.messaging.event_bus import Event, EventBus, TurnCommitted, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch, OutboundPort, BusOutboundPort
+from modules.delivery.application.ports import DeliveryPort, DeliveryRequest
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class PassiveTurnPipeline:
         enable_thinking: bool = False,
         phase_modules_provider: Callable[[], list[Any]] | None = None,
         tool_hook_executor=None,
+        delivery_port: DeliveryPort | None = None,
     ) -> None:
         self.agent = agent
         self.tool_registry = tool_registry
@@ -78,6 +80,7 @@ class PassiveTurnPipeline:
         self._phase_modules: list[PhaseModule] = []
         self._phase_modules_provider = phase_modules_provider
         self._tool_hook_executor = tool_hook_executor
+        self.delivery_port = delivery_port
 
     def register_phase_module(self, module: PhaseModule) -> None:
         """注册一个阶段模块（插件）。"""
@@ -479,7 +482,7 @@ class PassiveTurnPipeline:
         通过 outbound_port.send() 投递到 MessageBus 出站队列。
         MessageBus 后台 dispatch_outbound 任务会分发给对应渠道。
         """
-        if self.outbound_port is None:
+        if self.delivery_port is None and self.outbound_port is None:
             logger.warning("no outbound_port configured, cannot send reply")
             return
 
@@ -494,11 +497,11 @@ class PassiveTurnPipeline:
         if flow.inbound_metadata:
             metadata.update(flow.inbound_metadata)
         
-        dispatch = OutboundDispatch(
+        request = DeliveryRequest(
             channel=flow.channel,
-            session_id=flow.session_id,
+            conversation_id=flow.session_id,
             text=flow.final_output,
-            chat_id=str(
+            recipient_id=str(
                 flow.inbound_metadata.get("telegram_chat_id")
                 or flow.inbound_metadata.get("qq_group_id")
                 or flow.inbound_metadata.get("qq_user_id")
@@ -508,14 +511,25 @@ class PassiveTurnPipeline:
         )
 
         try:
-            self.outbound_port.send(dispatch)
+            if self.delivery_port is not None:
+                self.delivery_port.submit(request)
+            else:
+                self.outbound_port.send(
+                    OutboundDispatch(
+                        channel=request.channel,
+                        session_id=request.conversation_id,
+                        text=request.text,
+                        chat_id=request.recipient_id,
+                        metadata=dict(request.metadata),
+                    )
+                )
             logger.debug("outbound reply dispatched: channel=%s session=%s metadata=%s", flow.channel, flow.session_id, list(metadata.keys()))
         except Exception:
             logger.exception("failed to dispatch outbound reply")
 
     def _send_error_reply(self, flow: TurnFlow, exc: Exception) -> None:
         """发送错误回复。"""
-        if self.outbound_port is None:
+        if self.delivery_port is None and self.outbound_port is None:
             return
         metadata: dict[str, object] = {
             "trace_id": flow.trace_id,
@@ -523,11 +537,11 @@ class PassiveTurnPipeline:
         }
         if flow.inbound_metadata:
             metadata.update(flow.inbound_metadata)
-        dispatch = OutboundDispatch(
+        request = DeliveryRequest(
             channel=flow.channel,
-            session_id=flow.session_id,
+            conversation_id=flow.session_id,
             text=f"处理消息时出错: {exc}",
-            chat_id=str(
+            recipient_id=str(
                 flow.inbound_metadata.get("telegram_chat_id")
                 or flow.inbound_metadata.get("qq_group_id")
                 or flow.inbound_metadata.get("qq_user_id")
@@ -536,7 +550,18 @@ class PassiveTurnPipeline:
             metadata=metadata,
         )
         try:
-            self.outbound_port.send(dispatch)
+            if self.delivery_port is not None:
+                self.delivery_port.submit(request)
+            else:
+                self.outbound_port.send(
+                    OutboundDispatch(
+                        channel=request.channel,
+                        session_id=request.conversation_id,
+                        text=request.text,
+                        chat_id=request.recipient_id,
+                        metadata=dict(request.metadata),
+                    )
+                )
         except Exception:
             logger.exception("failed to send error reply")
 

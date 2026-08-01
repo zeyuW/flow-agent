@@ -16,8 +16,12 @@ from infra.config.watcher import (
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.messaging.outbox import SQLiteOutboxStore
 from flow_agent.messaging.event_bus import EventBus
-from flow_agent.core.agent_loop import AgentLoop
 from flow_agent.core.passive_turn_pipeline import PassiveTurnPipeline
+from modules.conversation.application.runner import ConversationRunner
+from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
+from modules.conversation.infra.legacy_pipeline import LegacyPipelineProcessor
+from modules.delivery.application.ports import DeliveryPort
+from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
 from flow_agent.mcp.server_registry import McpServerRegistry
 from flow_agent.tools.mcp_manage import McpListTool
 from flow_agent.core.agent import Agent
@@ -219,6 +223,7 @@ def create_passive_turn_pipeline(
     *,
     tooling: ToolingConfig,
     enable_thinking: bool,
+    delivery_port: DeliveryPort | None = None,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
 
@@ -238,17 +243,18 @@ def create_passive_turn_pipeline(
         enable_thinking=enable_thinking,
         phase_modules_provider=phase_modules_provider,
         tool_hook_executor=tool_hook_executor,
+        delivery_port=delivery_port,
     )
 
 
 def create_agent_loop(
     message_bus: MessageBus,
     pipeline: PassiveTurnPipeline,
-) -> AgentLoop:
-    """创建 Agent 主循环。"""
-    return AgentLoop(
-        message_bus=message_bus,
-        pipeline=pipeline,
+) -> ConversationRunner:
+    """创建新的对话应用运行器，并隔离迁移期旧实现。"""
+    return ConversationRunner(
+        source=LegacyMessageBusSource(message_bus),
+        processor=LegacyPipelineProcessor(pipeline),
         poll_interval_ms=100,
     )
 
@@ -279,6 +285,7 @@ def create_app_runtime(config: AppConfig):
     # 创建总线
     message_bus = create_message_bus(cfg.storage)
     event_bus = create_event_bus()
+    delivery_port = LegacyMessageBusDeliveryPort(message_bus)
 
     background_registry = InMemoryJobRegistry()
     background_store = SQLiteJobStore(WORKSPACE_LAYOUT.background_jobs_db)
@@ -349,6 +356,7 @@ def create_app_runtime(config: AppConfig):
         tool_hook_executor=plugin_manager.tool_hook_executor,
         tooling=cfg.tooling,
         enable_thinking=cfg.llm.main.enable_thinking,
+        delivery_port=delivery_port,
     )
 
     # 创建 Agent 主循环

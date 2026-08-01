@@ -1,0 +1,147 @@
+"""被动对话的并发与会话顺序编排。"""
+
+from __future__ import annotations
+
+import asyncio
+import threading
+from collections import deque
+from collections.abc import Awaitable
+from typing import Protocol
+
+from modules.conversation.domain.messages import IncomingMessage
+
+
+class IncomingMessageSource(Protocol):
+    """向对话应用提供已完成协议适配的入站消息。"""
+
+    def receive(self, poll_interval_ms: int) -> Awaitable[IncomingMessage]:
+        """等待下一条入站消息。"""
+
+
+class ConversationProcessor(Protocol):
+    """执行单个对话回合的应用端口。"""
+
+    def process(self, message: IncomingMessage) -> Awaitable[None]:
+        """处理一条消息直到回合终态。"""
+
+
+class ConversationRunner:
+    """维持同一会话 FIFO、不同会话可并行的被动对话运行器。"""
+
+    def __init__(
+        self,
+        source: IncomingMessageSource,
+        processor: ConversationProcessor,
+        *,
+        poll_interval_ms: int = 100,
+    ) -> None:
+        self._source = source
+        self._processor = processor
+        self._poll_interval_ms = max(1, poll_interval_ms)
+        self._running = False
+        self._active_by_conversation: dict[str, asyncio.Task[None]] = {}
+        self._pending_by_conversation: dict[str, deque[IncomingMessage]] = {}
+        self._thread: threading.Thread | None = None
+
+    async def run_forever(self) -> None:
+        """持续领取消息，并让不同会话独立推进。"""
+
+        self._running = True
+        try:
+            while self._running:
+                try:
+                    message = await asyncio.wait_for(
+                        self._source.receive(self._poll_interval_ms),
+                        timeout=max(self._poll_interval_ms / 1000.0, 0.05),
+                    )
+                except asyncio.TimeoutError:
+                    continue
+                self._enqueue_or_start(message)
+        finally:
+            tasks = tuple(self._active_by_conversation.values())
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._active_by_conversation.clear()
+            self._pending_by_conversation.clear()
+
+    async def stop(self) -> None:
+        """请求停止，并等待正在处理的回合自行结束。"""
+
+        self._running = False
+
+    def is_processing(self, conversation_id: str) -> bool:
+        """供其他业务判断该会话是否有尚未结束的被动回合。"""
+
+        task = self._active_by_conversation.get(conversation_id)
+        return task is not None and not task.done()
+
+    def start_background(self) -> None:
+        """在独立线程启动事件循环，供同步进程入口使用。"""
+
+        if self._thread is not None and self._thread.is_alive():
+            return
+
+        def run() -> None:
+            asyncio.run(self.run_forever())
+
+        self._thread = threading.Thread(target=run, daemon=True)
+        self._thread.start()
+
+    @property
+    def running(self) -> bool:
+        """返回运行器是否仍在领取新消息。"""
+
+        return self._running
+
+    @property
+    def active_task_count(self) -> int:
+        """返回当前正在处理的会话数量。"""
+
+        return len(self._active_by_conversation)
+
+    @property
+    def pending_message_count(self) -> int:
+        """返回尚未开始处理的消息总数。"""
+
+        return sum(len(items) for items in self._pending_by_conversation.values())
+
+    def _enqueue_or_start(self, message: IncomingMessage) -> None:
+        conversation_id = message.conversation_id
+        if conversation_id in self._active_by_conversation:
+            self._pending_by_conversation.setdefault(conversation_id, deque()).append(
+                message
+            )
+            return
+        self._start(message)
+
+    def _start(self, message: IncomingMessage) -> None:
+        task = asyncio.create_task(self._processor.process(message))
+        conversation_id = message.conversation_id
+        self._active_by_conversation[conversation_id] = task
+        task.add_done_callback(
+            lambda completed, owner=conversation_id: self._finish(completed, owner)
+        )
+
+    def _finish(self, task: asyncio.Task[None], conversation_id: str) -> None:
+        """一个回合结束后，才允许同会话中的下一条消息开始。"""
+
+        self._active_by_conversation.pop(conversation_id, None)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            # 回合异常已经由具体处理器记录；FIFO 队列仍须继续推进。
+            pass
+        pending = self._pending_by_conversation.get(conversation_id)
+        if not pending:
+            self._pending_by_conversation.pop(conversation_id, None)
+            return
+        next_message = pending.popleft()
+        if not pending:
+            self._pending_by_conversation.pop(conversation_id, None)
+        if self._running:
+            self._start(next_message)
