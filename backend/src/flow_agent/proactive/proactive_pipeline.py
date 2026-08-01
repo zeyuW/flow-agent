@@ -4,12 +4,12 @@ import logging
 import time
 
 from flow_agent.proactive.data_gateway import DataGateway
-from flow_agent.proactive.deliver import deliver_message
+from modules.proactive.application.deliver import deliver_message
 from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore, check_gate
 from flow_agent.proactive.judge_loop import JudgeLoop
 from flow_agent.proactive.lifecycle import ProactiveLifecycle, ProactiveModuleContext
 from modules.proactive.domain.models import AgentTick, JudgeResult
-from flow_agent.proactive.resolve import resolve_decision
+from modules.proactive.application.resolve import resolve_decision
 
 logger = logging.getLogger(__name__)
 
