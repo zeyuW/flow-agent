@@ -10,11 +10,11 @@ if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
   PYTHON_BIN="${ROOT_DIR}/.venv/bin/python"
 fi
 
-export PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${ROOT_DIR}/backend/src${PYTHONPATH:+:${PYTHONPATH}}"
 export TMPDIR="${TMPDIR:-/tmp}"
 
 echo "[1/4] 编译源码"
-"${PYTHON_BIN}" -m compileall -q flow_agent
+"${PYTHON_BIN}" -m compileall -q backend/src
 
 echo "[2/4] 检查空白和冲突标记"
 git diff --check
@@ -26,7 +26,7 @@ else
 fi
 
 echo "[3/4] 检查项目隔离"
-if rg -n -i 'akashic[-_ ]?agent|/home/roco/akashic-agent|参考项目|参考仓库' flow_agent tests; then
+if rg -n -i 'akashic[-_ ]?agent|/home/roco/akashic-agent|参考项目|参考仓库' backend/src backend/tests; then
   echo "检测到不应出现在当前项目中的参考来源信息"
   exit 1
 fi
@@ -37,7 +37,7 @@ if [[ -n "${FLOW_AGENT_TEST_TARGET:-}" ]]; then
   read -r -a test_targets <<< "${FLOW_AGENT_TEST_TARGET}"
   "${PYTHON_BIN}" -m pytest -q "${test_targets[@]}"
 else
-  "${PYTHON_BIN}" -m pytest -q
+  "${PYTHON_BIN}" -m pytest -q backend/tests
 fi
 
 echo "验证通过"

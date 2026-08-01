@@ -176,13 +176,13 @@ README.md                 : use `python -m pip install -e backend` for backend i
 Run:
 
 ```bash
-${PYTHON_BIN:-python} -m pip wheel --no-deps backend -w /tmp/flow-agent-phase-1-wheel
+PIP_NO_INDEX=1 ${PYTHON_BIN:-python} -m pip wheel --no-deps --no-build-isolation ./backend -w /tmp/flow-agent-phase-1-wheel
 PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_source_layout.py -q
 PYTHONPATH=backend/src ${PYTHON_BIN:-python} -c "import bootstrap, flow_agent, infra, interfaces, modules"
 PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 ```
 
-Expected: layout tests PASS, imports exit 0, full suite reports 238 passed.
+Expected: layout tests PASS, imports exit 0, the 238-test baseline plus the two new layout tests PASS.
 
 - [ ] **Step 6: Commit**
 

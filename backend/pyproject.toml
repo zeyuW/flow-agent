@@ -19,15 +19,19 @@ dependencies = [
     "numpy>=1.24.0",
 ]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-include = ["flow_agent*"]
-exclude = ["docker*"]
+where = ["src"]
+include = ["flow_agent*", "modules*", "interfaces*", "infra*", "bootstrap*"]
 
 [project.scripts]
 flow-agent = "flow_agent.main:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 
 [tool.black]
 line-length = 88

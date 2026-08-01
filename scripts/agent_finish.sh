@@ -40,7 +40,7 @@ fi
 
 for path in "$@"; do
   case "${path}" in
-    flow_agent/*|tests/*|scripts/*|.github/*|.githooks/*|docs/*|pyproject.toml)
+    backend/*|scripts/*|.github/*|.githooks/*|docs/*|README.md)
       ;;
     *)
       echo "拒绝提交范围外文件: ${path}"
@@ -70,13 +70,13 @@ fi
 
 CHANGED_FILES="$(git diff --cached --name-only)"
 if [[ -z "${COMMIT_SUMMARY}" ]]; then
-  if printf '%s\n' "${CHANGED_FILES}" | rg -q '^flow_agent/'; then
-    if printf '%s\n' "${CHANGED_FILES}" | rg -q '^tests/'; then
+  if printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/src/'; then
+    if printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/tests/'; then
       COMMIT_SUMMARY="feat: 更新 Agent 功能并补充测试"
     else
       COMMIT_SUMMARY="feat: 更新 Agent 功能"
     fi
-  elif printf '%s\n' "${CHANGED_FILES}" | rg -q '^tests/'; then
+  elif printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/tests/'; then
     COMMIT_SUMMARY="test: 更新自动化测试"
   else
     COMMIT_SUMMARY="chore: 更新工程自动化配置"

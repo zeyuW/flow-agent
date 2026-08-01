@@ -17,11 +17,11 @@ case "${PHASE}" in
     SUMMARY="feat: 完善事件总线生命周期管理"
     DETAILS=$'增加事件订阅和取消订阅能力
 补充事件总线生命周期测试'
-    TEST_TARGET="tests/test_event_bus_lifecycle.py"
+    TEST_TARGET="backend/tests/test_event_bus_lifecycle.py"
     FILES=(
-      flow_agent/messaging/event_bus.py
-      flow_agent/messaging/__init__.py
-      tests/test_event_bus_lifecycle.py
+      backend/src/flow_agent/messaging/event_bus.py
+      backend/src/flow_agent/messaging/__init__.py
+      backend/tests/test_event_bus_lifecycle.py
     )
     ;;
   phase2)
@@ -30,21 +30,21 @@ case "${PHASE}" in
 增加任务状态和错误分类
 增加重试与恢复语义
 补充阶段二状态恢复测试'
-    TEST_TARGET="tests/test_phase2_state_recovery.py"
+    TEST_TARGET="backend/tests/test_phase2_state_recovery.py"
     FILES=(
-      flow_agent/background/runtime.py
-      flow_agent/background/store.py
-      flow_agent/background/tools.py
-      flow_agent/core/agent.py
-      flow_agent/core/context.py
-      flow_agent/core/passive_turn_pipeline.py
-      flow_agent/runtime/errors.py
-      flow_agent/runtime/retry.py
-      flow_agent/runtime/__init__.py
-      flow_agent/scheduler/runtime.py
-      flow_agent/session/session_manager.py
-      flow_agent/session/session_store.py
-      tests/test_phase2_state_recovery.py
+      backend/src/flow_agent/background/runtime.py
+      backend/src/flow_agent/background/store.py
+      backend/src/flow_agent/background/tools.py
+      backend/src/flow_agent/core/agent.py
+      backend/src/flow_agent/core/context.py
+      backend/src/flow_agent/core/passive_turn_pipeline.py
+      backend/src/flow_agent/runtime/errors.py
+      backend/src/flow_agent/runtime/retry.py
+      backend/src/flow_agent/runtime/__init__.py
+      backend/src/flow_agent/scheduler/runtime.py
+      backend/src/flow_agent/session/session_manager.py
+      backend/src/flow_agent/session/session_store.py
+      backend/tests/test_phase2_state_recovery.py
     )
     ;;
   phase3)
@@ -53,25 +53,25 @@ case "${PHASE}" in
 增加运行期间失败退避重试
 禁止启动时批量恢复历史消息
 补充出站恢复和重复投递测试'
-    TEST_TARGET="tests/test_reliable_delivery.py tests/test_phase3_boundaries.py tests/test_proactive_tick.py tests/test_spawn_runtime.py"
+    TEST_TARGET="backend/tests/test_reliable_delivery.py backend/tests/test_phase3_boundaries.py backend/tests/test_proactive_tick.py backend/tests/test_spawn_runtime.py"
     FILES=(
-      flow_agent/app/bootstrap.py
-      flow_agent/channels/models.py
-      flow_agent/channels/telegram.py
-      flow_agent/core/agent_loop.py
-      flow_agent/messaging/message_bus.py
-      flow_agent/messaging/outbox.py
-      flow_agent/proactive/deliver.py
-      flow_agent/runtime/workspace.py
-      flow_agent/config/loader.py
-      flow_agent/config/settings.py
-      flow_agent/subagent/manager.py
-      flow_agent/subagent/models.py
-      flow_agent/tools/spawn.py
-      tests/test_proactive_tick.py
-      tests/test_spawn_runtime.py
-      tests/test_phase3_boundaries.py
-      tests/test_reliable_delivery.py
+      backend/src/flow_agent/app/bootstrap.py
+      backend/src/flow_agent/channels/models.py
+      backend/src/flow_agent/channels/telegram.py
+      backend/src/flow_agent/core/agent_loop.py
+      backend/src/flow_agent/messaging/message_bus.py
+      backend/src/flow_agent/messaging/outbox.py
+      backend/src/flow_agent/proactive/deliver.py
+      backend/src/flow_agent/runtime/workspace.py
+      backend/src/flow_agent/config/loader.py
+      backend/src/flow_agent/config/settings.py
+      backend/src/flow_agent/subagent/manager.py
+      backend/src/flow_agent/subagent/models.py
+      backend/src/flow_agent/tools/spawn.py
+      backend/tests/test_proactive_tick.py
+      backend/tests/test_spawn_runtime.py
+      backend/tests/test_phase3_boundaries.py
+      backend/tests/test_reliable_delivery.py
     )
     ;;
   automation)
@@ -79,7 +79,7 @@ case "${PHASE}" in
     DETAILS=$'增加统一验证脚本
 增加 Agent 自动生成提交说明和自动提交
 增加提交前检查和 GitHub Actions CI'
-    TEST_TARGET="tests/test_reliable_delivery.py"
+    TEST_TARGET="backend/tests/test_reliable_delivery.py"
     FILES=(
       .github/workflows/ci.yml
       .githooks/pre-commit
