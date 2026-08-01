@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Protocol
 
-from flow_agent.proactive.models import AgentTick
+from modules.proactive.domain.models import AgentTick
 from flow_agent.proactive.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
 from flow_agent.proactive.mcp_polling import McpPollingModule
 

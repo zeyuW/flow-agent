@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from flow_agent.proactive.models import DeliverResult, ResolveResult
+from modules.proactive.domain.models import DeliverResult, ResolveResult
 
 logger = logging.getLogger(__name__)
 

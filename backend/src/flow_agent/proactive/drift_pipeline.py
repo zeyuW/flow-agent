@@ -3,7 +3,7 @@
 import json
 import logging
 
-from flow_agent.proactive.drift_models import DriftSkill, DriftRun, DriftTick
+from modules.proactive.domain.drift import DriftSkill, DriftRun, DriftTick
 from flow_agent.proactive.drift_store import DriftStateStore
 from flow_agent.proactive.drift_tools import (
     get_drift_tool_schemas,

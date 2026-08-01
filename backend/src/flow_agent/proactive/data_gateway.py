@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from flow_agent.proactive.mcp_pool import McpClientPool
-from flow_agent.proactive.models import DataItem, GatewayResult
+from modules.proactive.domain.models import DataItem, GatewayResult
 from flow_agent.proactive.sources import LocalFileSource, ProactiveSource
 
 logger = logging.getLogger(__name__)

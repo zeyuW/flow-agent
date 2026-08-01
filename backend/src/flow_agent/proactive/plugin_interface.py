@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from flow_agent.proactive.models import JudgeResult, ResolveResult
+    from modules.proactive.domain.models import JudgeResult, ResolveResult
 
 
 @dataclass

@@ -5,7 +5,7 @@ import logging
 from typing import Any
 
 from flow_agent.memory.markdown_store import MarkdownStore
-from flow_agent.proactive.models import DataItem, GatewayResult, JudgeResult
+from modules.proactive.domain.models import DataItem, GatewayResult, JudgeResult
 
 logger = logging.getLogger(__name__)
 

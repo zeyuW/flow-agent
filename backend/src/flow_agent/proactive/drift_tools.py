@@ -97,7 +97,7 @@ def dispatch_drift_tool(tool_name: str, arguments: dict, ctx: dict) -> str:
         ctx["pushed"] = True
         return "消息已暂存"
     elif tool_name == "finish_drift":
-        from flow_agent.proactive.drift_models import DriftRun
+        from modules.proactive.domain.drift import DriftRun
         import datetime
 
         skill_name = arguments.get("skill_name", "")

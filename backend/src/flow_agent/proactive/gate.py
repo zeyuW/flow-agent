@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 
 from pathlib import Path
-from flow_agent.proactive.models import GateResult
+from modules.proactive.domain.models import GateResult
 
 
 @dataclass(frozen=True, slots=True)

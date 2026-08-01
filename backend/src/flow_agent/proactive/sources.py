@@ -5,7 +5,7 @@ from typing import Protocol
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from flow_agent.proactive.types import ProactiveCandidate, SourceRecord
+from modules.proactive.domain.types import ProactiveCandidate, SourceRecord
 
 
 logger = logging.getLogger(__name__)

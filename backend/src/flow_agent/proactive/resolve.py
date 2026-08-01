@@ -4,7 +4,7 @@ import hashlib
 import logging
 
 from flow_agent.proactive.gate import ProactiveStateStore
-from flow_agent.proactive.models import JudgeResult, ResolveResult
+from modules.proactive.domain.models import JudgeResult, ResolveResult
 
 logger = logging.getLogger(__name__)
 _DELIVERY_WINDOW = 86400.0

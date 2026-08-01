@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flow_agent.proactive.drift_models import DriftRun, DriftSkill, DriftTick
+from modules.proactive.domain.drift import DriftRun, DriftSkill, DriftTick
 
 logger = logging.getLogger(__name__)
 
