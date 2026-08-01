@@ -69,7 +69,7 @@
 - Consumes: 当前 `flow_agent` 包、测试套件和 `flow_agent.main:main` CLI 入口。
 - Produces: 可从 `backend/src` 解析的 `flow_agent`、`modules`、`interfaces`、`infra`、`bootstrap` 五个迁移期包。
 
-- [ ] **Step 1: Write the failing source-layout test**
+- [x] **Step 1: Write the failing source-layout test**
 
 ```python
 from importlib.util import find_spec
@@ -96,13 +96,13 @@ def test_legacy_python_package_is_not_at_repository_root():
     assert not (REPOSITORY_ROOT / "flow_agent").exists()
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `${PYTHON_BIN:-python} -m pytest tests/architecture/test_source_layout.py -q`
 
 Expected: FAIL because the `backend/` Python project boundary does not exist.
 
-- [ ] **Step 3: Move the existing Python project mechanically**
+- [x] **Step 3: Move the existing Python project mechanically**
 
 ```bash
 mkdir -p backend/src
@@ -129,7 +129,7 @@ Create the four package markers with these exact Chinese package docstrings and 
 """组合根包：负责配置加载、依赖装配与进程生命周期。"""
 ```
 
-- [ ] **Step 4: Configure Setuptools and Pytest**
+- [x] **Step 4: Configure Setuptools and Pytest**
 
 Update `backend/pyproject.toml`:
 
@@ -171,7 +171,7 @@ scripts/verify.sh         : compile `backend/src`, scan `backend/src backend/tes
 README.md                 : use `python -m pip install -e backend` for backend installation
 ```
 
-- [ ] **Step 5: Verify imports and behavior**
+- [x] **Step 5: Verify imports and behavior**
 
 Run:
 
@@ -184,7 +184,7 @@ PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 
 Expected: layout tests PASS, imports exit 0, the 238-test baseline plus the two new layout tests PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend
@@ -204,7 +204,7 @@ git commit -m "refactor: establish backend source boundary"
 - Consumes: Python 源码根目录和参与分析的顶层包名集合。
 - Produces: `build_import_graph(source_root, package_roots) -> dict[str, set[str]]` 和 `find_import_cycles(graph) -> list[tuple[str, ...]]`。
 
-- [ ] **Step 1: Write failing analyzer tests**
+- [x] **Step 1: Write failing analyzer tests**
 
 ```python
 from tests.architecture.import_graph import build_import_graph, find_import_cycles
@@ -223,13 +223,13 @@ def test_import_graph_finds_cycle(tmp_path):
     assert find_import_cycles(graph) == [("sample.a", "sample.b")]
 ```
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_import_graph.py -q`
 
 Expected: FAIL because `tests.architecture.import_graph` does not exist.
 
-- [ ] **Step 3: Implement the analyzer**
+- [x] **Step 3: Implement the analyzer**
 
 ```python
 from __future__ import annotations
@@ -277,13 +277,13 @@ def build_import_graph(source_root: Path, package_roots: set[str]) -> ImportGrap
 
 Add `_resolve_from_import` for relative imports and `_resolve_module` for longest existing module-prefix matching. Implement `find_import_cycles` with Tarjan strongly connected components, returning only components larger than one and sorting the result.
 
-- [ ] **Step 4: Run analyzer tests**
+- [x] **Step 4: Run analyzer tests**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_import_graph.py -q`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/tests/architecture
@@ -305,7 +305,7 @@ git commit -m "test: add static import graph analyzer"
 - Consumes: 直接对应新 `config.toml` 的嵌套映射。
 - Produces: 不可变且拒绝未知字段的 `AppConfig` 和各配置分区类型。
 
-- [ ] **Step 1: Write failing schema tests**
+- [x] **Step 1: Write failing schema tests**
 
 ```python
 import pytest
@@ -335,13 +335,13 @@ def test_enabled_telegram_requires_credentials():
         AppConfig.model_validate(raw)
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_schema.py -q`
 
 Expected: FAIL because `infra.config.schema` does not exist.
 
-- [ ] **Step 3: Implement the strict base and main types**
+- [x] **Step 3: Implement the strict base and main types**
 
 ```python
 from __future__ import annotations
@@ -404,7 +404,7 @@ Use `Field` to preserve the current effective minimum/maximum constraints from t
 Ports must be in `1..65535`; comma-delimited channel allowlists remain strings in Phase 1 so
 runtime behavior is not silently changed.
 
-- [ ] **Step 4: Implement the top-level schema**
+- [x] **Step 4: Implement the top-level schema**
 
 ```python
 class AppConfig(FrozenConfig):
@@ -437,7 +437,7 @@ omitted or renamed accidentally.
 
 Export configuration types from `infra.config.__init__` without importing Loader or Watcher.
 
-- [ ] **Step 5: Verify schema tests and types**
+- [x] **Step 5: Verify schema tests and types**
 
 Run:
 
@@ -448,7 +448,7 @@ ${PYTHON_BIN:-python} -m pyright --pythonpath ${PYTHON_BIN:-python} backend/src/
 
 Expected: tests PASS and scoped Pyright reports 0 errors.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add backend/src/infra/config backend/tests/infra
@@ -470,7 +470,7 @@ git commit -m "feat: add immutable application configuration"
 - Consumes: `pathlib.Path` pointing to exactly one TOML file。
 - Produces: `load_config(path: Path) -> AppConfig`；不缓存、不搜索备用路径、不读取环境变量。
 
-- [ ] **Step 1: Write failing loader tests**
+- [x] **Step 1: Write failing loader tests**
 
 ```python
 from pathlib import Path
@@ -503,13 +503,13 @@ def test_load_config_does_not_read_environment(monkeypatch, tmp_path: Path):
         load_config(path)
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_loader.py -q`
 
 Expected: FAIL because `infra.config.loader` does not exist.
 
-- [ ] **Step 3: Implement the pure loader**
+- [x] **Step 3: Implement the pure loader**
 
 ```python
 from __future__ import annotations
@@ -535,7 +535,7 @@ def load_config(path: Path) -> AppConfig:
 
 Do not add cache, YAML support, environment fallback, project-root discovery or LLM-specific Builders.
 
-- [ ] **Step 4: Add dependency, ignore rule and safe example**
+- [x] **Step 4: Add dependency, ignore rule and safe example**
 
 Add to `backend/pyproject.toml` dependencies:
 
@@ -552,7 +552,7 @@ backend/config.toml
 
 Create `backend/config.example.toml` with `[llm.main]`、`[channels]`、`[proactive]`、`[jobs]`、`[subagent]` and `[delegation_policy]` sections. Required credentials use `replace-me`，中文注释解释字段，不得包含真实凭据。
 
-- [ ] **Step 5: Verify loader and example**
+- [x] **Step 5: Verify loader and example**
 
 Run:
 
@@ -563,7 +563,7 @@ PYTHONPATH=backend/src ${PYTHON_BIN:-python} -c "from pathlib import Path; from 
 
 Expected: tests PASS and example loading exits 0.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add .gitignore backend/pyproject.toml backend/config.example.toml backend/src/infra/config/loader.py backend/tests/infra/config/test_loader.py
@@ -582,7 +582,7 @@ git commit -m "feat: load config from one TOML source"
 - Consumes: 当前 `AppConfig`、`load_config` 和多个 `ConfigApplier`。
 - Produces: `PreparedConfigChange(commit, discard)`、`ConfigApplier.prepare(current, candidate)`、`ConfigWatcher.reload_once() -> bool`。
 
-- [ ] **Step 1: Write failing two-phase tests**
+- [x] **Step 1: Write failing two-phase tests**
 
 ```python
 from pathlib import Path
@@ -627,13 +627,13 @@ def test_prepare_failure_discards_candidates_and_keeps_current(tmp_path: Path):
     assert watcher.current is old
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/infra/config/test_watcher.py -q`
 
 Expected: FAIL because `infra.config.watcher` does not exist.
 
-- [ ] **Step 3: Implement exact data contracts**
+- [x] **Step 3: Implement exact data contracts**
 
 ```python
 from __future__ import annotations
@@ -663,7 +663,7 @@ class ConfigApplier(Protocol):
 
 `ConfigWatcher.reload_once()` must：读取文件修订、忽略已处理修订、加载候选配置、顺序 Prepare、失败时逆序 Discard、全部成功后顺序 Commit、最后更新 `current`。Commit 回调只能执行不会失败的赋值或原子交换。
 
-- [ ] **Step 4: Verify watcher tests and types**
+- [x] **Step 4: Verify watcher tests and types**
 
 Run:
 
@@ -674,7 +674,7 @@ ${PYTHON_BIN:-python} -m pyright --pythonpath ${PYTHON_BIN:-python} backend/src/
 
 Expected: tests PASS and scoped Pyright reports 0 errors.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/src/infra/config/watcher.py backend/tests/infra/config/test_watcher.py
@@ -702,7 +702,7 @@ git commit -m "feat: add transactional config reload"
 - Consumes: `load_config(path) -> AppConfig` 和现有运行时工厂。
 - Produces: `bootstrap.config.load_application_config(backend_root: Path) -> AppConfig`、`bootstrap.cli.main(argv: Sequence[str] | None = None) -> int`、显式接收配置的运行时构造函数。
 
-- [ ] **Step 1: Write failing bootstrap tests**
+- [x] **Step 1: Write failing bootstrap tests**
 
 ```python
 from pathlib import Path
@@ -721,13 +721,13 @@ def test_bootstrap_loads_only_backend_config(tmp_path: Path):
     assert config.llm.main.model == "main-model"
 ```
 
-- [ ] **Step 2: Run the focused tests and verify they fail**
+- [x] **Step 2: Run the focused tests and verify they fail**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/test_config.py backend/tests/test_agent.py -q`
 
 Expected: FAIL because Bootstrap and explicit constructor signatures do not exist.
 
-- [ ] **Step 3: Implement the Bootstrap boundary**
+- [x] **Step 3: Implement the Bootstrap boundary**
 
 ```python
 from pathlib import Path
@@ -751,7 +751,7 @@ flow-agent = "bootstrap.cli:main"
 
 `bootstrap.cli.main` parses CLI arguments, loads `AppConfig` once and calls `flow_agent.main.run_service(config)`。Bootstrap must not create network clients at import time.
 
-- [ ] **Step 4: Make leaf runtime dependencies explicit**
+- [x] **Step 4: Make leaf runtime dependencies explicit**
 
 Apply these exact constructor transformations:
 
@@ -808,7 +808,7 @@ class OpenAILLMClient:
 
 Replace `self.settings.system_prompt` with `self.system_prompt` in Agent. Replace every `settings.get()` and module-level configuration read in the construction path with values passed from `create_app_runtime(config)`。No downstream object may retain the complete `AppConfig` unless it applies configuration changes.
 
-- [ ] **Step 5: Thread one immutable snapshot through composition**
+- [x] **Step 5: Thread one immutable snapshot through composition**
 
 Change every `flow_agent.app.bootstrap` factory that currently calls `settings.get()` to accept
 either the precise section it consumes or the already loaded `AppConfig` at the composition
@@ -820,7 +820,7 @@ Adapt configuration reload through concrete `ConfigApplier` objects. Preparation
 validate candidate resources; commit only performs non-failing reference swaps. The process entry
 owns `ConfigWatcher`; ordinary services must never import it or read a global cache.
 
-- [ ] **Step 6: Prove zero consumers, then remove the old configuration modules**
+- [x] **Step 6: Prove zero consumers, then remove the old configuration modules**
 
 Run:
 
@@ -833,7 +833,7 @@ Expected before deletion: no active consumers outside the files scheduled for de
 may refer to the old aggregate or proxy. Then delete the legacy configuration directory and LLM
 Builder file with `git rm`.
 
-- [ ] **Step 7: Verify the migrated runtime**
+- [x] **Step 7: Verify the migrated runtime**
 
 Run:
 
@@ -844,7 +844,7 @@ PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 
 Expected: focused tests PASS and full suite reports 238 passed.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add backend
@@ -865,7 +865,7 @@ git commit -m "refactor: inject runtime configuration explicitly"
 - Consumes: Task 2 的静态导入图和最终 `backend/src`。
 - Produces: 默认 Pytest 执行的无循环、分层、跨模块和组合根门禁。
 
-- [ ] **Step 1: Write failing project architecture tests**
+- [x] **Step 1: Write failing project architecture tests**
 
 ```python
 from pathlib import Path
@@ -944,29 +944,32 @@ modules.<name>              !-> modules.<other>.domain | modules.<other>.infra
 flow_agent                  !-> interfaces | bootstrap
 ```
 
-- [ ] **Step 2: Run tests and verify violations are reported**
+- [x] **Step 2: Run tests and verify violations are reported**
 
 Run: `PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/architecture/test_project_dependencies.py -q`
 
 Expected: FAIL until the source layout and configuration cycle migrations from previous tasks are complete.
 
-- [ ] **Step 3: Add the backend verification script**
+- [x] **Step 3: Add the backend verification script**
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
-PYTHON_BIN="${PYTHON_BIN:-python}"
-"$PYTHON_BIN" -m compileall -q backend/src
-PYTHONPATH=backend/src "$PYTHON_BIN" -m pytest backend/tests -q
-"$PYTHON_BIN" -m pyright --pythonpath "$PYTHON_BIN" backend/src/infra/config backend/tests/architecture backend/tests/infra/config
-"$PYTHON_BIN" -m black --check --target-version py310 --fast backend/src backend/tests
-git diff --check
+"${PYTHON_BIN:-python}" -m compileall -q backend/src
+PYTHONPATH=backend/src "${PYTHON_BIN:-python}" -m pytest -q backend/tests
+# 实际脚本根据 PYTHON_BIN 动态生成临时 Pyright 环境配置。
+"${PYTHON_BIN:-python}" -m pyright backend/src/infra/config backend/src/bootstrap backend/tests/architecture backend/tests/infra/config
+# 为规避部分环境中的多文件进程池阻塞，实际脚本逐文件执行 Black。
+while IFS= read -r file_path; do
+  "${PYTHON_BIN:-python}" -m black --check --target-version py310 --fast "${file_path}"
+done < <(rg --files backend/src/infra/config backend/src/bootstrap backend/tests/architecture backend/tests/infra/config | rg '\.py$')
+git diff --check && git diff --check --cached
 ```
 
 Make `backend/tests/test_ci_verification.py` assert that the script includes compileall、default Pytest、scoped Pyright、Black and `git diff --check`。
 
-- [ ] **Step 4: Run complete verification**
+- [x] **Step 4: Run complete verification**
 
 Run:
 
@@ -978,7 +981,7 @@ git status --short
 
 然后从工作区根目录执行工作区约定中的来源隔离检查。Expected: verification script exits 0; source-isolation scan has no matches; diff check exits 0; status contains only planned files.
 
-- [ ] **Step 5: Mark completed checkboxes and commit**
+- [x] **Step 5: Mark completed checkboxes and commit**
 
 Change only completed task checkboxes from `[ ]` to `[x]`, then run:
 

@@ -37,6 +37,10 @@ pythonpath = ["src"]
 [tool.black]
 line-length = 88
 
+[tool.pyright]
+extraPaths = ["src", "tests"]
+pythonVersion = "3.10"
+
 [dependency-groups]
 dev = [
     "black>=26.3.1",
