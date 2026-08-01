@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from time import perf_counter
 from typing import Callable
 
-from flow_agent.channels.base import ChannelStatus, MessageBusChannel
+from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
 from flow_agent.security.auth import APIKeyAuth

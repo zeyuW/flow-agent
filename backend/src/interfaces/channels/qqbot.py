@@ -11,7 +11,7 @@ import threading
 from dataclasses import dataclass, field
 from typing import Any
 
-from flow_agent.channels.base import ChannelStatus, MessageBusChannel
+from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
 

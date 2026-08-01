@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 
-from flow_agent.channels.base import ChannelStatus, MessageBusChannel
+from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
 

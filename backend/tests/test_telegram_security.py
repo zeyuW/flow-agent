@@ -1,7 +1,7 @@
 import logging
 import urllib.error
 
-from flow_agent.channels.telegram import TelegramChannel
+from interfaces.channels.telegram import TelegramChannel
 
 
 def test_telegram_api_failure_log_does_not_expose_bot_token(

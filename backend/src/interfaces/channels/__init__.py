@@ -6,14 +6,14 @@ MessageBus 后台 dispatch_outbound 任务调用回调发送消息。
 
 from typing import TYPE_CHECKING
 
-from flow_agent.channels.base import Channel, ChannelStatus, MessageBusChannel
+from interfaces.channels.base import Channel, ChannelStatus, MessageBusChannel
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 
 if TYPE_CHECKING:
-    from flow_agent.channels.cli import CLIChannel
-    from flow_agent.channels.http import HTTPChannel
-    from flow_agent.channels.qq import QQChannel
-    from flow_agent.channels.qqbot import QQBotChannel
+    from interfaces.channels.cli import CLIChannel
+    from interfaces.channels.http import HTTPChannel
+    from interfaces.channels.qq import QQChannel
+    from interfaces.channels.qqbot import QQBotChannel
 
 __all__ = [
     "Channel",

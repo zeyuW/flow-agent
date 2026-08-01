@@ -15,7 +15,7 @@ from flow_agent.channels.models import (
     InboundMessage,
     OutboundMessage,
 )
-from flow_agent.channels.protocol import Channel, ChannelContext, ChannelStatus
+from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
 from flow_agent.messaging.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
 logger = logging.getLogger(__name__)

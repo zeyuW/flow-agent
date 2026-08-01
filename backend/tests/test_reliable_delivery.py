@@ -8,7 +8,7 @@ from flow_agent.channels.models import (
     InboundMessage,
     OutboundMessage,
 )
-from flow_agent.channels.telegram import TelegramChannel
+from interfaces.channels.telegram import TelegramChannel
 from flow_agent.core.agent_loop import AgentLoop
 from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch
 from flow_agent.messaging.outbox import SQLiteOutboxStore

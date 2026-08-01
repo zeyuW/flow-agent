@@ -428,7 +428,7 @@ def test_agent_loop_run_once():
 
 def test_cli_channel_publishes_to_message_bus():
     """测试 CLI 渠道通过 MessageBus 发布入站消息。"""
-    from flow_agent.channels.cli import CLIChannel
+    from interfaces.channels.cli import CLIChannel
 
     bus = MessageBus()
     cli = CLIChannel(message_bus=bus, default_session_id="test")
@@ -445,7 +445,7 @@ def test_cli_channel_publishes_to_message_bus():
 
 def test_cli_channel_receives_outbound_via_subscription():
     """测试 CLI 渠道通过订阅回调接收出站消息。"""
-    from flow_agent.channels.cli import CLIChannel
+    from interfaces.channels.cli import CLIChannel
 
     bus = MessageBus()
     cli = CLIChannel(message_bus=bus)

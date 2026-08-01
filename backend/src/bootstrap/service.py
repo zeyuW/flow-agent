@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 
 from flow_agent.app.bootstrap import create_app_runtime
 from flow_agent.infra.logging import configure_logging
-from flow_agent.channels.http import HTTPChannel
+from interfaces.channels.http import HTTPChannel
 from flow_agent.infra.paths import WORKSPACE_LAYOUT
-from flow_agent.channels.telegram import TelegramChannel
+from interfaces.channels.telegram import TelegramChannel
 from flow_agent.tools.message_push import MessagePushTool
 from flow_agent.runtime.workspace_lock import (
     WorkspaceAlreadyRunningError,
@@ -110,7 +111,7 @@ def _run_service(config: AppConfig) -> None:
         tool_registry.register(message_push)
 
     # 启动渠道（先启动渠道，让它们订阅 MessageBus）
-    from flow_agent.channels.protocol import ChannelContext
+    from interfaces.channels.protocol import ChannelContext
 
     # 创建渠道上下文
     channel_ctx = ChannelContext(
@@ -121,7 +122,7 @@ def _run_service(config: AppConfig) -> None:
 
     # 启动 Telegram 渠道（使用新协议，在后台线程运行）
     telegram_thread = None
-    telegram_loop_holder: dict[str, object] = {}
+    telegram_loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
     if cfg.channels.telegram_enabled and telegram:
         import threading
         import asyncio

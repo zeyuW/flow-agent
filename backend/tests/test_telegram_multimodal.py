@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from flow_agent.channels.telegram import TelegramChannel
+from interfaces.channels.telegram import TelegramChannel
 from modules.conversation.application.agent import Agent
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.phase import TurnFlow
