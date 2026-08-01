@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Any
 
 from flow_agent.behavior.persona import PersonaResolver
-from flow_agent.config.settings import Settings
 from flow_agent.core.context import ConversationContext
 from flow_agent.core.models import AgentResponse
 from flow_agent.llm.client import LLMClient
@@ -14,7 +13,7 @@ from flow_agent.llm.router import LLMRouter
 class Agent:
     def __init__(
         self,
-        settings: Settings,
+        system_prompt: str,
         llm_client: LLMClient,
         context: ConversationContext,
         session_id: str = "default",
@@ -23,7 +22,7 @@ class Agent:
         persona_resolver: PersonaResolver | None = None,
         vision_client: LLMClient | None = None,
     ) -> None:
-        self.settings = settings
+        self.system_prompt = system_prompt
         self.llm_client = llm_client
         self.context = context
         self.session_id = session_id
@@ -58,7 +57,9 @@ class Agent:
     ) -> list[dict[str, Any]]:
         history = self.context.get_history(session_id or self.session_id)
         if self.prompt_assembler is None:
-            messages: list[dict[str, str]] = [{"role": "system", "content": self.settings.system_prompt}]
+            messages: list[dict[str, str]] = [
+                {"role": "system", "content": self.system_prompt}
+            ]
             if persona_block:
                 messages.append({"role": "system", "content": persona_block})
             if history:
@@ -70,7 +71,7 @@ class Agent:
             messages.append(_user_message_with_media(user_input, media or []))
             return messages
         messages = self.prompt_assembler.assemble(
-            system_block=self.settings.system_prompt,
+            system_block=self.system_prompt,
             persona_block=persona_block,
             history=history,
             user_input=user_input,

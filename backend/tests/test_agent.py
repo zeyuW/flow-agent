@@ -1,19 +1,8 @@
-from flow_agent.config.settings import (
-    LoggingSettings,
-    MemoryPolicySettings,
-    ModelSettings,
-    ObserveSettings,
-    ProactiveSettings,
-    RetrievalSettings,
-    SessionSettings,
-    Settings,
-    StorageSettings,
-    ToolingSettings,
-)
 from flow_agent.core.agent import Agent
 from flow_agent.core.context import ConversationContext
-from flow_agent.llm.client import FakeLLMClient
+from flow_agent.llm.client import FakeLLMClient, OpenAILLMClient
 from flow_agent.llm.prompts import build_messages
+from infra.config.schema import ModelEndpointConfig
 
 
 def test_build_messages():
@@ -37,26 +26,38 @@ def test_fake_llm_client():
     assert result.content == "echo: hello"
 
 
-def test_agent_run():
-    settings = Settings(
-        model=ModelSettings(
-            model="fake-model",
-            api_key="fake-key",
-            base_url=None,
-            system_prompt="You are helpful.",
-        ),
-        storage=StorageSettings(memory_db_path="/tmp/memory.db"),
-        logging=LoggingSettings(level="INFO"),
-        session=SessionSettings(default_session_id="default"),
-        tooling=ToolingSettings(enabled=True),
-        retrieval=RetrievalSettings(enabled=True),
-        observe=ObserveSettings(enabled=False),
-        memory_policy=MemoryPolicySettings(enabled=False),
-        proactive=ProactiveSettings(enabled=False),
+def test_openai_client_uses_one_explicit_endpoint(monkeypatch):
+    created: list[tuple[str, str | None]] = []
+
+    def create_client(*, api_key: str, base_url: str | None):
+        created.append((api_key, base_url))
+        return object()
+
+    monkeypatch.setattr("flow_agent.llm.client.OpenAI", create_client)
+    monkeypatch.setattr("flow_agent.llm.client.AsyncOpenAI", create_client)
+    endpoint = ModelEndpointConfig(
+        model="model-name",
+        api_key="secret",
+        base_url="https://example.test/v1",
     )
+
+    client = OpenAILLMClient(endpoint)
+
+    assert client.model == "model-name"
+    assert created == [
+        ("secret", "https://example.test/v1"),
+        ("secret", "https://example.test/v1"),
+    ]
+
+
+def test_agent_run():
     context = ConversationContext()
     client = FakeLLMClient()
-    agent = Agent(settings=settings, llm_client=client, context=context)
+    agent = Agent(
+        system_prompt="You are helpful.",
+        llm_client=client,
+        context=context,
+    )
 
     response = agent.run("hello")
 

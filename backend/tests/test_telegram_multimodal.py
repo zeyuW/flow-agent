@@ -92,7 +92,7 @@ def test_agent_builds_openai_compatible_image_content(tmp_path: Path):
     image = tmp_path / "photo.png"
     image.write_bytes(b"\x89PNG\r\n\x1a\ncontent")
     agent = Agent.__new__(Agent)
-    agent.settings = type("Settings", (), {"system_prompt": "system"})()
+    agent.system_prompt = "system"
     agent.context = type("Context", (), {"get_history": lambda *_: []})()
     agent.session_id = "s"
     agent.prompt_assembler = None

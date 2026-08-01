@@ -4,18 +4,6 @@ import json
 import threading
 import time
 
-from flow_agent.config.settings import (
-    LoggingSettings,
-    MemoryPolicySettings,
-    ModelSettings,
-    ObserveSettings,
-    ProactiveSettings,
-    RetrievalSettings,
-    SessionSettings,
-    Settings,
-    StorageSettings,
-    ToolingSettings,
-)
 from flow_agent.core.agent import Agent
 from flow_agent.core.context import ConversationContext
 from flow_agent.messaging.message_bus import (
@@ -79,23 +67,8 @@ class FakeTool:
         return ToolResult(ok=True, content=f"ok:{tool_input.get('query', '')}")
 
 
-def _build_settings() -> Settings:
-    return Settings(
-        model=ModelSettings(
-            model="fake-model",
-            api_key="fake-key",
-            base_url=None,
-            system_prompt="You are helpful.",
-        ),
-        storage=StorageSettings(memory_db_path="/tmp/memory.db"),
-        logging=LoggingSettings(level="INFO"),
-        session=SessionSettings(default_session_id="default"),
-        tooling=ToolingSettings(enabled=True),
-        retrieval=RetrievalSettings(enabled=True),
-        observe=ObserveSettings(enabled=False),
-        memory_policy=MemoryPolicySettings(enabled=False),
-        proactive=ProactiveSettings(enabled=False),
-    )
+def _build_system_prompt() -> str:
+    return "You are helpful."
 
 
 # ── InboundQueue 测试 ─────────────────────────────────────
@@ -322,7 +295,7 @@ def test_pipeline_runs_six_phases():
     验证事件广播先于出站投递。
     """
     agent = Agent(
-        settings=_build_settings(),
+        system_prompt=_build_system_prompt(),
         llm_client=ScriptedLLMClient(),
         context=ConversationContext(),
     )
@@ -362,7 +335,7 @@ def test_pipeline_runs_six_phases():
 def test_pipeline_outbound_port():
     """测试 Pipeline 通过 outbound_port 投递回复。"""
     agent = Agent(
-        settings=_build_settings(),
+        system_prompt=_build_system_prompt(),
         llm_client=ScriptedLLMClient(),
         context=ConversationContext(),
     )
@@ -390,7 +363,7 @@ def test_pipeline_outbound_port():
 def test_pipeline_errors_gracefully():
     """测试管道在 LLM 出错时仍能发送错误回复。"""
     agent = Agent(
-        settings=_build_settings(),
+        system_prompt=_build_system_prompt(),
         llm_client=_AlwaysFailLLM(),
         context=ConversationContext(),
     )
@@ -424,7 +397,7 @@ class _AlwaysFailLLM:
 def test_agent_loop_run_once():
     """测试 AgentLoop.run_once 处理一条消息。"""
     agent = Agent(
-        settings=_build_settings(),
+        system_prompt=_build_system_prompt(),
         llm_client=ScriptedLLMClient(),
         context=ConversationContext(),
     )
@@ -499,7 +472,7 @@ def test_full_message_bus_architecture_flow():
     4. 出站队列分发给订阅者
     """
     agent = Agent(
-        settings=_build_settings(),
+        system_prompt=_build_system_prompt(),
         llm_client=ScriptedLLMClient(),
         context=ConversationContext(),
     )

@@ -6,9 +6,9 @@ from typing import Protocol
 
 from openai import AsyncOpenAI, APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
 
-from flow_agent.config.settings import Settings
 from flow_agent.runtime.fallback import with_fallback
 from flow_agent.runtime.retry import RetryPolicy, retry_call
+from infra.config.schema import ModelEndpointConfig
 
 
 logger = logging.getLogger(__name__)
@@ -48,26 +48,16 @@ class LLMClient(Protocol):
 
 # OpenAILLMClient 是 OpenAI 模型的客户端实现
 class OpenAILLMClient:
-    def __init__(
-        self,
-        settings: Settings,
-        model_override: str | None = None,
-        api_key_override: str | None = None,
-        base_url_override: str | None = None,
-    ) -> None:
-        api_key = api_key_override or settings.api_key
-        if not api_key:
-            raise ValueError("API key is required")
-
-        self.model = model_override or settings.model_name
+    def __init__(self, config: ModelEndpointConfig) -> None:
+        self.model = config.model
         # 创建 OpenAI 客户端
         self.client = OpenAI(
-            api_key=api_key,
-            base_url=base_url_override or settings.base_url,
+            api_key=config.api_key,
+            base_url=config.base_url,
         )
         self.async_client = AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url_override or settings.base_url,
+            api_key=config.api_key,
+            base_url=config.base_url,
         )
 
     # 生成文本

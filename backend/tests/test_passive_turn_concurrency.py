@@ -47,8 +47,6 @@ def test_different_sessions_start_without_waiting_for_each_other():
 def test_agent_builds_history_for_explicit_session():
     """并发回合必须按调用参数读取对应会话历史。"""
 
-    from types import SimpleNamespace
-
     from flow_agent.core.agent import Agent
     from flow_agent.core.context import ConversationContext
 
@@ -56,7 +54,7 @@ def test_agent_builds_history_for_explicit_session():
     context.append_turn("session-a", "仅属于 A 的用户消息", "仅属于 A 的回复")
     context.append_turn("session-b", "仅属于 B 的用户消息", "仅属于 B 的回复")
     agent = Agent(
-        settings=SimpleNamespace(system_prompt="系统提示"),
+        system_prompt="系统提示",
         llm_client=object(),
         context=context,
     )
@@ -86,7 +84,7 @@ def test_agent_awaits_async_model_client():
             return LLMResult(content="异步结果")
 
     agent = Agent(
-        settings=SimpleNamespace(system_prompt="系统提示"),
+        system_prompt="系统提示",
         llm_client=AsyncClient(),
         context=ConversationContext(),
     )
