@@ -7,6 +7,7 @@ import logging
 import ssl
 import urllib.parse
 import urllib.request
+from pathlib import Path
 from typing import Any
 
 from flow_agent.channels.models import (
@@ -36,6 +37,7 @@ class TelegramChannel(Channel, EventSubscriber):
         bot_token: str,
         allowed_users: list[str] | None = None,
         allowed_groups: list[int] | None = None,
+        attachment_dir: Path | None = None,
     ) -> None:
         self.bot_token = bot_token
         self.allowed_users = set(allowed_users or [])  # 支持用户名和数字ID
@@ -46,6 +48,7 @@ class TelegramChannel(Channel, EventSubscriber):
         self._last_error: str | None = None
         self._pending_messages: dict[str, int] = {}  # session_id -> message_id
         self._delivery_chunk_progress: dict[str, int] = {}
+        self._attachment_dir = attachment_dir
         
         # 流式输出缓冲区
         self._stream_buffers: dict[str, dict[str, Any]] = {}  # session_id -> {"content": str, "last_sent": str, "last_time": float}
@@ -295,7 +298,7 @@ class TelegramChannel(Channel, EventSubscriber):
         user = message.get("from", {})
         user_id = user.get("id", "")
         username = user.get("username", "")
-        text = message.get("text", "")
+        text = message.get("text", "") or message.get("caption", "")
         
         if chat_type == "private":
             # 私聊消息：检查用户ID或用户名
@@ -319,8 +322,11 @@ class TelegramChannel(Channel, EventSubscriber):
         else:
             return
         
-        if not text:
+        media = await self._extract_image_media(message, chat_id)
+        if not text and not media:
             return
+        if media and not text:
+            text = "请描述这张图片。"
         
         sender = str(user_id) if user_id else username
         await self._publish_inbound(session_id, text, sender, {
@@ -329,9 +335,66 @@ class TelegramChannel(Channel, EventSubscriber):
             "telegram_chat_id": chat_id,
             "telegram_chat_type": chat_type,
             "message_id": message.get("message_id", ""),
-        })
-    
-    async def _publish_inbound(self, session_id: str, text: str, sender: str, metadata: dict) -> None:
+        }, media=media)
+
+    async def _extract_image_media(self, message: dict, chat_id: object) -> list[str]:
+        """下载 Telegram 图片或图片文档，并返回受控附件路径。"""
+
+        file_id = ""
+        extension = "png"
+        photos = message.get("photo") or []
+        if photos:
+            file_id = str(photos[-1].get("file_id") or "")
+        else:
+            document = message.get("document") or {}
+            mime_type = str(document.get("mime_type") or "")
+            if not mime_type.startswith("image/"):
+                return []
+            file_id = str(document.get("file_id") or "")
+            extension = Path(str(document.get("file_name") or "image.png")).suffix.lstrip(".") or "png"
+        if not file_id:
+            return []
+        message_id = message.get("message_id", "unknown")
+        filename = f"telegram_{chat_id}_{message_id}.{extension.lower()}"
+        try:
+            return [await self._download_image(file_id, filename=filename)]
+        except Exception:
+            logger.exception("Telegram 图片下载失败: message_id=%s", message_id)
+            return []
+
+    async def _download_image(self, file_id: str, *, filename: str) -> str:
+        """通过 getFile 下载图片到受控附件目录。"""
+
+        info = await asyncio.to_thread(
+            self._post_api,
+            f"{_TELEGRAM_API_BASE}/bot{self.bot_token}/getFile",
+            {"file_id": file_id},
+        )
+        remote_path = str((info.get("result") or {}).get("file_path") or "")
+        if not remote_path:
+            raise RuntimeError("Telegram 未返回图片路径")
+        target_dir = self._attachment_dir
+        if target_dir is None:
+            from flow_agent.infra.paths import WORKSPACE_LAYOUT
+
+            target_dir = WORKSPACE_LAYOUT.inbound_attachments_dir / "telegram"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / Path(filename).name
+        url = f"{_TELEGRAM_API_BASE}/file/bot{self.bot_token}/{remote_path}"
+
+        def download() -> None:
+            with urllib.request.urlopen(url, timeout=20) as response:
+                data = response.read(20 * 1024 * 1024 + 1)
+            if len(data) > 20 * 1024 * 1024:
+                raise ValueError("Telegram 图片超过 20MB 限制")
+            if not _is_supported_image(data):
+                raise ValueError("Telegram 文件不是受支持的图片")
+            target.write_bytes(data)
+
+        await asyncio.to_thread(download)
+        return str(target)
+
+    async def _publish_inbound(self, session_id: str, text: str, sender: str, metadata: dict, *, media: list[str] | None = None) -> None:
         """发布入站消息到 MessageBus。"""
         if not self._context:
             return
@@ -340,6 +403,7 @@ class TelegramChannel(Channel, EventSubscriber):
             session_id=session_id,
             text=text,
             sender=sender,
+            media=list(media or []),
             metadata=metadata,
         )
         self._context.bus.publish_inbound(inbound)
@@ -481,8 +545,66 @@ class TelegramChannel(Channel, EventSubscriber):
         logger.info("telegram send_file: chat=%s path=%s (API 待实现)", chat_id, path)
     
     def send_image(self, *, chat_id: str, path: str) -> None:
-        """发送图片到指定会话"""
-        logger.info("telegram send_image: chat=%s path=%s (API 待实现)", chat_id, path)
+        """发送本地图片或公开 HTTP(S) 图片 URL 到指定会话。"""
+        normalized_chat_id = _normalize_telegram_chat_id(chat_id)
+        if normalized_chat_id is None:
+            raise ValueError(f"无效 Telegram chat_id: {chat_id}")
+        parsed = urllib.parse.urlparse(path)
+        if parsed.scheme in {"http", "https"} and parsed.netloc:
+            result = self._post_photo_url(normalized_chat_id, path)
+            if not result.get("ok"):
+                raise RuntimeError("Telegram 图片发送失败")
+            return
+        if parsed.scheme:
+            raise ValueError("图片 URL 仅支持 HTTP 或 HTTPS")
+        image = Path(path)
+        if not image.is_file():
+            raise ValueError("图片文件不存在")
+        if image.stat().st_size > 10 * 1024 * 1024:
+            raise ValueError("Telegram 图片超过 10MB 限制")
+        result = self._post_photo(normalized_chat_id, image)
+        if not result.get("ok"):
+            raise RuntimeError("Telegram 图片发送失败")
+
+    def _post_photo_url(self, chat_id: int, url: str, caption: str = "") -> dict:
+        """让 Telegram 拉取公开图片 URL，避免宿主重复下载无须保存的图片。"""
+
+        payload: dict[str, object] = {"chat_id": chat_id, "photo": url}
+        if caption:
+            payload["caption"] = caption
+        return self._post_api(
+            f"{_TELEGRAM_API_BASE}/bot{self.bot_token}/sendPhoto",
+            payload,
+        )
+
+    def _post_photo(self, chat_id: int, path: Path, caption: str = "") -> dict:
+        """以 multipart/form-data 上传本地图片，不记录请求中的令牌或二进制内容。"""
+
+        boundary = "----flowagenttelegramphoto"
+        parts = [
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"chat_id\"\r\n\r\n{chat_id}\r\n".encode(),
+        ]
+        if caption:
+            parts.append(
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"caption\"\r\n\r\n{caption}\r\n".encode()
+            )
+        parts.extend([
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"{path.name}\"\r\nContent-Type: image/{path.suffix.lstrip('.').lower() or 'png'}\r\n\r\n".encode(),
+            path.read_bytes(),
+            f"\r\n--{boundary}--\r\n".encode(),
+        ])
+        request = urllib.request.Request(
+            f"{_TELEGRAM_API_BASE}/bot{self.bot_token}/sendPhoto",
+            data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.loads(response.read())
+        except Exception:
+            logger.exception("telegram POST endpoint=sendPhoto failed")
+            return {}
 
 
 def _normalize_telegram_chat_id(value: str) -> int | None:
@@ -497,6 +619,17 @@ def _normalize_telegram_chat_id(value: str) -> int | None:
     if not signed_digits.isdigit():
         return None
     return int(raw)
+
+
+def _is_supported_image(data: bytes) -> bool:
+    """根据文件签名确认图片类型，避免仅相信远端 MIME 声明。"""
+
+    return (
+        data.startswith(b"\xff\xd8\xff")
+        or data.startswith(b"\x89PNG\r\n\x1a\n")
+        or data.startswith((b"GIF87a", b"GIF89a"))
+        or (data.startswith(b"RIFF") and data[8:12] == b"WEBP")
+    )
 
 
 def _split_telegram_text(text: str, limit: int = 3900) -> list[str]:

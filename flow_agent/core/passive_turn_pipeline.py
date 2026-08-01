@@ -102,6 +102,7 @@ class PassiveTurnPipeline:
             inbound_metadata=inbound.metadata or {},  # 保存入站 metadata
             trace_id=uuid4().hex[:12],
         )
+        flow.inbound_metadata["media"] = list(inbound.media)
         flow.extensions["_phase_modules"] = self._phase_module_snapshot()
         turn_started = time.perf_counter()
         self._record_event({
@@ -170,6 +171,7 @@ class PassiveTurnPipeline:
             inbound_metadata=inbound.metadata or {},
             trace_id=uuid4().hex[:12],
         )
+        flow.inbound_metadata["media"] = list(inbound.media)
         flow.extensions["_phase_modules"] = self._phase_module_snapshot()
         turn_started = time.perf_counter()
         self._record_event(
@@ -295,6 +297,7 @@ class PassiveTurnPipeline:
             retrieval_block="",
             tool_instructions=tool_instructions,
             session_id=flow.session_id,
+            media=list(flow.inbound_metadata.get("media") or []),
         )
         flow.messages = messages
         return flow
@@ -651,6 +654,15 @@ class PassiveTurnPipeline:
             tool_input["__chat_id"] = str(
                 flow.inbound_metadata.get("telegram_chat_id") or flow.session_id
             )
+        if tool_call.name == "message_push":
+            # 被动回复只允许回到触发当前回合的渠道，不能采纳模型指定的其他收件人。
+            tool_input["channel"] = flow.channel
+            tool_input["chat_id"] = str(
+                flow.inbound_metadata.get("telegram_chat_id")
+                or flow.inbound_metadata.get("qq_group_id")
+                or flow.inbound_metadata.get("qq_user_id")
+                or flow.session_id
+            )
         return tool_input
 
     def _run_tool_loop(
@@ -685,21 +697,7 @@ class PassiveTurnPipeline:
                 "tool_calls": [self._tool_call_to_message_item(tc) for tc in result.tool_calls],
             })
             for tool_call in result.tool_calls:
-                tool_input = dict(tool_call.arguments)
-                if tool_call.name in {
-                    "schedule_task",
-                    "list_scheduled_tasks",
-                    "cancel_scheduled_task",
-                    "configure_proactive_policy",
-                    "get_proactive_status",
-                    "spawn",
-                }:
-                    tool_input["__session_id"] = flow.session_id
-                    tool_input["__channel"] = flow.channel
-                    tool_input["__chat_id"] = str(
-                        flow.inbound_metadata.get("telegram_chat_id")
-                        or flow.session_id
-                    )
+                tool_input = self._tool_input_for_flow(tool_call, flow)
                 if self._tool_hook_executor is not None:
                     outcome = self._tool_hook_executor.execute_sync(
                         tool_call.name,

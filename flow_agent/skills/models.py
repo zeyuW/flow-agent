@@ -11,4 +11,5 @@ class SkillSpec:
     requires_tools: list[str] = field(default_factory=list)
     requires_sources: list[str] = field(default_factory=list)
     requires_mcp: list[str] = field(default_factory=list)
-
+    requires_vision_model: bool = False
+    requires_image_output: bool = False

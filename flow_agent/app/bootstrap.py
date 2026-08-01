@@ -104,6 +104,16 @@ def create_core_components():
         if cfg.provider.fast_model
         else None
     )
+    vision_client = (
+        OpenAILLMClient(
+            cfg,
+            model_override=cfg.vision.model,
+            api_key_override=cfg.vision.api_key or cfg.provider.fast_api_key,
+            base_url_override=cfg.vision.base_url,
+        )
+        if cfg.vision.model
+        else None
+    )
     llm_router = LLMRouter(main_client=llm_client, fast_client=fast_client)
 
     # 提示词组装器
@@ -161,6 +171,7 @@ def create_core_components():
         llm_router=llm_router,
         prompt_assembler=prompt_assembler,
         persona_resolver=persona_resolver,
+        vision_client=vision_client,
     )
 
     return {

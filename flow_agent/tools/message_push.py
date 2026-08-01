@@ -19,13 +19,17 @@ _MESSAGE_PUSH_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "channel": {"type": "string", "description": "目标通道名 (cli/qq/http 等)"},
-                "chat_id": {"type": "string", "description": "目标会话 ID"},
+                "channel": {"type": "string", "description": "目标通道名；被动回复时由运行时绑定当前通道"},
+                "chat_id": {"type": "string", "description": "目标会话 ID；被动回复时由运行时绑定当前会话"},
                 "text": {"type": "string", "description": "消息文本"},
                 "file_path": {"type": "string", "description": "可选：要发送的文件路径"},
-                "image_path": {"type": "string", "description": "可选：要发送的图片路径"},
+                "image_path": {"type": "string", "description": "可选：要发送的本地图片路径或 HTTP(S) URL"},
             },
-            "required": ["channel", "chat_id", "text"],
+            "anyOf": [
+                {"required": ["text"]},
+                {"required": ["file_path"]},
+                {"required": ["image_path"]},
+            ],
         },
     },
 }
@@ -80,6 +84,11 @@ class MessagePushTool:
         text = arguments.get("text", "")
         file_path = arguments.get("file_path", "")
         image_path = arguments.get("image_path", "")
+
+        if not channel or not chat_id:
+            return "错误：channel 和 chat_id 不能为空"
+        if not text and not file_path and not image_path:
+            return "错误：text、file_path、image_path 至少提供一个"
 
         senders = self._senders.get(channel)
         if not senders:

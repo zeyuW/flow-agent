@@ -31,6 +31,8 @@ class SkillLoader:
         requires_tools: list[str] = []
         requires_sources: list[str] = []
         requires_mcp: list[str] = []
+        requires_vision_model = False
+        requires_image_output = False
         for line in lines:
             clean = line.strip()
             if clean.lower().startswith("name:"):
@@ -43,6 +45,10 @@ class SkillLoader:
                 requires_sources = _parse_csv(clean)
             elif clean.lower().startswith("requires_mcp:"):
                 requires_mcp = _parse_csv(clean)
+            elif clean.lower().startswith("requires_vision_model:"):
+                requires_vision_model = _parse_bool(clean)
+            elif clean.lower().startswith("requires_image_output:"):
+                requires_image_output = _parse_bool(clean)
         return SkillSpec(
             name=name,
             description=description,
@@ -50,6 +56,8 @@ class SkillLoader:
             requires_tools=requires_tools,
             requires_sources=requires_sources,
             requires_mcp=requires_mcp,
+            requires_vision_model=requires_vision_model,
+            requires_image_output=requires_image_output,
         )
 
 
@@ -59,3 +67,8 @@ def _parse_csv(line: str) -> list[str]:
         return []
     return [item.strip() for item in payload.split(",") if item.strip()]
 
+
+def _parse_bool(line: str) -> bool:
+    """仅接受明确真值，避免 Skill 声明被任意字符串意外开启。"""
+
+    return line.split(":", 1)[1].strip().lower() in {"1", "true", "yes"}

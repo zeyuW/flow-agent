@@ -22,6 +22,7 @@ from flow_agent.config.settings import (
     StorageSettings,
     SubagentSettings,
     ToolingSettings,
+    VisionSettings,
 )
 from flow_agent.config.source_values import ConfigValues
 from flow_agent.llm.config import (
@@ -344,6 +345,11 @@ def load_settings(*, force_reload: bool = False) -> Settings:
             style=values.get_str(("persona", "style"), "structured"),
         ),
         provider=build_llm_provider_settings(values),
+        vision=VisionSettings(
+            model=values.get_str(("llm", "vision", "model"), "") or None,
+            api_key=values.get_str(("llm", "vision", "api_key"), "") or None,
+            base_url=values.get_str(("llm", "vision", "base_url"), "") or None,
+        ),
         prompt_budget=PromptBudgetSettings(
             max_chars=values.get_int(
                 ("prompt_budget", "max_chars"), 8000, minimum=2000

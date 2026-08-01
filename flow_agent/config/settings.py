@@ -22,6 +22,14 @@ class ProviderSettings(BaseModel):
     provider_fallback_enabled: bool = True
 
 
+class VisionSettings(BaseModel):
+    """图片理解模型配置；未配置时图片回合会明确拒绝。"""
+
+    model: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+
+
 class EmbeddingSettings(BaseModel):
     """嵌入模型的外部服务连接信息。"""
 
@@ -217,6 +225,7 @@ class Settings(BaseModel):
     subagent: SubagentSettings = Field(default_factory=SubagentSettings)
     persona: PersonaSettings = Field(default_factory=PersonaSettings)
     provider: ProviderSettings = Field(default_factory=ProviderSettings)
+    vision: VisionSettings = Field(default_factory=VisionSettings)
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     prompt_budget: PromptBudgetSettings = Field(default_factory=PromptBudgetSettings)
     delegation_policy: DelegationPolicySettings = Field(default_factory=DelegationPolicySettings)
