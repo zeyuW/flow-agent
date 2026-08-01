@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
-from flow_agent.messaging.outbox import SQLiteOutboxStore
+from modules.delivery.infra.outbox import SQLiteOutboxStore
 
 logger = logging.getLogger(__name__)
 

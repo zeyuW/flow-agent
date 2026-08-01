@@ -14,7 +14,7 @@ from infra.config.watcher import (
     PreparedConfigChange,
 )
 from flow_agent.messaging.message_bus import MessageBus
-from flow_agent.messaging.outbox import SQLiteOutboxStore
+from modules.delivery.infra.outbox import SQLiteOutboxStore
 from infra.messaging.event_bus import EventBus
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.runner import ConversationRunner
