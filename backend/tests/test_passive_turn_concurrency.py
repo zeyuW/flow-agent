@@ -47,8 +47,8 @@ def test_different_sessions_start_without_waiting_for_each_other():
 def test_agent_builds_history_for_explicit_session():
     """并发回合必须按调用参数读取对应会话历史。"""
 
-    from flow_agent.core.agent import Agent
-    from flow_agent.core.context import ConversationContext
+    from modules.conversation.application.agent import Agent
+    from modules.conversation.infra.context import ConversationContext
 
     context = ConversationContext()
     context.append_turn("session-a", "仅属于 A 的用户消息", "仅属于 A 的回复")
@@ -74,8 +74,8 @@ def test_agent_awaits_async_model_client():
 
     from types import SimpleNamespace
 
-    from flow_agent.core.agent import Agent
-    from flow_agent.core.context import ConversationContext
+    from modules.conversation.application.agent import Agent
+    from modules.conversation.infra.context import ConversationContext
     from flow_agent.llm.client import LLMResult
 
     class AsyncClient:

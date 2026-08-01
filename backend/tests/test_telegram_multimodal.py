@@ -4,9 +4,9 @@ import asyncio
 from pathlib import Path
 
 from flow_agent.channels.telegram import TelegramChannel
-from flow_agent.core.agent import Agent
+from modules.conversation.application.agent import Agent
 from modules.conversation.application.pipeline import PassiveTurnPipeline
-from flow_agent.core.phase_module import TurnFlow
+from modules.conversation.application.phase import TurnFlow
 from flow_agent.llm.client import LLMResult
 from flow_agent.llm.client import LLMToolCall
 from flow_agent.skills.loader import SkillLoader

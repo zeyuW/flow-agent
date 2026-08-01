@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from flow_agent.core.context import ConversationContext
+from modules.conversation.infra.context import ConversationContext
 from flow_agent.background.jobs import JobSpec
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import SQLiteJobStore

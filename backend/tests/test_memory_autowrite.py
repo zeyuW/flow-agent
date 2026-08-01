@@ -2,7 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from modules.conversation.application.pipeline import PassiveTurnPipeline
-from flow_agent.core.phase_module import TurnFlow
+from modules.conversation.application.phase import TurnFlow
 from flow_agent.guard.guards import ToolGuard
 from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.memory.markdown_store import MarkdownStore

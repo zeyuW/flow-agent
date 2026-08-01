@@ -1,5 +1,5 @@
-from flow_agent.core.agent import Agent
-from flow_agent.core.context import ConversationContext
+from modules.conversation.application.agent import Agent
+from modules.conversation.infra.context import ConversationContext
 from flow_agent.llm.client import FakeLLMClient, OpenAILLMClient
 from flow_agent.llm.prompts import build_messages
 from infra.config.schema import ModelEndpointConfig

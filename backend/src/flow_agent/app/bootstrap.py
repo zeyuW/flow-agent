@@ -23,9 +23,9 @@ from modules.delivery.application.ports import DeliveryPort
 from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
 from flow_agent.mcp.server_registry import McpServerRegistry
 from flow_agent.tools.mcp_manage import McpListTool
-from flow_agent.core.agent import Agent
+from modules.conversation.application.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
-from flow_agent.core.context import ConversationContext
+from modules.conversation.infra.context import ConversationContext
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient
 from flow_agent.llm.assembler import PromptAssembler, PromptBudget

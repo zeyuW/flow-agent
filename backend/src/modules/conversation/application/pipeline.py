@@ -17,9 +17,9 @@ from uuid import uuid4
 from typing import Any
 from collections.abc import Callable
 
-from flow_agent.core.agent import Agent
+from modules.conversation.application.agent import Agent
 from flow_agent.core.delegation import DelegationPolicy
-from flow_agent.core.phase_module import PhaseModule, TurnFlow
+from modules.conversation.application.phase import PhaseModule, TurnFlow
 from flow_agent.channels.models import OutboundMessage
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall

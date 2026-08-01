@@ -3,8 +3,8 @@ from pathlib import Path
 from typing import Any
 
 from flow_agent.behavior.persona import PersonaResolver
-from flow_agent.core.context import ConversationContext
-from flow_agent.core.models import AgentResponse
+from modules.conversation.application.models import AgentResponse
+from modules.conversation.application.ports import ConversationHistory
 from flow_agent.llm.client import LLMClient
 from flow_agent.llm.assembler import PromptAssembler
 from flow_agent.llm.router import LLMRouter
@@ -15,7 +15,7 @@ class Agent:
         self,
         system_prompt: str,
         llm_client: LLMClient,
-        context: ConversationContext,
+        context: ConversationHistory,
         session_id: str = "default",
         llm_router: LLMRouter | None = None,
         prompt_assembler: PromptAssembler | None = None,

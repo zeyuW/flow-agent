@@ -4,8 +4,8 @@ import json
 import threading
 import time
 
-from flow_agent.core.agent import Agent
-from flow_agent.core.context import ConversationContext
+from modules.conversation.application.agent import Agent
+from modules.conversation.infra.context import ConversationContext
 from flow_agent.messaging.message_bus import (
     MessageBus,
     InboundQueue,
@@ -16,7 +16,7 @@ from flow_agent.messaging.message_bus import (
 from flow_agent.messaging.event_bus import EventBus, Event, TurnCommitted
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from flow_agent.core.agent_loop import AgentLoop, ProcessingState
-from flow_agent.core.phase_module import PhaseModule, TurnFlow
+from modules.conversation.application.phase import PhaseModule, TurnFlow
 from flow_agent.channels.models import InboundMessage, OutboundMessage
 from flow_agent.llm.client import LLMResult, LLMToolCall
 from flow_agent.tools.base import ToolResult
