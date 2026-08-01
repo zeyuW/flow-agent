@@ -13,8 +13,8 @@ from flow_agent.proactive.judge_loop import JudgeLoop
 from flow_agent.proactive.lifecycle import compile_proactive_lifecycle
 from flow_agent.proactive.mcp_polling import McpPollingModule
 from flow_agent.proactive.mcp_pool import McpClientPool
-from flow_agent.proactive.proactive_loop import HawkesConfig, ProactiveLoop
-from flow_agent.proactive.proactive_pipeline import ProactiveTurnPipeline
+from modules.proactive.application.loop import HawkesConfig, ProactiveLoop
+from modules.proactive.application.pipeline import ProactiveTurnPipeline
 
 
 def _flatten_sources(proactive_sources) -> list:
