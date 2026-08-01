@@ -1,0 +1,45 @@
+# 主模型是唯一必需的运行凭据。
+[llm.main]
+model = "replace-me"
+api_key = "replace-me"
+base_url = "https://api.example.com/v1"
+system_prompt = "You are a helpful AI assistant."
+enable_thinking = true
+
+# 接入层默认关闭，按部署需要启用。
+[channels]
+dashboard_enabled = false
+dashboard_host = "127.0.0.1"
+dashboard_port = 9901
+http_enabled = false
+http_host = "127.0.0.1"
+http_port = 8788
+telegram_enabled = false
+telegram_bot_token = "replace-me"
+telegram_allowed_users = "replace-me"
+telegram_allowed_groups = ""
+
+# 主动线路启用后必须填写目标用户。
+[proactive]
+enabled = false
+telegram_target_user_id = "replace-me"
+max_per_day = 10
+min_interval = 60.0
+max_interval = 600.0
+cooldown = 60.0
+
+# 后台任务线程池和有界队列。
+[jobs]
+max_async_queue = 64
+max_async_workers = 4
+timeout_seconds = 30.0
+
+# 委托任务的并发与持久化位置。
+[subagent]
+max_concurrency = 2
+tasks_file = ".flow/sessions/subagent_tasks.jsonl"
+
+# 超过本地阈值的请求可进入委托线路。
+[delegation_policy]
+enabled = true
+max_local_chars = 500

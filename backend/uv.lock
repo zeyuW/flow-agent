@@ -139,6 +139,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "sqlite-vec" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "websockets" },
 ]
 
@@ -157,6 +158,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "sqlite-vec", specifier = ">=0.1.0" },
+    { name = "tomli", marker = "python_version < '3.11'", specifier = ">=2.0" },
     { name = "websockets", specifier = ">=15.0" },
 ]
 
