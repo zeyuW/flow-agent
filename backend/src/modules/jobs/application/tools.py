@@ -7,7 +7,7 @@ from difflib import get_close_matches
 from dataclasses import dataclass
 from typing import Any
 
-from flow_agent.background.runtime import BackgroundRuntime
+from modules.jobs.application.runtime import BackgroundRuntime
 from flow_agent.tools.base import ToolResult
 
 
