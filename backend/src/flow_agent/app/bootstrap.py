@@ -24,7 +24,7 @@ from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPo
 from flow_agent.mcp.server_registry import McpServerRegistry
 from flow_agent.tools.mcp_manage import McpListTool
 from modules.conversation.application.agent import Agent
-from flow_agent.core.delegation import DelegationPolicy
+from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.infra.context import ConversationContext
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import OpenAILLMClient

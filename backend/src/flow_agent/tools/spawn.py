@@ -5,7 +5,7 @@ import logging
 import threading
 from typing import Any
 
-from flow_agent.core.delegation import DelegationPolicy
+from modules.conversation.application.delegation import DelegationPolicy
 from flow_agent.subagent.models import SpawnDecision
 from flow_agent.tools.base import Tool, ToolResult
 

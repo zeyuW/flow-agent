@@ -18,7 +18,7 @@ from typing import Any
 from collections.abc import Callable
 
 from modules.conversation.application.agent import Agent
-from flow_agent.core.delegation import DelegationPolicy
+from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.application.phase import PhaseModule, TurnFlow
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
