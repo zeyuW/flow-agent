@@ -7,16 +7,8 @@ import time
 from dataclasses import dataclass, field
 
 from pathlib import Path
+from modules.proactive.domain.policy import ProactivePolicy
 from modules.proactive.domain.models import GateResult
-
-
-@dataclass(frozen=True, slots=True)
-class ProactivePolicy:
-    """单个聊天的主动推送策略。"""
-
-    enabled: bool = False
-    idle_threshold_seconds: float = 0.0
-    topics: tuple[str, ...] = ()
 
 
 @dataclass

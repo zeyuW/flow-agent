@@ -17,6 +17,7 @@ from modules.proactive.domain.types import (
     SourceRecord,
 )
 from modules.proactive.domain.drift import DriftRun, DriftSkill, DriftTick
+from modules.proactive.domain.policy import ProactivePolicy
 
 __all__ = [
     "AgentTick",
@@ -34,4 +35,5 @@ __all__ = [
     "DriftRun",
     "DriftSkill",
     "DriftTick",
+    "ProactivePolicy",
 ]
