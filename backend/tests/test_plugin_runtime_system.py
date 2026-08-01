@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from flow_agent.background.runtime import InMemoryJobRegistry
 from flow_agent.messaging.event_bus import Event, EventBus
-from flow_agent.plugins.plugin_loader import PluginManager
+from flow_agent.plugins.plugin_loader import PluginManager, _plugin_revision
 from flow_agent.tools.registry import ToolRegistry
 
 
@@ -58,6 +59,23 @@ class VersionedPlugin(Plugin):
 ''',
         encoding="utf-8",
     )
+
+
+def test_plugin_revision_uses_content_when_metadata_is_unchanged(tmp_path: Path):
+    plugin_dir = tmp_path / "plugins" / "demo"
+    plugin_dir.mkdir(parents=True)
+    plugin_file = plugin_dir / "plugin.py"
+    plugin_file.write_text("value = 'v1'\n", encoding="utf-8")
+    original_stat = plugin_file.stat()
+    original_revision = _plugin_revision(plugin_dir, None)
+
+    plugin_file.write_text("value = 'v2'\n", encoding="utf-8")
+    os.utime(
+        plugin_file,
+        ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+    )
+
+    assert _plugin_revision(plugin_dir, None) != original_revision
 
 
 def test_plugin_reconcile_updates_runtime_contributions_and_keeps_old_on_failure(

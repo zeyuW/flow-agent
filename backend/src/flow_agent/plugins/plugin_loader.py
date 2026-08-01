@@ -80,6 +80,7 @@ class PluginManager:
             workspace / "plugin-data" if workspace is not None else None
         )
         self._loaded: dict[str, _ActivePlugin] = {}
+        self._failed_revisions: dict[str, str] = {}
         self._tool_hook_executor = ToolHookExecutor()
         self._on_contributions_changed = on_contributions_changed
         self._lock = threading.RLock()
@@ -168,6 +169,7 @@ class PluginManager:
 
         snapshot = {item["name"]: Path(item["path"]) for item in self.discover()}
         candidates: list[_PreparedPlugin] = []
+        recovered = False
         for name in sorted(snapshot):
             plugin_dir = snapshot[name]
             data_dir = self._plugin_data_dir / name if self._plugin_data_dir else None
@@ -175,11 +177,18 @@ class PluginManager:
             with self._lock:
                 active = self._loaded.get(name)
             if active is not None and active.prepared.revision == revision:
+                failed_revision = self._failed_revisions.pop(name, None)
+                recovered = recovered or failed_revision is not None
                 continue
+            if self._failed_revisions.get(name) == revision:
+                for prepared in reversed(candidates):
+                    await self._discard_prepared(prepared)
+                return False
             try:
                 candidate = await self._prepare(name, plugin_dir, revision)
                 candidates.append(candidate)
             except Exception:
+                self._failed_revisions[name] = revision
                 # 同一轮中任一候选失败时，不能让前面的候选形成半代发布。
                 for prepared in reversed(candidates):
                     await self._discard_prepared(prepared)
@@ -191,6 +200,7 @@ class PluginManager:
         try:
             for candidate in candidates:
                 await self._publish(candidate)
+                self._failed_revisions.pop(candidate.name, None)
                 published.add(candidate.name)
                 changed = True
         except Exception:
@@ -204,11 +214,12 @@ class PluginManager:
             removed = sorted(set(self._loaded) - set(snapshot))
         for name in removed:
             await self._unload(name)
+            self._failed_revisions.pop(name, None)
             changed = True
 
         if changed and self._on_contributions_changed is not None:
             self._on_contributions_changed()
-        return changed
+        return changed or recovered
 
     async def _discard_prepared(self, prepared: _PreparedPlugin) -> None:
         """释放本轮未发布候选，保持当前已发布插件不变。"""
@@ -514,13 +525,12 @@ def _plugin_revision(plugin_dir: Path, data_dir: Path | None) -> str:
             continue
         if path.suffix.lower() not in {".py", ".json", ".toml", ".yaml", ".yml"}:
             continue
-        stat = path.stat()
         try:
             relative = path.relative_to(plugin_dir)
         except ValueError:
             relative = Path("plugin-data") / path.name
         digest.update(str(relative).encode())
-        digest.update(f"{stat.st_mtime_ns}:{stat.st_size}".encode())
+        digest.update(path.read_bytes())
     return digest.hexdigest()
 
 
