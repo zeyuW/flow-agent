@@ -70,10 +70,23 @@ class ConversationRunner:
             self._active_by_conversation.clear()
             self._pending_by_conversation.clear()
 
-    async def stop(self) -> None:
-        """请求停止，并等待正在处理的回合自行结束。"""
+    async def stop(self, timeout: float = 5.0) -> None:
+        """请求停止，并在超时后取消仍未完成的回合。"""
 
         self._running = False
+        tasks = tuple(self._active_by_conversation.values())
+        if not tasks:
+            return
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=max(0.0, timeout),
+            )
+        except asyncio.TimeoutError:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def is_processing(self, conversation_id: str) -> bool:
         """供其他业务判断该会话是否有尚未结束的被动回合。"""

@@ -111,6 +111,51 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
     asyncio.run(scenario())
 
 
+def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
+    """停止超时后必须取消卡住的回合，不能遗留后台任务。"""
+
+    from modules.conversation.application.runner import ConversationRunner
+    from modules.conversation.domain.messages import IncomingMessage
+
+    class Source:
+        def __init__(self) -> None:
+            self.messages: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+
+        async def receive(self, poll_interval_ms: int) -> IncomingMessage:
+            del poll_interval_ms
+            return await self.messages.get()
+
+    class Processor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.cancelled = asyncio.Event()
+
+        async def process(self, message: IncomingMessage) -> None:
+            del message
+            self.started.set()
+            try:
+                await asyncio.Future()
+            except asyncio.CancelledError:
+                self.cancelled.set()
+                raise
+
+    async def scenario() -> None:
+        source = Source()
+        processor = Processor()
+        runner = ConversationRunner(source, processor, poll_interval_ms=1)
+        running = asyncio.create_task(runner.run_forever())
+        await source.messages.put(IncomingMessage("cli", "same", "hang"))
+        await asyncio.wait_for(processor.started.wait(), timeout=0.2)
+
+        await runner.stop(timeout=0.01)
+        await asyncio.wait_for(running, timeout=0.2)
+
+        assert processor.cancelled.is_set()
+        assert runner.active_task_count == 0
+
+    asyncio.run(scenario())
+
+
 def test_legacy_message_bus_source_translates_channel_input_to_conversation_input():
     """现有消息总线进入新应用层前必须完成协议转换。"""
 
