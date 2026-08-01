@@ -45,7 +45,7 @@ from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAda
 from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
 from flow_agent.background.runtime import BackgroundRuntime, InMemoryJobRegistry
 from flow_agent.background.store import SQLiteJobStore
-from flow_agent.background.tools import (
+from modules.jobs.application.tools import (
     ListBackgroundJobsTool,
     ListBackgroundRunsTool,
     RunBackgroundJobTool,
