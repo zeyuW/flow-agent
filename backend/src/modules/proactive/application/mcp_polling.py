@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from flow_agent.proactive.mcp_pool import McpClientPool
+from modules.proactive.infra.mcp_pool import McpClientPool
 from modules.proactive.domain.specs import RegisteredProactiveSource
 
 if TYPE_CHECKING:

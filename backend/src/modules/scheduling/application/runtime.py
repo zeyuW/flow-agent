@@ -13,8 +13,8 @@ from typing import Callable
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from flow_agent.channels.models import InboundMessage
-from flow_agent.messaging.message_bus import OutboundDispatch
+from interfaces.channels.models import InboundMessage
+from modules.delivery.infra.message_bus import OutboundDispatch
 
 logger = logging.getLogger(__name__)
 

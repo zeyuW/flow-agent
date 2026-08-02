@@ -14,7 +14,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable
 
-from flow_agent.background.jobs import JobSpec
+from modules.jobs.domain.models import JobSpec
 from modules.capabilities.mcp.config import McpServerSpec
 from modules.capabilities.plugins.plugin_base import Plugin
 from modules.capabilities.plugins.plugin_context import PluginContext
@@ -603,7 +603,7 @@ def _collect_proactive_sources(instance: Plugin, plugin_name: str) -> list[Any]:
     sources = instance.proactive_sources() or []
     if not sources:
         return []
-    from flow_agent.proactive.specs import RegisteredProactiveSource
+    from modules.proactive.domain.specs import RegisteredProactiveSource
 
     return [
         RegisteredProactiveSource(spec=spec, plugin_id=plugin_name)

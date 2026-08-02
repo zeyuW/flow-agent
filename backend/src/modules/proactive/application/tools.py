@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from flow_agent.proactive.gate import ProactiveStateStore
-from flow_agent.tools.base import ToolResult
+from modules.proactive.infra.gate import ProactiveStateStore
+from modules.capabilities.tools.base import ToolResult
 
 
 @dataclass(slots=True)

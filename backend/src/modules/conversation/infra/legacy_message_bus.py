@@ -1,6 +1,6 @@
 """将既有消息总线作为对话应用的入站适配器。"""
 
-from flow_agent.messaging.message_bus import MessageBus
+from modules.delivery.infra.message_bus import MessageBus
 from modules.conversation.domain.messages import IncomingMessage
 
 

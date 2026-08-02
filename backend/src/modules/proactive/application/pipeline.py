@@ -3,9 +3,9 @@
 import logging
 import time
 
-from flow_agent.proactive.data_gateway import DataGateway
+from modules.proactive.infra.data_gateway import DataGateway
 from modules.proactive.application.deliver import deliver_message
-from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore, check_gate
+from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore, check_gate
 from modules.proactive.application.judge_loop import JudgeLoop
 from modules.proactive.application.lifecycle import ProactiveLifecycle, ProactiveModuleContext
 from modules.proactive.domain.models import AgentTick, JudgeResult

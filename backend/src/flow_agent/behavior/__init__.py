@@ -1,2 +1,0 @@
-"""Behavior strategy layer."""
-

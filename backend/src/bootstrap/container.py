@@ -709,7 +709,7 @@ class _RuntimeConfigApplier:
             raise ValueError(f"无效日志级别: {candidate.logging.level}")
 
         if self.proactive_loop is not None:
-            from flow_agent.proactive.proactive_loop import HawkesConfig
+            from modules.proactive.application.loop import HawkesConfig
 
             HawkesConfig(
                 base_intensity=candidate.proactive.hawkes_base_intensity,

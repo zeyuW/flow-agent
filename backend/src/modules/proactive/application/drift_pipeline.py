@@ -4,7 +4,7 @@ import json
 import logging
 
 from modules.proactive.domain.drift import DriftSkill, DriftRun, DriftTick
-from flow_agent.proactive.drift_store import DriftStateStore
+from modules.proactive.infra.drift_store import DriftStateStore
 from modules.proactive.application.drift_tools import (
     get_drift_tool_schemas,
     get_post_push_tool_schemas,

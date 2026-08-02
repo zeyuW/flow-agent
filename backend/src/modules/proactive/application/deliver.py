@@ -34,7 +34,7 @@ async def deliver_message(
         )
 
     try:
-        from flow_agent.messaging.message_bus import OutboundDispatch
+        from modules.delivery.infra.message_bus import OutboundDispatch
 
         metadata = {
             "proactive": True,

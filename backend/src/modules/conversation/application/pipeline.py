@@ -21,7 +21,7 @@ from modules.conversation.application.agent import Agent
 from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.application.phase import PhaseModule, TurnFlow
 from infra.observability.trace import TraceRecorder
-from flow_agent.llm.client import LLMToolCall
+from modules.capabilities.llm.client import LLMToolCall
 from modules.memory.memory_engine import MemoryEngine
 from modules.memory.markdown_store import MarkdownStore
 from modules.capabilities.tools.registry import ToolRegistry
@@ -33,7 +33,7 @@ from infra.messaging.event_bus import (
     ToolCallStarted,
     ToolCallCompleted,
 )
-from flow_agent.messaging.message_bus import (
+from modules.delivery.infra.message_bus import (
     MessageBus,
     OutboundDispatch,
     OutboundPort,

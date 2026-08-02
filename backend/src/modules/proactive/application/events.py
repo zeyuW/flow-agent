@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from infra.messaging.event_bus import Event
-from flow_agent.proactive.proactive_loop import ProactiveLoop
+from modules.proactive.application.loop import ProactiveLoop
 
 
 @dataclass(slots=True)

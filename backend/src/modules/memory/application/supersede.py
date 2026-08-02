@@ -10,7 +10,7 @@ import logging
 import math
 from dataclasses import dataclass, field
 
-from flow_agent.memory.vector_store import MemoryItem, MemoryStore
+from modules.memory.infra.vector_store import MemoryItem, MemoryStore
 
 logger = logging.getLogger(__name__)
 

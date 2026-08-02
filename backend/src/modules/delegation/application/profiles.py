@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules.delegation.application.models import SubagentSpec
-from flow_agent.tools.filesystem import ReadFileTool
+from modules.capabilities.tools.adapters.filesystem import ReadFileTool
 
 PROFILE_RESEARCH = "research"
 PROFILE_SCRIPTING = "scripting"

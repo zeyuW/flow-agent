@@ -4,15 +4,15 @@ from collections.abc import Mapping
 from pathlib import Path
 from infra.observability.trace import TraceRecorder
 
-from flow_agent.proactive.data_gateway import DataGateway
+from modules.proactive.infra.data_gateway import DataGateway
 from modules.proactive.application.drift_pipeline import DriftTurnPipeline
-from flow_agent.proactive.drift_store import DriftStateStore
+from modules.proactive.infra.drift_store import DriftStateStore
 from modules.proactive.application.events import ProactiveEventBridge
-from flow_agent.proactive.gate import AnyActionGate, ProactiveStateStore
+from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore
 from modules.proactive.application.judge_loop import JudgeLoop
 from modules.proactive.application.lifecycle import compile_proactive_lifecycle
 from modules.proactive.application.mcp_polling import McpPollingModule
-from flow_agent.proactive.mcp_pool import McpClientPool
+from modules.proactive.infra.mcp_pool import McpClientPool
 from modules.proactive.application.loop import HawkesConfig, ProactiveLoop
 from modules.proactive.application.pipeline import ProactiveTurnPipeline
 

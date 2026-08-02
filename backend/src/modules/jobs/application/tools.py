@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules.jobs.application.runtime import BackgroundRuntime
-from flow_agent.tools.base import ToolResult
+from modules.capabilities.tools.base import ToolResult
 
 
 @dataclass(slots=True)

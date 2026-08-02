@@ -4,7 +4,7 @@
 包含四个部分：强制约束、用户偏好、待跟进需求与任务、相关历史。
 """
 
-from flow_agent.memory.memory_retriever import RetrievalHit
+from modules.memory.infra.retriever import RetrievalHit
 
 
 def format_injection_block(

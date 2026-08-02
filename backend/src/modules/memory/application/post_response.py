@@ -9,11 +9,11 @@
 import logging
 from dataclasses import dataclass, field
 
-from flow_agent.memory.markdown_store import MarkdownStore
+from modules.memory.markdown_store import MarkdownStore
 from modules.memory.application.memorizer import Memorizer
 from modules.memory.application.profile_extractor import ExtractedProfileItem, ProfileExtractor
 from modules.memory.application.supersede import SupersedeDetector
-from flow_agent.memory.vector_store import MemoryStore, _compute_content_hash
+from modules.memory.infra.vector_store import MemoryStore, _compute_content_hash
 
 logger = logging.getLogger(__name__)
 

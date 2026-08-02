@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from flow_agent.memory.embedder import OpenAIEmbedder
-from flow_agent.memory.markdown_store import MarkdownStore
-from flow_agent.memory.memory_engine import MemoryEngine
-from flow_agent.memory.memory_retriever import DualChannelRetriever
+from modules.memory.infra.embedder import OpenAIEmbedder
+from modules.memory.markdown_store import MarkdownStore
+from modules.memory.memory_engine import MemoryEngine
+from modules.memory.infra.retriever import DualChannelRetriever
 from modules.memory.application.memorizer import Memorizer
 from modules.memory.application.post_response import PostResponseMemoryWorker
 from modules.memory.application.supersede import SupersedeDetector
-from flow_agent.memory.vector_store import MemoryStore
+from modules.memory.infra.vector_store import MemoryStore
 from modules.memory.application.query_rewriter import QueryRewriter
 from modules.memory.domain.dedup_decider import DedupDecider
 

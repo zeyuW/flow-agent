@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from flow_agent.background.jobs import JobSpec
+from modules.jobs.domain.models import JobSpec
 from modules.capabilities.mcp.config import McpServerSpec
 from modules.capabilities.plugins.plugin_context import PluginConfig, PluginContext, PluginKVStore
 from modules.capabilities.plugins.plugin_registry import plugin_registry

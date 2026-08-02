@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from modules.jobs.domain.models import JobSpec, JobRun
-from flow_agent.background.writer import JobStoreWriter
+from modules.jobs.infra.writer import JobStoreWriter
 from infra.resilience.errors import classify_error
 from infra.resilience.retry import RetryPolicy, retry_call
 

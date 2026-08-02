@@ -412,7 +412,7 @@ class SubagentManager:
         )
 
         # 完成事件重新进入 AgentLoop，由主代理组织最终用户回复。
-        from flow_agent.channels.models import InboundMessage
+        from interfaces.channels.models import InboundMessage
         msg = InboundMessage(
             channel=origin_channel,
             session_id=origin_session_id or origin_chat_id,

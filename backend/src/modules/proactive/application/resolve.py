@@ -3,7 +3,7 @@
 import hashlib
 import logging
 
-from flow_agent.proactive.gate import ProactiveStateStore
+from modules.proactive.infra.gate import ProactiveStateStore
 from modules.proactive.domain.models import JudgeResult, ResolveResult
 
 logger = logging.getLogger(__name__)

@@ -7,8 +7,8 @@
 import logging
 from dataclasses import dataclass
 
-from flow_agent.memory.embedder import Embedder
-from flow_agent.memory.vector_store import MemoryStore
+from modules.memory.infra.embedder import Embedder
+from modules.memory.infra.vector_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class Memorizer:
     ) -> MemorizeResult:
         """写入一条记忆。"""
         # 先检查是否已存在（只用 content_hash，不走 embedding 以节省成本）
-        from flow_agent.memory.vector_store import _compute_content_hash
+        from modules.memory.infra.vector_store import _compute_content_hash
 
         content_hash = _compute_content_hash(summary, memory_type)
         existing = self.store.search_by_source_ref(source_ref) if source_ref else []
@@ -101,7 +101,7 @@ class Memorizer:
         """强制写入（即使内容重复也创建新条目）。"""
         if embedding is None:
             embedding = self.embedder.embed(summary)
-        from flow_agent.memory.vector_store import _compute_content_hash
+        from modules.memory.infra.vector_store import _compute_content_hash
 
         content_hash = _compute_content_hash(summary, memory_type)
         item = self.store.write(
