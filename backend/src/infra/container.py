@@ -11,7 +11,7 @@ from infra.worker import WorkerPool, WorkerSupervisor
 
 
 @dataclass
-class InfrastructureContainer:
+class InfraContainer:
     """集中管理可被业务模块共享的技术基础设施实例。"""
 
     message_bus: MessageBus
@@ -23,7 +23,7 @@ class InfrastructureContainer:
     _close_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     @classmethod
-    def create(cls) -> "InfrastructureContainer":
+    def create(cls) -> "InfraContainer":
         """创建不包含任何业务对象的基础设施容器。"""
 
         return cls(

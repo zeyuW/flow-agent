@@ -1,11 +1,11 @@
-from infra.container import InfrastructureContainer
+from infra.container import InfraContainer
 from infra.lifecycle import RuntimeService
 from infra.messagebus import EventBus, MessageBus
 from infra.worker import WorkerSupervisor
 
 
 def test_infrastructure_container_builds_only_shared_services():
-    container = InfrastructureContainer.create()
+    container = InfraContainer.create()
 
     assert isinstance(container.message_bus, MessageBus)
     assert isinstance(container.event_bus, EventBus)

@@ -9,7 +9,7 @@ from infra.telemetry.events import classify_event, to_envelope
 
 
 @dataclass(slots=True)
-class UnifiedEventSnapshot:
+class EventSnapshot:
     turns: list[dict[str, Any]]
     tools: list[dict[str, Any]]
     proactive: list[dict[str, Any]]
@@ -18,7 +18,7 @@ class UnifiedEventSnapshot:
     all_events: list[dict[str, Any]]
 
 
-class UnifiedEventStore:
+class EventStore:
     """Unified event store with envelope normalization."""
 
     def __init__(self, capacity: int = 300) -> None:
@@ -48,9 +48,9 @@ class UnifiedEventStore:
                 self._subagents.append(normalized)
         return normalized
 
-    def snapshot(self) -> UnifiedEventSnapshot:
+    def snapshot(self) -> EventSnapshot:
         with self._lock:
-            return UnifiedEventSnapshot(
+            return EventSnapshot(
                 turns=list(self._turns),
                 tools=list(self._tools),
                 proactive=list(self._proactive),
