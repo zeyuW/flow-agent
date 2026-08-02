@@ -11,56 +11,15 @@ import asyncio
 import logging
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
 from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
 from modules.delivery.infra.outbox import SQLiteOutboxStore
+from infra.messagebus.queues import InboundQueue, OutboundQueue
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class InboundQueue:
-    """入站消息队列：线程安全的 FIFO 队列。"""
-
-    _queue: deque[Any] = field(default_factory=deque)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def publish(self, message: Any) -> None:
-        """向入站队列发布一条消息。"""
-        with self._lock:
-            self._queue.append(message)
-            logger.debug("inbound published: channel=%s session=%s", message.channel, message.session_id)
-
-    def consume_one(self) -> Any | None:
-        """从入站队列消费一条消息（非阻塞）。"""
-        with self._lock:
-            if self._queue:
-                return self._queue.popleft()
-            return None
-
-    async def consume_one_async(self, poll_interval_ms: int = 100) -> Any | None:
-        """从入站队列阻塞消费一条消息（异步，适用于 AgentLoop 主循环）。"""
-        while True:
-            with self._lock:
-                if self._queue:
-                    return self._queue.popleft()
-            await asyncio.sleep(poll_interval_ms / 1000.0)
-
-    def consume_all(self) -> list[Any]:
-        """消费入站队列中的所有消息。"""
-        with self._lock:
-            items = list(self._queue)
-            self._queue.clear()
-            return items
-
-    @property
-    def size(self) -> int:
-        with self._lock:
-            return len(self._queue)
 
 
 @dataclass
@@ -122,103 +81,6 @@ class DeliveryHandle:
         """非阻塞读取当前回执。"""
 
         return self._receipt if self._event.is_set() else None
-
-
-@dataclass
-class OutboundQueue:
-    """出站消息队列：支持订阅者模式的出站队列。
-
-    按 channel 分类存储订阅者回调，确保回复只发给对应渠道。
-    """
-
-    _queue: deque[OutboundMessage] = field(default_factory=deque)
-    _subscribers: dict[str, list[Callable[[OutboundMessage], None]]] = field(default_factory=dict)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-
-    def subscribe(self, channel: str, callback: Callable[[OutboundMessage], None]) -> None:
-        """注册出站消息订阅者（渠道适配器的回调函数）。
-
-        按 channel 分类存储订阅者，确保回复只发给对应渠道。
-        """
-        with self._lock:
-            if channel not in self._subscribers:
-                self._subscribers[channel] = []
-            if callback not in self._subscribers[channel]:
-                self._subscribers[channel].append(callback)
-                logger.debug("outbound subscriber registered: channel=%s", channel)
-
-    def unsubscribe(self, channel: str, callback: Callable[[OutboundMessage], None]) -> None:
-        """取消订阅。"""
-        with self._lock:
-            if channel in self._subscribers and callback in self._subscribers[channel]:
-                self._subscribers[channel].remove(callback)
-                if not self._subscribers[channel]:
-                    del self._subscribers[channel]
-
-    def publish(self, message: OutboundMessage) -> None:
-        """投递一条出站消息到队列（由 BusOutboundPort 调用）。"""
-        with self._lock:
-            self._queue.append(message)
-            logger.debug(f"outbound queued: channel={message.channel} session={message.session_id} queue_size={len(self._queue)}")
-
-    def dispatch(self, message: OutboundMessage) -> None:
-        """同步投递一条出站消息：入队并立即推送给对应渠道的所有订阅者。"""
-        with self._lock:
-            self._queue.append(message)
-            subs = list(self._subscribers.get(message.channel, []))
-        for callback in subs:
-            try:
-                callback(message)
-            except Exception:
-                logger.exception("outbound subscriber callback failed for channel=%s", message.channel)
-
-    async def dispatch_async(self, message: OutboundMessage) -> None:
-        """异步投递一条出站消息，支持协程回调。"""
-        with self._lock:
-            self._queue.append(message)
-            subs = list(self._subscribers.get(message.channel, []))
-        for callback in subs:
-            try:
-                result = callback(message)
-                if asyncio.iscoroutine(result):
-                    await result
-            except Exception:
-                logger.exception("outbound subscriber async dispatch failed for channel=%s", message.channel)
-
-    def consume_one(self) -> OutboundMessage | None:
-        """从出站队列消费一条消息（非阻塞）。"""
-        with self._lock:
-            if self._queue:
-                return self._queue.popleft()
-            return None
-
-    async def consume_one_async(self, poll_interval_ms: int = 100) -> OutboundMessage | None:
-        """从出站队列阻塞消费一条消息（异步，适用于后台 dispatch 任务）。"""
-        while True:
-            with self._lock:
-                if self._queue:
-                    msg = self._queue.popleft()
-                    logger.debug(f"consumed outbound message: channel={msg.channel} session={msg.session_id} remaining={len(self._queue)}")
-                    return msg
-            await asyncio.sleep(poll_interval_ms / 1000.0)
-        return None
-
-    def drain(self) -> list[OutboundMessage]:
-        """清空并返回到目前为止入队的消息。"""
-        with self._lock:
-            items = list(self._queue)
-            self._queue.clear()
-            return items
-
-    @property
-    def subscriber_count(self) -> int:
-        with self._lock:
-            return sum(len(subs) for subs in self._subscribers.values())
-
-    def has_subscribers(self, channel: str) -> bool:
-        """检查指定渠道是否有注册的订阅者。"""
-        with self._lock:
-            return channel in self._subscribers and len(self._subscribers[channel]) > 0
 
 
 class OutboundPort(Protocol):
