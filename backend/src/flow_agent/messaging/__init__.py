@@ -1,4 +1,4 @@
-from flow_agent.messaging.message_bus import (
+from modules.delivery.infra.message_bus import (
     MessageBus,
     InboundQueue,
     OutboundQueue,

@@ -1,6 +1,6 @@
 """将既有消息总线接入投递模块端口。"""
 
-from flow_agent.messaging.message_bus import MessageBus, OutboundDispatch
+from modules.delivery.infra.message_bus import MessageBus, OutboundDispatch
 from modules.delivery.application.ports import (
     DeliveryReceipt,
     DeliveryRequest,

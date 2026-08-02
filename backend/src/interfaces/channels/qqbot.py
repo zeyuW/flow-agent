@@ -14,7 +14,7 @@ from typing import Any
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import OutboundMessage
-from flow_agent.messaging.message_bus import MessageBus
+from modules.delivery.infra.message_bus import MessageBus
 
 try:
     import websockets
