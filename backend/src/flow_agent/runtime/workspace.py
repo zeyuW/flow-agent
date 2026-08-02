@@ -1,18 +1,17 @@
-"""工作区布局的旧路径转发层。"""
+"""工作区布局旧路径转发层。"""
 
-from pathlib import Path
+from importlib import import_module
 
 from infra.runtime.workspace import *
-from infra.runtime.workspace import init_workspace as _init_workspace
 
 
-def init_workspace(root: Path):
-    """兼容旧入口，完成记忆和主动状态的业务初始化。"""
+def init_workspace(root):
+    """兼容旧入口，转交给启动层完成业务目录初始化。"""
+    return import_module("bootstrap.workspace").init_workspace(root)
 
-    layout = _init_workspace(root)
-    from modules.memory.markdown_store import MarkdownStore
-    from modules.proactive.infra.gate import ProactiveStateStore
 
-    MarkdownStore(layout.memory_dir).initialize()
-    ProactiveStateStore(layout.proactive_state_db).close()
-    return layout
+def __getattr__(name: str):
+    """按需解析启动初始化逻辑，避免旧包静态依赖组合根。"""
+    if name == "init_workspace":
+        return getattr(import_module("bootstrap.workspace"), name)
+    return getattr(import_module("infra.runtime.workspace"), name)
