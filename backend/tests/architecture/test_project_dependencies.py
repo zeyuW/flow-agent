@@ -87,3 +87,11 @@ def test_bus_adapters_use_role_names_instead_of_legacy_names():
     assert (delivery_infra / "port_adapter.py").exists()
     assert not (conversation_infra / "legacy_message_bus.py").exists()
     assert not (delivery_infra / "legacy_message_bus.py").exists()
+
+
+def test_worker_manager_uses_accurate_lifecycle_name():
+    """后台常驻线程管理器不使用暗示故障恢复的 Supervisor 名称。"""
+
+    worker_root = SOURCE_ROOT / "infra" / "worker"
+    assert (worker_root / "manager.py").exists()
+    assert not (worker_root / "supervisor.py").exists()

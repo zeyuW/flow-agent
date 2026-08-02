@@ -1,9 +1,9 @@
 import threading
 
-from infra.worker import WorkerSupervisor
+from infra.worker import WorkerManager
 
 
-def test_worker_supervisor_starts_and_stops_named_worker():
+def test_worker_manager_starts_and_stops_named_worker():
     stopped = threading.Event()
     finished = threading.Event()
 
@@ -12,7 +12,7 @@ def test_worker_supervisor_starts_and_stops_named_worker():
         stopped.set()
         finished.set()
 
-    supervisor = WorkerSupervisor()
+    supervisor = WorkerManager()
     supervisor.register("demo", run)
     supervisor.start("demo")
     assert supervisor.running("demo") is True

@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 
 from infra.lifecycle import RuntimeService, create_runtime_service
 from infra.bus import EventBus, MessageBus
-from infra.worker import WorkerPool, WorkerSupervisor
+from infra.worker import WorkerManager, WorkerPool
 
 
 @dataclass
@@ -17,7 +17,7 @@ class InfraContainer:
     message_bus: MessageBus
     event_bus: EventBus
     runtime: RuntimeService
-    workers: WorkerSupervisor
+    workers: WorkerManager
     worker_pool: WorkerPool
     _closed: bool = field(default=False, init=False, repr=False)
     _close_lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
@@ -30,7 +30,7 @@ class InfraContainer:
             message_bus=MessageBus(),
             event_bus=EventBus(),
             runtime=create_runtime_service(),
-            workers=WorkerSupervisor(),
+            workers=WorkerManager(),
             worker_pool=WorkerPool(),
         )
 

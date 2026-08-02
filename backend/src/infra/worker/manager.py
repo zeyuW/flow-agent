@@ -19,7 +19,7 @@ class _WorkerState:
     thread: threading.Thread | None = None
 
 
-class WorkerSupervisor:
+class WorkerManager:
     """管理带停止信号的后台常驻线程，不介入业务重试策略。"""
 
     def __init__(self) -> None:
