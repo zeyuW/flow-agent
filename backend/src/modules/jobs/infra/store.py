@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from modules.jobs.domain.models import JobRun
-from flow_agent.runtime.errors import ErrorCategory
+from infra.resilience.errors import ErrorCategory
 
 
 def _utc_now() -> datetime:

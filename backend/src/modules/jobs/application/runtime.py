@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 from modules.jobs.domain.models import JobSpec, JobRun
 from flow_agent.background.writer import JobStoreWriter
-from flow_agent.runtime.errors import classify_error
-from flow_agent.runtime.retry import RetryPolicy, retry_call
+from infra.resilience.errors import classify_error
+from infra.resilience.retry import RetryPolicy, retry_call
 
 
 logger = logging.getLogger(__name__)

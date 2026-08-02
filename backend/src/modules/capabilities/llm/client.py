@@ -6,8 +6,8 @@ from typing import Protocol
 
 from openai import AsyncOpenAI, APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
 
-from flow_agent.runtime.fallback import with_fallback
-from flow_agent.runtime.retry import RetryPolicy, retry_call
+from infra.resilience.fallback import with_fallback
+from infra.resilience.retry import RetryPolicy, retry_call
 from infra.config.schema import ModelEndpointConfig
 
 
