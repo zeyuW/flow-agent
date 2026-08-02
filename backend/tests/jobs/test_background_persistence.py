@@ -4,6 +4,7 @@ import threading
 from modules.jobs.domain.models import JobSpec
 from modules.jobs.application.runtime import BackgroundRuntime, InMemoryJobRegistry
 from modules.jobs.infra.store import SQLiteJobStore
+from infra.persistence.sqlite import SQLiteDatabase
 from modules.jobs.application.tools import (
     ListBackgroundJobsTool,
     ListBackgroundRunsTool,
@@ -31,6 +32,14 @@ def test_background_job_state_and_history_survive_restart(tmp_path: Path):
     assert runs[0].status == "succeeded"
     assert runs[0].result == "完成"
     restored.close()
+
+
+def test_background_store_uses_shared_sqlite_infrastructure(tmp_path: Path):
+    store = SQLiteJobStore(tmp_path / "background.db")
+
+    assert isinstance(store.database, SQLiteDatabase)
+
+    store.close()
 
 
 def test_background_tools_expose_registered_jobs_and_persisted_runs(tmp_path: Path):
