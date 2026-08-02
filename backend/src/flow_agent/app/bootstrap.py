@@ -41,8 +41,8 @@ from flow_agent.memory.maintenance import (
     MemoryOptimizer,
     MemoryOptimizerLoop,
 )
-from flow_agent.tools.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
-from flow_agent.tools.memorize import MemorizeTool, MemorizeToolAdapter
+from modules.memory.application.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
+from modules.memory.application.memorize import MemorizeTool, MemorizeToolAdapter
 from modules.jobs.application.runtime import BackgroundRuntime, InMemoryJobRegistry
 from modules.jobs.infra.store import SQLiteJobStore
 from modules.jobs.application.tools import (
@@ -77,7 +77,7 @@ from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
 from modules.capabilities.skills.loader import SkillLoader
 from modules.capabilities.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
-from flow_agent.tools.spawn import SpawnTool
+from modules.delegation.application.spawn import SpawnTool
 from flow_agent.tools.registry import ToolRegistry
 from modules.capabilities.plugins.plugin_loader import PluginManager
 from flow_agent.proactive.sources import (

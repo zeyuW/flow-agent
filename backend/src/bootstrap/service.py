@@ -10,7 +10,7 @@ from infra.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
 from infra.paths import WORKSPACE_LAYOUT
 from interfaces.channels.telegram import TelegramChannel
-from flow_agent.tools.message_push import MessagePushTool
+from modules.delivery.application.message_push import MessagePushTool
 from infra.runtime.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
