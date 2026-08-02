@@ -3,7 +3,7 @@ from typing import Any
 import re
 import threading
 
-from flow_agent.guard.guards import ToolGuard
+from modules.capabilities.tools.guard import ToolGuard
 from modules.capabilities.tools.base import Tool, ToolResult
 
 
