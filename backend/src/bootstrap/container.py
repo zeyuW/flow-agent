@@ -98,9 +98,6 @@ from modules.proactive.infra.sources import (
     WebSnapshotSource,
 )
 
-BACKEND_ROOT = Path(__file__).resolve().parents[3]
-
-
 """新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
 
 核心流程:
@@ -525,7 +522,7 @@ def create_app_runtime(config: AppConfig):
     )
     background_runtime.config_watcher = ConfigWatchLoop(
         ConfigWatcher(
-            BACKEND_ROOT / "config.toml",
+            PROJECT_ROOT / "config.toml",
             current=cfg,
             appliers=(runtime_config_applier,),
         )

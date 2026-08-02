@@ -8,7 +8,7 @@ from bootstrap.config import load_application_config
 from bootstrap.service import run_service
 from bootstrap.workspace import init_workspace
 
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -32,9 +32,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        config = load_application_config(BACKEND_ROOT)
+        config = load_application_config(PROJECT_ROOT)
     except (OSError, ValueError) as exc:
-        print(f"启动失败：无法加载 backend/config.toml：{exc}")
+        print(f"启动失败：无法加载项目根目录 config.toml：{exc}")
         return 2
     run_service(config)
     return 0
