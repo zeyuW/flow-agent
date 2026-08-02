@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from infra.persistence.sqlite import SQLiteDatabase
+
 
 @dataclass(slots=True, frozen=True)
 class OutboxRecord:
@@ -34,17 +36,19 @@ class SQLiteOutboxStore:
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.RLock()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._database = SQLiteDatabase(path)
+        self._database.connection.row_factory = sqlite3.Row
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(str(self.path), timeout=10)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA journal_mode=WAL")
-        return connection
+    @property
+    def database(self) -> SQLiteDatabase:
+        """返回共享 SQLite 适配器。"""
+
+        return self._database
 
     def _initialize(self) -> None:
-        with self._lock, self._connect() as connection:
+        self._database.connection.execute("PRAGMA journal_mode=WAL")
+        with self._lock, self._database.transaction() as connection:
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS outbound_deliveries (
@@ -70,7 +74,7 @@ class SQLiteOutboxStore:
     def mark_interrupted_sending_unknown(self) -> int:
         """启动恢复时把遗留 sending 转为不可自动重放的 unknown。"""
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             cursor = connection.execute(
                 """
                 UPDATE outbound_deliveries
@@ -97,7 +101,7 @@ class SQLiteOutboxStore:
 
         now = time.time()
         encoded = json.dumps(metadata, ensure_ascii=False, default=str)
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             connection.execute(
                 """
                 INSERT INTO outbound_deliveries (
@@ -122,7 +126,7 @@ class SQLiteOutboxStore:
     def mark_sending(self, delivery_id: str) -> None:
         """增加尝试次数并进入 sending 状态。"""
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             connection.execute(
                 """
                 UPDATE outbound_deliveries
@@ -151,7 +155,7 @@ class SQLiteOutboxStore:
     def expire_before(self, cutoff: float) -> int:
         """将恢复窗口之前的可重试消息标记为过期，避免启动时补发旧消息。"""
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             cursor = connection.execute(
                 """
                 UPDATE outbound_deliveries
@@ -171,7 +175,7 @@ class SQLiteOutboxStore:
         self._mark_terminal(delivery_id, "expired", error)
 
     def _mark_terminal(self, delivery_id: str, status: str, error: str) -> None:
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             connection.execute(
                 """
                 UPDATE outbound_deliveries
@@ -194,7 +198,7 @@ class SQLiteOutboxStore:
         if max_age_seconds is not None:
             cutoff = (time.time() if now is None else now) - max(0.0, max_age_seconds)
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             rows = connection.execute(
                 """
                 SELECT delivery_id, channel, session_id, chat_id, text,
@@ -214,7 +218,7 @@ class SQLiteOutboxStore:
     def get(self, delivery_id: str) -> OutboxRecord | None:
         """读取单条投递记录，供测试和诊断使用。"""
 
-        with self._lock, self._connect() as connection:
+        with self._lock, self._database.transaction() as connection:
             row = connection.execute(
                 """
                 SELECT delivery_id, channel, session_id, chat_id, text,
@@ -225,6 +229,12 @@ class SQLiteOutboxStore:
                 (delivery_id,),
             ).fetchone()
         return self._record_from_row(row) if row is not None else None
+
+    def close(self) -> None:
+        """关闭底层数据库连接。"""
+
+        with self._lock:
+            self._database.close()
 
     @staticmethod
     def _record_from_row(row: sqlite3.Row) -> OutboxRecord:

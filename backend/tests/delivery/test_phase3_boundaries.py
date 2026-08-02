@@ -6,6 +6,7 @@ from modules.delivery.infra.outbox import SQLiteOutboxStore
 from modules.proactive.application.deliver import deliver_message
 from modules.proactive.domain.models import ResolveResult
 from modules.delegation.application.manager import SubagentManager
+from infra.persistence.sqlite import SQLiteDatabase
 
 
 def test_proactive_delivery_uses_stable_delivery_key():
@@ -59,6 +60,14 @@ def test_outbox_skips_already_delivered_delivery_id(tmp_path):
     assert handle.receipt() is not None
     assert handle.receipt().delivered is True
     assert bus.outbound.consume_one() is None
+
+
+def test_outbox_uses_shared_sqlite_infrastructure(tmp_path):
+    store = SQLiteOutboxStore(tmp_path / "outbox.db")
+
+    assert isinstance(store.database, SQLiteDatabase)
+
+    store.close()
 
 
 def test_subagent_completion_is_idempotent(tmp_path):

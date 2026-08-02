@@ -208,7 +208,7 @@ def test_stale_outbox_is_expired_instead_of_replayed(tmp_path: Path):
         text="过期消息",
         metadata={},
     )
-    with store._lock, store._connect() as connection:
+    with store.database.transaction() as connection:
         connection.execute(
             "UPDATE outbound_deliveries SET created_at = ?, updated_at = ? "
             "WHERE delivery_id = ?",
