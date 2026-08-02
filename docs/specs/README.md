@@ -19,7 +19,7 @@
 - HTTP、CLI、MCP 和第三方 IM 渠道协议适配放在 `interfaces`。
 - LLM、Tools、MCP、Skills 等可复用 Agent 能力放在 `modules/capabilities`。
 - `bootstrap` 是唯一组合根，负责配置加载、依赖装配、启动和关闭。
-- 迁移完成后删除 `flow_agent` 旧实现和转发层，不保留长期兼容入口。
+- `flow_agent` 旧实现和转发层已删除，源码只保留新的业务模块边界。
 
 ## 二、目录职责
 
@@ -147,6 +147,6 @@ conversation/application/tools
 
 - 新代码不得新增 `flow_agent` 导入。
 - 迁移时先移动真实实现，再更新应用入口和组合根。
-- 旧路径只能作为短期转发层，迁移完成后删除。
+- 迁移完成后不保留旧路径转发层。
 - 每批迁移必须通过架构检查、全量测试、类型检查和格式检查。
 - 不为了兼容旧内部导入路径而保留重复实现。
