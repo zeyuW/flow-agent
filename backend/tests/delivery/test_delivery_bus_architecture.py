@@ -6,14 +6,14 @@ import time
 
 from modules.conversation.application.agent import Agent
 from modules.conversation.infra.context import ConversationContext
-from modules.delivery.infra.message_bus import (
-    MessageBus,
+from modules.delivery.infra.delivery_bus import (
+    DeliveryBus,
     InboundQueue,
     OutboundQueue,
     OutboundDispatch,
     BusOutboundPort,
 )
-from infra.messagebus.event_bus import EventBus, Event, TurnCommitted
+from infra.bus.event import EventBus, Event, TurnCommitted
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.agent_loop import AgentLoop, ProcessingState
 from modules.conversation.application.phase import PhaseModule, TurnFlow
@@ -163,10 +163,10 @@ def test_bus_outbound_port_send():
     assert consumed.channel == "cli"
 
 
-# ── MessageBus 集成测试 ───────────────────────────────────
+# ── DeliveryBus 集成测试 ───────────────────────────────────
 
 def test_message_bus_inbound_flow():
-    bus = MessageBus()
+    bus = DeliveryBus()
     msg = InboundMessage(channel="test", session_id="s1", text="hello")
     bus.publish_inbound(msg)
     consumed = bus.consume_inbound()
@@ -175,8 +175,8 @@ def test_message_bus_inbound_flow():
 
 
 def test_message_bus_outbound_subscribe_publish():
-    """测试 MessageBus.subscribe_outbound(channel, callback) 和 OutboundQueue.publish。"""
-    bus = MessageBus()
+    """测试 DeliveryBus.subscribe_outbound(channel, callback) 和 OutboundQueue.publish。"""
+    bus = DeliveryBus()
     sub = _FakeSubscriber()
     bus.subscribe_outbound("cli", sub.on_outbound)
     msg = OutboundMessage(channel="cli", session_id="s1", text="reply")
@@ -190,8 +190,8 @@ def test_message_bus_outbound_subscribe_publish():
 
 
 def test_message_bus_dispatch_outbound():
-    """测试 MessageBus.dispatch_outbound（兼容旧接口）。"""
-    bus = MessageBus()
+    """测试 DeliveryBus.dispatch_outbound（兼容旧接口）。"""
+    bus = DeliveryBus()
     sub = _FakeSubscriber()
     bus.subscribe_outbound("cli", sub.on_outbound)
     msg = OutboundMessage(channel="cli", session_id="s1", text="compat")
@@ -203,8 +203,8 @@ def test_message_bus_dispatch_outbound():
 
 
 def test_message_bus_outbound_port():
-    """测试 MessageBus.outbound_port。"""
-    bus = MessageBus()
+    """测试 DeliveryBus.outbound_port。"""
+    bus = DeliveryBus()
     assert bus.outbound_port is not None
     dispatch = OutboundDispatch(channel="cli", session_id="s1", text="via port")
     bus.outbound_port.send(dispatch)
@@ -301,7 +301,7 @@ def test_pipeline_runs_six_phases():
     )
     registry = ToolRegistry()
     registry.register(FakeTool())
-    bus = MessageBus()
+    bus = DeliveryBus()
     eb = EventBus()
     out_sub = _FakeSubscriber()
     bus.subscribe_outbound("cli", out_sub.on_outbound)
@@ -341,7 +341,7 @@ def test_pipeline_outbound_port():
     )
     registry = ToolRegistry()
     registry.register(FakeTool())
-    bus = MessageBus()
+    bus = DeliveryBus()
     eb = EventBus()
 
     pipeline = PassiveTurnPipeline(
@@ -368,7 +368,7 @@ def test_pipeline_errors_gracefully():
         context=ConversationContext(),
     )
     registry = ToolRegistry()
-    bus = MessageBus()
+    bus = DeliveryBus()
     eb = EventBus()
 
     pipeline = PassiveTurnPipeline(
@@ -403,7 +403,7 @@ def test_agent_loop_run_once():
     )
     registry = ToolRegistry()
     registry.register(FakeTool())
-    bus = MessageBus()
+    bus = DeliveryBus()
     eb = EventBus()
 
     pipeline = PassiveTurnPipeline(
@@ -424,13 +424,13 @@ def test_agent_loop_run_once():
     assert consumed.text == "pipeline final answer"
 
 
-# ── 渠道 MessageBus 集成测试（新 subscribe 接口）────────────
+# ── 渠道 DeliveryBus 集成测试（新 subscribe 接口）────────────
 
 def test_cli_channel_publishes_to_message_bus():
-    """测试 CLI 渠道通过 MessageBus 发布入站消息。"""
+    """测试 CLI 渠道通过 DeliveryBus 发布入站消息。"""
     from interfaces.channels.cli import CLIChannel
 
-    bus = MessageBus()
+    bus = DeliveryBus()
     cli = CLIChannel(message_bus=bus, default_session_id="test")
     cli.start()
 
@@ -447,11 +447,11 @@ def test_cli_channel_receives_outbound_via_subscription():
     """测试 CLI 渠道通过订阅回调接收出站消息。"""
     from interfaces.channels.cli import CLIChannel
 
-    bus = MessageBus()
+    bus = DeliveryBus()
     cli = CLIChannel(message_bus=bus)
     cli.start()
 
-    # 模拟 MessageBus 分发（通过订阅回调）
+    # 模拟 DeliveryBus 分发（通过订阅回调）
     msg = OutboundMessage(channel="cli", session_id="test", text="response text")
     bus.outbound.dispatch(msg)
 
@@ -461,10 +461,10 @@ def test_cli_channel_receives_outbound_via_subscription():
 # ── 完整集成流程测试 ─────────────────────────────────────
 
 def test_full_message_bus_architecture_flow():
-    """端到端测试：渠道 → MessageBus → AgentLoop → Pipeline → 回复。
+    """端到端测试：渠道 → DeliveryBus → AgentLoop → Pipeline → 回复。
 
     验证：
-    1. 入站消息通过 MessageBus 发布
+    1. 入站消息通过 DeliveryBus 发布
     2. AgentLoop 拉取并处理
     3. Pipeline AfterTurn 阶段：
        ① 先通过 EventBus 广播 TurnCommitted
@@ -478,7 +478,7 @@ def test_full_message_bus_architecture_flow():
     )
     registry = ToolRegistry()
     registry.register(FakeTool())
-    bus = MessageBus()
+    bus = DeliveryBus()
     eb = EventBus()
 
     # 出站订阅者

@@ -1,6 +1,6 @@
-"""将既有消息总线接入投递模块端口。"""
+"""将投递总线接入投递应用端口。"""
 
-from modules.delivery.infra.message_bus import MessageBus, OutboundDispatch
+from modules.delivery.infra.delivery_bus import DeliveryBus, OutboundDispatch
 from modules.delivery.application.ports import (
     DeliveryReceipt,
     DeliveryRequest,
@@ -8,14 +8,14 @@ from modules.delivery.application.ports import (
 )
 
 
-class LegacyMessageBusDeliveryPort:
-    """使用既有 Outbox 与渠道分发器完成可靠投递。"""
+class DeliveryPortAdapter:
+    """使用 Outbox 与渠道分发器完成可靠投递。"""
 
-    def __init__(self, bus: MessageBus) -> None:
+    def __init__(self, bus: DeliveryBus) -> None:
         self._bus = bus
 
     def submit(self, request: DeliveryRequest) -> DeliverySubmission:
-        """将请求写入既有 Outbox，返回稳定的投递关联标识。"""
+        """将请求写入 Outbox，返回稳定的投递关联标识。"""
 
         handle = self._bus.outbound_port.send(self._to_dispatch(request))
         return DeliverySubmission(delivery_id=handle.delivery_id)
@@ -26,7 +26,7 @@ class LegacyMessageBusDeliveryPort:
         *,
         timeout: float,
     ) -> DeliveryReceipt:
-        """委托旧总线发送，并将其回执转换为投递领域回执。"""
+        """委托投递总线发送，并将回执转换为投递领域回执。"""
 
         receipt = await self._bus.outbound_port.send_and_wait(
             self._to_dispatch(request), timeout=timeout

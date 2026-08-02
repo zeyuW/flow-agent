@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from modules.delivery.infra.message_bus import InboundQueue
+from modules.delivery.infra.delivery_bus import InboundQueue
 from modules.scheduling.application.runtime import SchedulerService, parse_duration
 from modules.scheduling.application.tools import (
     CancelScheduledTaskTool,

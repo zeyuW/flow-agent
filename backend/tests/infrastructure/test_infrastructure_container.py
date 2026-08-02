@@ -1,6 +1,6 @@
 from infra.container import InfraContainer
 from infra.lifecycle import RuntimeService
-from infra.messagebus import EventBus, MessageBus
+from infra.bus import EventBus, MessageBus
 from infra.worker import WorkerSupervisor
 
 

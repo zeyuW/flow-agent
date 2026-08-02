@@ -1,10 +1,10 @@
 """投递模块的持久化与消息适配器。"""
 
-from infra.messagebus.event_bus import Event, EventSubscription, EventBus, TurnCommitted
-from modules.delivery.infra.message_bus import (
+from infra.bus.event import Event, EventSubscription, EventBus, TurnCommitted
+from modules.delivery.infra.delivery_bus import (
     BusOutboundPort,
     InboundQueue,
-    MessageBus,
+    DeliveryBus,
     OutboundDispatch,
     OutboundPort,
     OutboundQueue,
@@ -16,7 +16,7 @@ __all__ = [
     "EventBus",
     "EventSubscription",
     "InboundQueue",
-    "MessageBus",
+    "DeliveryBus",
     "OutboundDispatch",
     "OutboundPort",
     "OutboundQueue",

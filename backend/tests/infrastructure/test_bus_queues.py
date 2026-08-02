@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from infra.messagebus.queues import InboundQueue, OutboundQueue
+from infra.bus.queues import InboundQueue, OutboundQueue
 
 
 @dataclass(frozen=True)

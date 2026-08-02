@@ -1,6 +1,6 @@
 """消息总线：实现入站队列、出站队列和发布/订阅机制。
 
-MessageBus 是解耦渠道与核心逻辑的关键组件：
+DeliveryBus 是解耦渠道与核心逻辑的关键组件：
 - InboundQueue: 渠道适配器发布消息到此队列
 - OutboundPort: AgentLoop 投递回复的抽象接口
 - BusOutboundPort: 将 OutboundDispatch 转换为 OutboundMessage 并发布到出站队列
@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
 from modules.delivery.infra.outbox import SQLiteOutboxStore
-from infra.messagebus.queues import InboundQueue, OutboundQueue
+from infra.bus.queues import InboundQueue, OutboundQueue
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ class BusOutboundPort(OutboundPort):
 
 
 @dataclass
-class MessageBus:
+class DeliveryBus:
     """消息总线：解耦渠道和核心逻辑的中心枢纽。
 
     提供两个方向的队列：
@@ -287,7 +287,7 @@ class MessageBus:
         """渠道适配器调用：注册出站订阅回调。
 
         渠道启动时调用此方法注册 on_response 回调函数。
-        MessageBus 后台 dispatch_outbound 任务在收到出站消息时调用此回调。
+        DeliveryBus 后台 dispatch_outbound 任务在收到出站消息时调用此回调。
         """
         self.outbound.subscribe(channel, callback)
 

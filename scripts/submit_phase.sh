@@ -59,7 +59,7 @@ case "${PHASE}" in
       backend/src/interfaces/channels/models.py
       backend/src/interfaces/channels/telegram.py
       backend/src/modules/conversation/application/agent_loop.py
-      backend/src/modules/delivery/infra/message_bus.py
+      backend/src/modules/delivery/infra/delivery_bus.py
       backend/src/modules/delivery/infra/outbox.py
       backend/src/modules/proactive/application/deliver.py
       backend/src/infra/runtime/workspace.py

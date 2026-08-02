@@ -25,7 +25,7 @@ from modules.capabilities.llm.client import LLMToolCall
 from modules.memory.memory_engine import MemoryEngine
 from modules.memory.markdown_store import MarkdownStore
 from modules.capabilities.tools.registry import ToolRegistry
-from infra.messagebus.event_bus import (
+from infra.bus.event import (
     Event,
     EventBus,
     TurnCommitted,
@@ -33,8 +33,8 @@ from infra.messagebus.event_bus import (
     ToolCallStarted,
     ToolCallCompleted,
 )
-from modules.delivery.infra.message_bus import (
-    MessageBus,
+from modules.delivery.infra.delivery_bus import (
+    DeliveryBus,
     OutboundDispatch,
     OutboundPort,
     BusOutboundPort,
@@ -68,7 +68,7 @@ class PassiveTurnPipeline:
         self,
         agent: Agent,
         tool_registry: ToolRegistry,
-        message_bus: MessageBus | None = None,
+        message_bus: DeliveryBus | None = None,
         event_bus: EventBus | None = None,
         outbound_port: OutboundPort | None = None,
         memory_engine: MemoryEngine | None = None,
@@ -116,7 +116,7 @@ class PassiveTurnPipeline:
         这是 AgentLoop 调用的入口。
         管道处理完成后：
         ① 通过 EventBus 广播 TurnCommitted 事件
-        ② 通过 OutboundPort 投递回复到 MessageBus 出站队列
+        ② 通过 OutboundPort 投递回复到 DeliveryBus 出站队列
 
         顺序确保事件先于回复发送，避免状态不一致。
         """
@@ -524,8 +524,8 @@ class PassiveTurnPipeline:
         """通过 OutboundPort 投递出站回复。
 
         将管道的 final_output 封装为 OutboundDispatch，
-        通过 outbound_port.send() 投递到 MessageBus 出站队列。
-        MessageBus 后台 dispatch_outbound 任务会分发给对应渠道。
+        通过 outbound_port.send() 投递到 DeliveryBus 出站队列。
+        DeliveryBus 后台 dispatch_outbound 任务会分发给对应渠道。
         """
         delivery_port = self.delivery_port
         outbound_port = self.outbound_port

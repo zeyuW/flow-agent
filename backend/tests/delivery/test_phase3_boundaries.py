@@ -1,7 +1,7 @@
 import asyncio
 
 from interfaces.channels.models import ChannelDeliveryResult
-from modules.delivery.infra.message_bus import MessageBus, OutboundDispatch
+from modules.delivery.infra.delivery_bus import DeliveryBus, OutboundDispatch
 from modules.delivery.infra.outbox import SQLiteOutboxStore
 from modules.proactive.application.deliver import deliver_message
 from modules.proactive.domain.models import ResolveResult
@@ -46,7 +46,7 @@ def test_outbox_skips_already_delivered_delivery_id(tmp_path):
         metadata={},
     )
     store.mark_delivered("stable")
-    bus = MessageBus(outbox_store=store)
+    bus = DeliveryBus(outbox_store=store)
 
     handle = bus.outbound_port.send(
         OutboundDispatch(
@@ -71,9 +71,9 @@ def test_outbox_uses_shared_sqlite_infrastructure(tmp_path):
 
 
 def test_subagent_completion_is_idempotent(tmp_path):
-    from modules.delivery.infra.message_bus import MessageBus
+    from modules.delivery.infra.delivery_bus import DeliveryBus
 
-    bus = MessageBus()
+    bus = DeliveryBus()
     manager = SubagentManager(
         tasks_path=tmp_path / "tasks.jsonl",
         message_bus=bus,

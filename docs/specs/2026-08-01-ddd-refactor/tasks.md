@@ -838,7 +838,7 @@ Builder file with `git rm`.
 Run:
 
 ```bash
-PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/test_config.py backend/tests/test_agent.py backend/tests/test_message_bus_architecture.py backend/tests/test_passive_turn_concurrency.py backend/tests/test_telegram_multimodal.py -q
+PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests/test_config.py backend/tests/test_agent.py backend/tests/test_delivery_bus_architecture.py backend/tests/test_passive_turn_concurrency.py backend/tests/test_telegram_multimodal.py -q
 PYTHONPATH=backend/src ${PYTHON_BIN:-python} -m pytest backend/tests -q
 ```
 

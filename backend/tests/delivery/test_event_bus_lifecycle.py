@@ -1,6 +1,6 @@
 import asyncio
 
-from infra.messagebus.event_bus import Event, EventBus
+from infra.bus.event import Event, EventBus
 
 
 def test_typed_event_bus_emit_is_ordered_and_replaceable():

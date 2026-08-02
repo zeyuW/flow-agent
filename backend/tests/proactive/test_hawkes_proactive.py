@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 
 
-from infra.messagebus.event_bus import Event, EventBus
+from infra.bus.event import Event, EventBus
 from infra.telemetry.trace import TraceRecorder
 from modules.proactive.infra.gate import ProactiveStateStore
 from modules.proactive.infra.data_gateway import DataGateway

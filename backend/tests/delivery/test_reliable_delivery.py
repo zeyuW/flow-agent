@@ -10,7 +10,7 @@ from interfaces.channels.models import (
 )
 from interfaces.channels.telegram import TelegramChannel
 from modules.conversation.application.agent_loop import AgentLoop
-from modules.delivery.infra.message_bus import MessageBus, OutboundDispatch
+from modules.delivery.infra.delivery_bus import DeliveryBus, OutboundDispatch
 from modules.delivery.infra.outbox import SQLiteOutboxStore
 from modules.proactive.application.deliver import deliver_message
 from modules.proactive.domain.models import ResolveResult
@@ -19,7 +19,7 @@ from modules.proactive.domain.models import ResolveResult
 def test_outbound_waits_for_real_channel_receipt(tmp_path: Path):
     async def scenario():
         store = SQLiteOutboxStore(tmp_path / "outbox.db")
-        bus = MessageBus(outbox_store=store)
+        bus = DeliveryBus(outbox_store=store)
         bus._retry_delay_s = 0
         bus.subscribe_outbound("telegram", lambda message: bool(message.chat_id))
         runner = asyncio.create_task(bus.start_dispatch_task())
@@ -51,7 +51,7 @@ def test_outbound_waits_for_real_channel_receipt(tmp_path: Path):
 def test_failed_channel_does_not_return_success(tmp_path: Path):
     async def scenario():
         store = SQLiteOutboxStore(tmp_path / "outbox.db")
-        bus = MessageBus(outbox_store=store)
+        bus = DeliveryBus(outbox_store=store)
         bus._retry_delay_s = 0
         calls = []
 
@@ -92,7 +92,7 @@ def test_retryable_failure_is_retried_while_agent_is_running(tmp_path: Path):
 
     async def scenario():
         store = SQLiteOutboxStore(tmp_path / "outbox.db")
-        bus = MessageBus(outbox_store=store)
+        bus = DeliveryBus(outbox_store=store)
         bus._retry_delay_s = 0
         bus._runtime_retry_base_delay_s = 0.01
         bus._runtime_retry_max_delay_s = 0.02
@@ -134,7 +134,7 @@ def test_non_retryable_failure_is_not_retried(tmp_path: Path):
 
     async def scenario():
         store = SQLiteOutboxStore(tmp_path / "outbox.db")
-        bus = MessageBus(outbox_store=store)
+        bus = DeliveryBus(outbox_store=store)
         bus._retry_delay_s = 0
         calls = []
 
@@ -171,7 +171,7 @@ def test_non_retryable_failure_is_not_retried(tmp_path: Path):
 
 def test_pending_outbox_is_recovered_after_restart(tmp_path: Path):
     path = tmp_path / "outbox.db"
-    first = MessageBus(outbox_store=SQLiteOutboxStore(path))
+    first = DeliveryBus(outbox_store=SQLiteOutboxStore(path))
     handle = first.outbound_port.send(
         OutboundDispatch(
             channel="telegram",
@@ -182,7 +182,7 @@ def test_pending_outbox_is_recovered_after_restart(tmp_path: Path):
     )
 
     second_store = SQLiteOutboxStore(path)
-    second = MessageBus(
+    second = DeliveryBus(
         outbox_store=second_store,
         outbox_recovery_window_s=86400,
     )
@@ -215,7 +215,7 @@ def test_stale_outbox_is_expired_instead_of_replayed(tmp_path: Path):
             (1.0, 1.0, "stale-1"),
         )
 
-    bus = MessageBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=60)
+    bus = DeliveryBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=60)
 
     assert bus.outbound.consume_one() is None
     record = bus.outbox_store.get("stale-1")
@@ -237,7 +237,7 @@ def test_fresh_outbox_is_recovered_with_original_event_time(tmp_path: Path):
         metadata={"kind": "proactive"},
     )
 
-    bus = MessageBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=86400)
+    bus = DeliveryBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=86400)
     restored = bus.outbound.consume_one()
 
     assert restored is not None
@@ -259,7 +259,7 @@ def test_sending_record_becomes_unknown_instead_of_replayed(tmp_path: Path):
     store.mark_sending("sending-1")
 
     restarted = SQLiteOutboxStore(path)
-    bus = MessageBus(outbox_store=restarted)
+    bus = DeliveryBus(outbox_store=restarted)
     record = restarted.get("sending-1")
 
     assert record is not None
@@ -270,7 +270,7 @@ def test_sending_record_becomes_unknown_instead_of_replayed(tmp_path: Path):
 def test_partial_channel_delivery_is_recorded_as_unknown(tmp_path: Path):
     async def scenario():
         store = SQLiteOutboxStore(tmp_path / "outbox.db")
-        bus = MessageBus(outbox_store=store)
+        bus = DeliveryBus(outbox_store=store)
         bus.subscribe_outbound(
             "telegram",
             lambda message: ChannelDeliveryResult(
@@ -305,7 +305,7 @@ def test_partial_channel_delivery_is_recorded_as_unknown(tmp_path: Path):
 
 def test_same_session_messages_are_processed_in_fifo_order():
     async def scenario():
-        bus = MessageBus()
+        bus = DeliveryBus()
         processed = []
         release_first = asyncio.Event()
 
@@ -461,7 +461,7 @@ def test_agent_loop_cancellation_cancels_hanging_passive_turn():
     """运行时取消主循环时，必须取消尚未结束的被动回合。"""
 
     async def scenario():
-        bus = MessageBus()
+        bus = DeliveryBus()
 
         class Pipeline:
             def process(self, inbound):

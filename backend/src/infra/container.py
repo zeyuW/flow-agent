@@ -6,7 +6,7 @@ import threading
 from dataclasses import dataclass, field
 
 from infra.lifecycle import RuntimeService, create_runtime_service
-from infra.messagebus import EventBus, MessageBus
+from infra.bus import EventBus, MessageBus
 from infra.worker import WorkerPool, WorkerSupervisor
 
 

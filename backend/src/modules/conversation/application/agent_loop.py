@@ -1,11 +1,11 @@
-"""Agent 主循环：作为 MessageBus 入站队列的消费者。
+"""Agent 主循环：作为 DeliveryBus 入站队列的消费者。
 
-AgentLoop 持续从 MessageBus 阻塞式消费入站消息，
+AgentLoop 持续从 DeliveryBus 阻塞式消费入站消息，
 为每个消息通过 asyncio.create_task() 创建独立异步任务，
 确保一个会话的长推理不会阻塞其他会话的响应。
 
 流程：
-  1. 从 MessageBus 阻塞消费 InboundItem
+  1. 从 DeliveryBus 阻塞消费 InboundItem
   2. 检查 _processing 状态，防止同一会话并发处理
   3. 通过 asyncio.create_task() 创建独立任务
   4. 任务中发布 TurnStarted 事件 → 委托给 Pipeline 处理
@@ -20,8 +20,8 @@ from collections import deque
 
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.conversation.application.pipeline import PassiveTurnPipeline
-from modules.delivery.infra.message_bus import MessageBus
-from infra.messagebus.event_bus import EventBus, Event
+from modules.delivery.infra.delivery_bus import DeliveryBus
+from infra.bus.event import EventBus, Event
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class ProcessingState:
 class AgentLoop:
     """Agent 主循环。
 
-    作为 MessageBus 入站队列的消费者，
+    作为 DeliveryBus 入站队列的消费者，
     持续拉取消息并通过 asyncio.create_task() 创建独立处理任务。
 
     支持两种运行模式：
@@ -77,7 +77,7 @@ class AgentLoop:
 
     def __init__(
         self,
-        message_bus: MessageBus,
+        message_bus: DeliveryBus,
         pipeline: PassiveTurnPipeline,
         event_bus: EventBus | None = None,
         poll_interval_ms: int = 100,
@@ -112,7 +112,7 @@ class AgentLoop:
         """持续异步轮询处理入站消息。
 
         主循环在 while self._running 中持续运行，
-        每次从 MessageBus 获取 InboundItem 后，
+        每次从 DeliveryBus 获取 InboundItem 后，
         立即通过 asyncio.create_task() 创建独立任务，实现并发处理。
         """
         self._running = True

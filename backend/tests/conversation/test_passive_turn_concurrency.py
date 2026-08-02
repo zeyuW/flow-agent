@@ -4,14 +4,14 @@ import asyncio
 
 from interfaces.channels.models import InboundMessage
 from modules.conversation.application.agent_loop import AgentLoop
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 
 
 def test_different_sessions_start_without_waiting_for_each_other():
     """一个会话等待模型时，另一会话必须能够开始执行。"""
 
     async def scenario():
-        bus = MessageBus()
+        bus = DeliveryBus()
         first_started = asyncio.Event()
         second_started = asyncio.Event()
         release_first = asyncio.Event()
@@ -326,7 +326,7 @@ def test_same_session_async_pipeline_keeps_fifo_order():
     """同一会话的后续消息必须等待前一回合终态。"""
 
     async def scenario():
-        bus = MessageBus()
+        bus = DeliveryBus()
         first_started = asyncio.Event()
         release_first = asyncio.Event()
         steps = []

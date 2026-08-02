@@ -9,7 +9,7 @@ from typing import Callable
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import OutboundMessage
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 from infra.security.auth import APIKeyAuth
 from infra.security.policy import SecurityPolicy
 
@@ -25,7 +25,7 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, object]:
 
 @dataclass
 class HTTPChannel(MessageBusChannel):
-    """HTTP webhook 渠道：基于 MessageBus。
+    """HTTP webhook 渠道：基于 DeliveryBus。
 
     Endpoints:
     - POST /inbound  body: {"session_id": "...", "text": "..."}
@@ -36,7 +36,7 @@ class HTTPChannel(MessageBusChannel):
 
     host: str
     port: int
-    message_bus: MessageBus
+    message_bus: DeliveryBus
     auth: APIKeyAuth | None = None
     security_policy: SecurityPolicy | None = None
     _server: HTTPServer | None = None
@@ -79,7 +79,7 @@ class HTTPChannel(MessageBusChannel):
     def _on_response(self, message: OutboundMessage) -> None:
         """收到出站回复时的回调函数。
 
-        由 MessageBus 后台 dispatch_outbound 任务调用。
+        由 DeliveryBus 后台 dispatch_outbound 任务调用。
         HTTP 渠道的出站目前通过日志记录，未来可用于异步推送（如 WebSocket）。
         """
         logger.debug("http outbound: channel=%s session=%s text=%s",

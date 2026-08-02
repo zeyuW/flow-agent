@@ -156,16 +156,16 @@ def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
     asyncio.run(scenario())
 
 
-def test_legacy_message_bus_source_translates_channel_input_to_conversation_input():
-    """现有消息总线进入新应用层前必须完成协议转换。"""
+def test_inbound_source_translates_channel_input_to_conversation_input():
+    """渠道消息进入应用层前必须完成协议转换。"""
 
     from interfaces.channels.models import InboundMessage
-    from modules.delivery.infra.message_bus import MessageBus
-    from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
+    from modules.delivery.infra.delivery_bus import DeliveryBus
+    from modules.conversation.infra.inbound_source import InboundSource
 
     async def scenario() -> None:
-        bus = MessageBus()
-        source = LegacyMessageBusSource(bus)
+        bus = DeliveryBus()
+        source = InboundSource(bus)
         bus.publish_inbound(
             InboundMessage(
                 channel="cli",
@@ -191,14 +191,14 @@ def test_bootstrap_assembles_the_new_conversation_runner():
     """组合根必须将既有消息总线接入新的对话应用运行器。"""
 
     from bootstrap.container import create_agent_loop
-    from modules.delivery.infra.message_bus import MessageBus
+    from modules.delivery.infra.delivery_bus import DeliveryBus
     from modules.conversation.application.runner import ConversationRunner
 
     class Pipeline:
         async def process_async(self, message) -> None:
             del message
 
-    runner = create_agent_loop(MessageBus(), Pipeline())
+    runner = create_agent_loop(DeliveryBus(), Pipeline())
 
     assert isinstance(runner, ConversationRunner)
 
@@ -206,13 +206,13 @@ def test_bootstrap_assembles_the_new_conversation_runner():
 def test_delivery_adapter_returns_the_real_channel_receipt():
     """投递适配器必须把渠道确认结果转换为业务回执，而非提前报告成功。"""
 
-    from modules.delivery.infra.message_bus import MessageBus
+    from modules.delivery.infra.delivery_bus import DeliveryBus
     from modules.delivery.application.ports import DeliveryRequest
-    from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
+    from modules.delivery.infra.port_adapter import DeliveryPortAdapter
 
     async def scenario() -> None:
-        bus = MessageBus()
-        port = LegacyMessageBusDeliveryPort(bus)
+        bus = DeliveryBus()
+        port = DeliveryPortAdapter(bus)
         delivered_to = []
         bus.subscribe_outbound(
             "telegram",

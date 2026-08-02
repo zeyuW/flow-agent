@@ -14,7 +14,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from modules.conversation.domain.channel_message import InboundMessage
-from modules.delivery.infra.message_bus import OutboundDispatch
+from modules.delivery.infra.delivery_bus import OutboundDispatch
 
 logger = logging.getLogger(__name__)
 

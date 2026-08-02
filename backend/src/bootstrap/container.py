@@ -14,14 +14,14 @@ from infra.config.watcher import (
     ConfigWatcher,
     PreparedConfigChange,
 )
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 from modules.delivery.infra.outbox import SQLiteOutboxStore
-from infra.messagebus.event_bus import EventBus
+from infra.bus.event import EventBus
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.runner import ConversationRunner
-from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
+from modules.conversation.infra.inbound_source import InboundSource
 from modules.delivery.application.ports import DeliveryPort
-from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
+from modules.delivery.infra.port_adapter import DeliveryPortAdapter
 from modules.capabilities.mcp.server_registry import McpServerRegistry
 from modules.capabilities.tools.mcp_manage import McpListTool
 from modules.conversation.application.agent import Agent
@@ -98,11 +98,11 @@ from modules.proactive.infra.sources import (
     WebSnapshotSource,
 )
 
-"""新架构组装：MessageBus + EventBus + AgentLoop + PassiveTurnPipeline
+"""新架构组装：DeliveryBus + EventBus + AgentLoop + PassiveTurnPipeline
 
 核心流程:
-  渠道 → MessageBus.publish_inbound → AgentLoop.consume → PassiveTurnPipeline.process
-    → AfterTurn: EventBus.fanout + MessageBus.dispatch_outbound → 渠道
+  渠道 → DeliveryBus.publish_inbound → AgentLoop.consume → PassiveTurnPipeline.process
+    → AfterTurn: EventBus.fanout + DeliveryBus.dispatch_outbound → 渠道
 """
 
 
@@ -202,9 +202,9 @@ def create_core_components(config: AppConfig):
     }
 
 
-def create_message_bus(storage: StorageConfig) -> MessageBus:
-    """创建消息总线实例。"""
-    return MessageBus(
+def create_delivery_bus(storage: StorageConfig) -> DeliveryBus:
+    """创建带可靠投递能力的业务总线。"""
+    return DeliveryBus(
         outbox_store=SQLiteOutboxStore(WORKSPACE_LAYOUT.outbound_messages_db),
         outbox_recovery_window_s=storage.outbox_recovery_window_seconds,
         outbox_recovery_limit=storage.outbox_recovery_limit,
@@ -219,7 +219,7 @@ def create_event_bus() -> EventBus:
 def create_passive_turn_pipeline(
     agent: Agent,
     tool_registry: ToolRegistry,
-    message_bus: MessageBus,
+    message_bus: DeliveryBus,
     event_bus: EventBus,
     memory_engine: MemoryEngine | None = None,
     markdown_store=None,
@@ -254,12 +254,12 @@ def create_passive_turn_pipeline(
 
 
 def create_agent_loop(
-    message_bus: MessageBus,
+    message_bus: DeliveryBus,
     pipeline: PassiveTurnPipeline,
 ) -> ConversationRunner:
     """创建新的对话应用运行器，并隔离迁移期旧实现。"""
     return ConversationRunner(
-        source=LegacyMessageBusSource(message_bus),
+        source=InboundSource(message_bus),
         processor=cast(Any, pipeline),
         poll_interval_ms=100,
     )
@@ -289,9 +289,9 @@ def create_app_runtime(config: AppConfig):
     mcp_registry = components["mcp_registry"]
 
     # 创建总线
-    message_bus = create_message_bus(cfg.storage)
+    message_bus = create_delivery_bus(cfg.storage)
     event_bus = create_event_bus()
-    delivery_port = LegacyMessageBusDeliveryPort(message_bus)
+    delivery_port = DeliveryPortAdapter(message_bus)
 
     background_registry = InMemoryJobRegistry()
     background_store = SQLiteJobStore(WORKSPACE_LAYOUT.background_jobs_db)

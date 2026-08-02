@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from infra.messagebus.event_bus import Event
+from infra.bus.event import Event
 from modules.proactive.application.loop import ProactiveLoop
 
 

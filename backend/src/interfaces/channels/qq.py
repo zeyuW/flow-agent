@@ -10,7 +10,7 @@ from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import OutboundMessage
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 
 
 logger = logging.getLogger(__name__)
@@ -53,16 +53,16 @@ def _read_chunked(handler: BaseHTTPRequestHandler) -> bytes:
 
 @dataclass
 class QQChannel(MessageBusChannel):
-    """QQ 渠道：基于 MessageBus 的 OneBot 兼容渠道。
+    """QQ 渠道：基于 DeliveryBus 的 OneBot 兼容渠道。
 
     入站：接收 OneBot HTTP POST → 封装 InboundMessage → publish_inbound
     出站：通过 subscribe_outbound 注册 _on_response 回调
-          → MessageBus 后台 dispatch 任务调用回调 → POST send_private_msg
+          → DeliveryBus 后台 dispatch 任务调用回调 → POST send_private_msg
     """
 
     host: str
     port: int
-    message_bus: MessageBus
+    message_bus: DeliveryBus
     api_base: str
     access_token: str = ""
     _server: HTTPServer | None = None
@@ -105,7 +105,7 @@ class QQChannel(MessageBusChannel):
     def _on_response(self, message: OutboundMessage) -> None:
         """收到出站回复时的回调函数。
 
-        由 MessageBus 后台 dispatch_outbound 任务调用。
+        由 DeliveryBus 后台 dispatch_outbound 任务调用。
         负责调用 QQ API 将消息发送给用户。
         """
         qq_user_id = int(message.metadata.get("qq_user_id", 0))
@@ -116,7 +116,7 @@ class QQChannel(MessageBusChannel):
             self._send_private_msg(user_id=qq_user_id, message=message.text)
         except Exception:
             logger.exception("qq outbound send failed")
-            raise  # 让 MessageBus 的容错重试机制处理
+            raise  # 让 DeliveryBus 的容错重试机制处理
 
     def on_outbound(self, message: OutboundMessage) -> None:
         """收到出站回复（兼容旧接口，转发到 _on_response）。"""
@@ -146,7 +146,7 @@ class QQChannel(MessageBusChannel):
                         return
                     inbound = InboundMessage(parent.name, f"qq_{user_id}", text)
                     inbound.metadata["qq_user_id"] = user_id
-                    # 通过 MessageBus 发布入站消息
+                    # 通过 DeliveryBus 发布入站消息
                     parent.message_bus.publish_inbound(inbound)
                     _ok(self, {"ok": True, "queued": True})
                 except Exception as exc:

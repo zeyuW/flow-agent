@@ -1,17 +1,17 @@
-"""将既有消息总线作为对话应用的入站适配器。"""
+"""将投递总线转换为对话应用的入站适配器。"""
 
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 from modules.conversation.domain.messages import IncomingMessage
 
 
-class LegacyMessageBusSource:
-    """从既有总线读取消息并转换为对话领域协议。"""
+class InboundSource:
+    """从投递总线读取消息并转换为对话领域协议。"""
 
-    def __init__(self, bus: MessageBus) -> None:
+    def __init__(self, bus: DeliveryBus) -> None:
         self._bus = bus
 
     async def receive(self, poll_interval_ms: int) -> IncomingMessage:
-        """等待一条旧总线消息，再消除旧字段命名。"""
+        """等待一条入站消息，并转换为对话领域字段。"""
 
         inbound = await self._bus.consume_inbound_async(poll_interval_ms)
         if inbound is None:

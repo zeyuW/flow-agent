@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import OutboundMessage
-from modules.delivery.infra.message_bus import MessageBus
+from modules.delivery.infra.delivery_bus import DeliveryBus
 
 
 logger = logging.getLogger(__name__)
@@ -12,14 +12,14 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CLIChannel(MessageBusChannel):
-    """CLI 渠道：基于 MessageBus 的 stdin/stdout 渠道。
+    """CLI 渠道：基于 DeliveryBus 的 stdin/stdout 渠道。
 
-    入站：读取用户输入 → 封装 InboundMessage → publish_inbound 到 MessageBus
+    入站：读取用户输入 → 封装 InboundMessage → publish_inbound 到 DeliveryBus
     出站：通过 subscribe_outbound 注册 _on_response 回调
-          → MessageBus 后台 dispatch 任务调用回调 → print 到 stdout
+          → DeliveryBus 后台 dispatch 任务调用回调 → print 到 stdout
     """
 
-    message_bus: MessageBus
+    message_bus: DeliveryBus
     default_session_id: str = "default"
     _running: bool = False
     _last_error: str | None = None
@@ -48,7 +48,7 @@ class CLIChannel(MessageBusChannel):
     def handle_line(self, line: str, *, session_id: str | None = None) -> str | None:
         """处理一行用户输入。
 
-        封装为 InboundMessage 后通过 MessageBus 发布到入站队列。
+        封装为 InboundMessage 后通过 DeliveryBus 发布到入站队列。
         返回值为 None（回复通过 outbound 回调异步处理）。
         """
         if not self._running:
@@ -73,7 +73,7 @@ class CLIChannel(MessageBusChannel):
     def _on_response(self, message: OutboundMessage) -> None:
         """收到出站回复时的回调函数。
 
-        由 MessageBus 后台 dispatch_outbound 任务调用。
+        由 DeliveryBus 后台 dispatch_outbound 任务调用。
         负责调用平台 API 将消息发送给用户。
         """
         self._last_outbound_text = message.text
