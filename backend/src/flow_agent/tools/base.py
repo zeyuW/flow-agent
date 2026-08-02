@@ -1,25 +1,3 @@
-from dataclasses import dataclass
-from typing import Any, Protocol
+"""工具协议的旧路径转发层。"""
 
-
-@dataclass(slots=True)
-class ToolResult:
-    ok: bool
-    content: str
-
-
-class Tool(Protocol):
-    @property
-    def name(self) -> str:
-        ...
-
-    @property
-    def description(self) -> str:
-        ...
-
-    @property
-    def input_schema(self) -> dict[str, Any]:
-        ...
-
-    def run(self, tool_input: dict[str, str]) -> ToolResult:
-        ...
+from modules.capabilities.tools.base import *
