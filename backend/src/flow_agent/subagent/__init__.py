@@ -1,8 +1,3 @@
-"""Subagent module: background task delegation with async spawn + MessageBus completion.
+"""子代理能力的旧路径转发层。"""
 
-Manager    — SubagentManager: async spawn/spawn_sync, _run_subagent, _announce_result
-SubAgent   — async LLM tool loop with completion detection, max_iterations
-Runner     — AgentBackgroundJobRunner: lifecycle wrapper
-Profiles   — build_spawn_spec, PROFILE_RESEARCH/SCRIPTING/GENERAL
-SpawnTool  — main agent tool with DelegationPolicy + background/sync modes
-"""
+from modules.delegation.application import *
