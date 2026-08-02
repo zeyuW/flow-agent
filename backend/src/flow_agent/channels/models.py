@@ -1,11 +1,8 @@
-from typing import Protocol
+"""渠道消息模型旧路径转发层。"""
 
-from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
-from modules.conversation.domain.channel_message import InboundMessage
+from importlib import import_module
 
 
-class OutboundSubscriber(Protocol):
-    """出站消息订阅者协议：渠道适配器实现此接口来接收待发送的回复。"""
-
-    def on_outbound(self, message: OutboundMessage) -> None:
-        ...
+def __getattr__(name: str):
+    """按需解析接口层模型，避免旧包静态依赖接口实现。"""
+    return getattr(import_module("interfaces.channels.models"), name)
