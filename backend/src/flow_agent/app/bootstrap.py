@@ -50,8 +50,8 @@ from modules.jobs.application.tools import (
     ListBackgroundRunsTool,
     RunBackgroundJobTool,
 )
-from flow_agent.scheduler.runtime import SchedulerService
-from flow_agent.scheduler.tools import (
+from modules.scheduling.application.runtime import SchedulerService
+from modules.scheduling.application.tools import (
     CancelScheduledTaskTool,
     CurrentTimeTool,
     ListScheduledTasksTool,
