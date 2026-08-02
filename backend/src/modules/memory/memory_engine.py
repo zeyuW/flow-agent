@@ -9,9 +9,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from flow_agent.memory.memory_retriever import DualChannelRetriever, RetrievalHit
-from flow_agent.memory.vector_store import MemoryStore
-from flow_agent.memory.embedder import Embedder
+from modules.memory.infra.retriever import DualChannelRetriever, RetrievalHit
+from modules.memory.infra.vector_store import MemoryStore
+from modules.memory.infra.embedder import Embedder
 
 logger = logging.getLogger(__name__)
 
