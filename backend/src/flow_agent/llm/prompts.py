@@ -1,14 +1,3 @@
-def build_messages(
-    system_prompt: str,
-    user_input: str,
-    history: list[dict[str, str]] | None = None,
-) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = [
-        {"role": "system", "content": system_prompt},
-    ]
+"""提示词模板的旧路径转发层。"""
 
-    if history:
-        messages.extend(history)
-
-    messages.append({"role": "user", "content": user_input})
-    return messages
+from modules.capabilities.llm.prompts import *

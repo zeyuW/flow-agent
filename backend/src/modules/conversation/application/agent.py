@@ -2,12 +2,12 @@ import base64
 from pathlib import Path
 from typing import Any
 
-from flow_agent.behavior.persona import PersonaResolver
+from modules.capabilities.behavior.persona import PersonaResolver
 from modules.conversation.application.models import AgentResponse
 from modules.conversation.application.ports import ConversationHistory
-from flow_agent.llm.client import LLMClient
-from flow_agent.llm.assembler import PromptAssembler
-from flow_agent.llm.router import LLMRouter
+from modules.capabilities.llm.client import LLMClient
+from modules.capabilities.llm.assembler import PromptAssembler
+from modules.capabilities.llm.router import LLMRouter
 
 
 class Agent:
