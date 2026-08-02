@@ -31,14 +31,14 @@ include = ["modules*", "interfaces*", "infra*", "bootstrap*"]
 flow-agent = "bootstrap.cli:main"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["test"]
 pythonpath = ["src"]
 
 [tool.black]
 line-length = 88
 
 [tool.pyright]
-extraPaths = ["src", "tests"]
+extraPaths = ["src", "test"]
 pythonVersion = "3.10"
 
 [dependency-groups]

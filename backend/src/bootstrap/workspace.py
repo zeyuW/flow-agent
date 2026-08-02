@@ -2,7 +2,19 @@
 
 from pathlib import Path
 
-from infra.runtime.workspace import WorkspaceLayout, init_workspace as _init_workspace
+from infra.runtime.workspace import (
+    WorkspaceLayout,
+    detect_workspace,
+    init_workspace as _init_workspace,
+    persist_workspace_profile,
+)
+
+__all__ = [
+    "WorkspaceLayout",
+    "detect_workspace",
+    "init_workspace",
+    "persist_workspace_profile",
+]
 
 
 def init_workspace(root: Path) -> WorkspaceLayout:

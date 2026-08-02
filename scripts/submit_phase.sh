@@ -17,11 +17,11 @@ case "${PHASE}" in
     SUMMARY="feat: 完善事件总线生命周期管理"
     DETAILS=$'增加事件订阅和取消订阅能力
 补充事件总线生命周期测试'
-    TEST_TARGET="backend/tests/test_event_bus_lifecycle.py"
+    TEST_TARGET="backend/test/test_event_bus_lifecycle.py"
     FILES=(
       backend/src/flow_agent/messaging/event_bus.py
       backend/src/flow_agent/messaging/__init__.py
-      backend/tests/test_event_bus_lifecycle.py
+      backend/test/test_event_bus_lifecycle.py
     )
     ;;
   phase2)
@@ -30,7 +30,7 @@ case "${PHASE}" in
 增加任务状态和错误分类
 增加重试与恢复语义
 补充阶段二状态恢复测试'
-    TEST_TARGET="backend/tests/test_phase2_state_recovery.py"
+    TEST_TARGET="backend/test/test_phase2_state_recovery.py"
     FILES=(
       backend/src/flow_agent/background/runtime.py
       backend/src/flow_agent/background/store.py
@@ -44,7 +44,7 @@ case "${PHASE}" in
       backend/src/flow_agent/scheduler/runtime.py
       backend/src/flow_agent/session/session_manager.py
       backend/src/flow_agent/session/session_store.py
-      backend/tests/test_phase2_state_recovery.py
+      backend/test/test_phase2_state_recovery.py
     )
     ;;
   phase3)
@@ -53,7 +53,7 @@ case "${PHASE}" in
 增加运行期间失败退避重试
 禁止启动时批量恢复历史消息
 补充出站恢复和重复投递测试'
-    TEST_TARGET="backend/tests/test_reliable_delivery.py backend/tests/test_phase3_boundaries.py backend/tests/test_proactive_tick.py backend/tests/test_spawn_runtime.py"
+    TEST_TARGET="backend/test/test_reliable_delivery.py backend/test/test_phase3_boundaries.py backend/test/test_proactive_tick.py backend/test/test_spawn_runtime.py"
     FILES=(
       backend/src/flow_agent/app/bootstrap.py
       backend/src/flow_agent/channels/models.py
@@ -68,10 +68,10 @@ case "${PHASE}" in
       backend/src/flow_agent/subagent/manager.py
       backend/src/flow_agent/subagent/models.py
       backend/src/flow_agent/tools/spawn.py
-      backend/tests/test_proactive_tick.py
-      backend/tests/test_spawn_runtime.py
-      backend/tests/test_phase3_boundaries.py
-      backend/tests/test_reliable_delivery.py
+      backend/test/test_proactive_tick.py
+      backend/test/test_spawn_runtime.py
+      backend/test/test_phase3_boundaries.py
+      backend/test/test_reliable_delivery.py
     )
     ;;
   automation)
@@ -79,7 +79,7 @@ case "${PHASE}" in
     DETAILS=$'增加统一验证脚本
 增加 Agent 自动生成提交说明和自动提交
 增加提交前检查和 GitHub Actions CI'
-    TEST_TARGET="backend/tests/test_reliable_delivery.py"
+    TEST_TARGET="backend/test/test_reliable_delivery.py"
     FILES=(
       .github/workflows/ci.yml
       .githooks/pre-commit

@@ -71,12 +71,12 @@ fi
 CHANGED_FILES="$(git diff --cached --name-only)"
 if [[ -z "${COMMIT_SUMMARY}" ]]; then
   if printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/src/'; then
-    if printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/tests/'; then
+    if printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/test/'; then
       COMMIT_SUMMARY="feat: 更新 Agent 功能并补充测试"
     else
       COMMIT_SUMMARY="feat: 更新 Agent 功能"
     fi
-  elif printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/tests/'; then
+  elif printf '%s\n' "${CHANGED_FILES}" | rg -q '^backend/test/'; then
     COMMIT_SUMMARY="test: 更新自动化测试"
   else
     COMMIT_SUMMARY="chore: 更新工程自动化配置"
