@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from infra.runtime.models import RuntimeHealth, RuntimeServiceSnapshot, RuntimeUnitSnapshot
+from infra.lifecycle.models import RuntimeHealth, RuntimeServiceSnapshot, RuntimeUnitSnapshot
 
 
 logger = logging.getLogger(__name__)

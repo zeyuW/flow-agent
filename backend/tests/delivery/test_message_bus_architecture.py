@@ -13,7 +13,7 @@ from modules.delivery.infra.message_bus import (
     OutboundDispatch,
     BusOutboundPort,
 )
-from infra.messaging.event_bus import EventBus, Event, TurnCommitted
+from infra.messagebus.event_bus import EventBus, Event, TurnCommitted
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.agent_loop import AgentLoop, ProcessingState
 from modules.conversation.application.phase import PhaseModule, TurnFlow

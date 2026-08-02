@@ -20,12 +20,12 @@ from collections.abc import Callable
 from modules.conversation.application.agent import Agent
 from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.application.phase import PhaseModule, TurnFlow
-from infra.observability.trace import TraceRecorder
+from infra.telemetry.trace import TraceRecorder
 from modules.capabilities.llm.client import LLMToolCall
 from modules.memory.memory_engine import MemoryEngine
 from modules.memory.markdown_store import MarkdownStore
 from modules.capabilities.tools.registry import ToolRegistry
-from infra.messaging.event_bus import (
+from infra.messagebus.event_bus import (
     Event,
     EventBus,
     TurnCommitted,

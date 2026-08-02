@@ -13,7 +13,7 @@ from typing import Any
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
 from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
-from infra.messaging.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
+from infra.messagebus.event_bus import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
 logger = logging.getLogger(__name__)
 
@@ -372,7 +372,7 @@ class TelegramChannel(Channel, EventSubscriber):
             raise RuntimeError("Telegram 未返回图片路径")
         target_dir = self._attachment_dir
         if target_dir is None:
-            from infra.paths import WORKSPACE_LAYOUT
+            from infra.lifecycle.paths import WORKSPACE_LAYOUT
 
             target_dir = WORKSPACE_LAYOUT.inbound_attachments_dir / "telegram"
         target_dir.mkdir(parents=True, exist_ok=True)

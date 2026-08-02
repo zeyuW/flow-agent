@@ -1,6 +1,6 @@
 """投递模块的持久化与消息适配器。"""
 
-from infra.messaging.event_bus import Event, EventSubscription, EventBus, TurnCommitted
+from infra.messagebus.event_bus import Event, EventSubscription, EventBus, TurnCommitted
 from modules.delivery.infra.message_bus import (
     BusOutboundPort,
     InboundQueue,

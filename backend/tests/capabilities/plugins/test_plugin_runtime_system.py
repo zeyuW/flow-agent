@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from modules.jobs.application.runtime import InMemoryJobRegistry
-from infra.messaging.event_bus import Event, EventBus
+from infra.messagebus.event_bus import Event, EventBus
 from modules.capabilities.plugins.plugin_loader import PluginManager, _plugin_revision
 from modules.capabilities.tools.registry import ToolRegistry
 
@@ -168,7 +168,7 @@ def test_plugin_background_job_keeps_trigger_declaration(tmp_path: Path):
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "plugin.py").write_text(
         '''from modules.jobs.domain.models import JobSpec
-from infra.messaging.event_bus import TurnCommitted
+from infra.messagebus.event_bus import TurnCommitted
 from modules.capabilities.plugins.plugin_base import Plugin
 
 class TriggeredPlugin(Plugin):

@@ -1,6 +1,6 @@
 import pytest
 
-from infra.runtime.workspace_lock import (
+from infra.lifecycle.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
 )

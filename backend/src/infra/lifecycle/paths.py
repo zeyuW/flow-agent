@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from infra.runtime.workspace import build_layout
+from infra.lifecycle.workspace import build_layout
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[4]
 WORKSPACE_LAYOUT = build_layout(PROJECT_ROOT)
 FLOW_DIR = WORKSPACE_LAYOUT.flow_dir
 DATA_DIR = WORKSPACE_LAYOUT.data_dir

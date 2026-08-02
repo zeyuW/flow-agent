@@ -8,12 +8,12 @@ from pathlib import Path
 
 from bootstrap.config import load_application_config
 from bootstrap.container import create_app_runtime
-from infra.logging import configure_logging
+from infra.telemetry.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
-from infra.paths import WORKSPACE_LAYOUT
+from infra.lifecycle.paths import WORKSPACE_LAYOUT
 from interfaces.channels.telegram import TelegramChannel
 from modules.delivery.application.message_push import MessagePushTool
-from infra.runtime.workspace_lock import (
+from infra.lifecycle.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
 )

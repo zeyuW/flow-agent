@@ -16,7 +16,7 @@ from infra.config.watcher import (
 )
 from modules.delivery.infra.message_bus import MessageBus
 from modules.delivery.infra.outbox import SQLiteOutboxStore
-from infra.messaging.event_bus import EventBus
+from infra.messagebus.event_bus import EventBus
 from modules.conversation.application.pipeline import PassiveTurnPipeline
 from modules.conversation.application.runner import ConversationRunner
 from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
@@ -27,7 +27,7 @@ from modules.capabilities.tools.adapters.mcp_manage import McpListTool
 from modules.conversation.application.agent import Agent
 from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.infra.context import ConversationContext
-from infra.observability.trace import TraceRecorder
+from infra.telemetry.trace import TraceRecorder
 from modules.capabilities.llm.client import OpenAILLMClient
 from modules.capabilities.llm.assembler import PromptAssembler, PromptBudget
 from modules.capabilities.llm.router import LLMRouter
@@ -64,10 +64,10 @@ from modules.scheduling.application.tools import (
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
-from infra.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
-from infra.runtime.service import RuntimeService, RuntimeUnit
-from infra.runtime.workspace import init_workspace
+from infra.lifecycle.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
+from infra.lifecycle.models import RuntimeHealth, RuntimeUnitSnapshot
+from infra.lifecycle.service import RuntimeService, RuntimeUnit
+from infra.lifecycle.workspace import init_workspace
 from modules.delegation.application.runtime import (
     SubagentRuntime,
     create_subagent_runtime,

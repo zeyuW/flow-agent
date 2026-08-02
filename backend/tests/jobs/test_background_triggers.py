@@ -7,7 +7,7 @@ from pathlib import Path
 from modules.jobs.domain.models import JobSpec
 from modules.jobs.application.runtime import BackgroundRuntime, InMemoryJobRegistry
 from modules.jobs.infra.store import SQLiteJobStore
-from infra.messaging.event_bus import Event, EventBus
+from infra.messagebus.event_bus import Event, EventBus
 
 
 def _runtime(

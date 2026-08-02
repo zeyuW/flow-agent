@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from infra.observability.events import classify_event, to_envelope
+from infra.telemetry.events import classify_event, to_envelope
 
 
 @dataclass(slots=True)
