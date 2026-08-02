@@ -4,5 +4,5 @@
 
 ```bash
 python -m pip install -e backend
-python -m pytest backend/test -q
+python -m pytest backend/tests -q
 ```

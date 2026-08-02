@@ -21,7 +21,7 @@ git diff --check
 git diff --check --cached
 
 echo "[3/6] 检查项目隔离"
-if rg -n -i 'akashic[-_ ]?agent|/home/roco/akashic-agent|参考项目|参考仓库' backend/src backend/test; then
+if rg -n -i 'akashic[-_ ]?agent|/home/roco/akashic-agent|参考项目|参考仓库' backend/src backend/tests; then
   echo "检测到不应出现在当前项目中的参考来源信息"
   exit 1
 fi
@@ -31,7 +31,7 @@ if [[ -n "${FLOW_AGENT_TEST_TARGET:-}" ]]; then
   read -r -a test_targets <<< "${FLOW_AGENT_TEST_TARGET}"
   "${PYTHON_BIN}" -m pytest -q "${test_targets[@]}"
 else
-  "${PYTHON_BIN}" -m pytest -q backend/test
+  "${PYTHON_BIN}" -m pytest -q backend/tests
 fi
 
 echo "[5/6] 检查新增架构与配置类型"
@@ -56,12 +56,12 @@ with open(config_path, "w", encoding="utf-8") as config_file:
         config_file,
     )
 ' "${pyright_config}" "${python_env_root}" "${python_env_name}" \
-  "${ROOT_DIR}/backend/src" "${ROOT_DIR}/backend/test"
+  "${ROOT_DIR}/backend/src" "${ROOT_DIR}/backend/tests"
 "${PYTHON_BIN}" -m pyright --project "${pyright_config}" \
   backend/src/infra/config \
   backend/src/bootstrap \
-  backend/test/architecture \
-  backend/test/infrastructure
+  backend/tests/architecture \
+  backend/tests/infrastructure
 
 echo "[6/6] 检查新增架构与配置格式"
 export BLACK_CACHE_DIR="${TMPDIR}/flow-agent-black-cache"
@@ -72,8 +72,8 @@ done < <(
   rg --files \
     backend/src/infra/config \
     backend/src/bootstrap \
-    backend/test/architecture \
-    backend/test/infrastructure \
+    backend/tests/architecture \
+    backend/tests/infrastructure \
   | rg '\.py$'
 )
 
