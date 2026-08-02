@@ -79,7 +79,7 @@ from modules.capabilities.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.spawn import SpawnTool
 from flow_agent.tools.registry import ToolRegistry
-from flow_agent.plugins.plugin_loader import PluginManager
+from modules.capabilities.plugins.plugin_loader import PluginManager
 from flow_agent.proactive.sources import (
     LocalFileSource,
     LocalTaskSource,
