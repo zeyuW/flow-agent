@@ -1,4 +1,4 @@
-from modules.delivery.infra.message_bus import (
+from modules.delivery.infra import (
     MessageBus,
     InboundQueue,
     OutboundQueue,
@@ -6,7 +6,7 @@ from modules.delivery.infra.message_bus import (
     OutboundPort,
     BusOutboundPort,
 )
-from flow_agent.messaging.event_bus import EventBus, Event, EventSubscription, TurnCommitted
+from infra.messaging.event_bus import EventBus, Event, EventSubscription, TurnCommitted
 
 __all__ = [
     "MessageBus",
