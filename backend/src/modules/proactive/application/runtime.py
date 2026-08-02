@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from pathlib import Path
-from flow_agent.infra.trace import TraceRecorder
+from infra.observability.trace import TraceRecorder
 
 from flow_agent.proactive.data_gateway import DataGateway
 from modules.proactive.application.drift_pipeline import DriftTurnPipeline
