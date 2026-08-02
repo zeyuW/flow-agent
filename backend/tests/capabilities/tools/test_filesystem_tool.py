@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from modules.capabilities.tools.adapters.filesystem import ReadFileTool
+from modules.capabilities.tools.filesystem import ReadFileTool
 
 
 def test_read_file_tool_success(tmp_path: Path):
@@ -20,4 +20,3 @@ def test_read_file_tool_missing_path():
 
     assert result.ok is False
     assert "Missing required input: path" in result.content
-

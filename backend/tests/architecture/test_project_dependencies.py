@@ -48,3 +48,13 @@ def test_shared_infrastructure_has_no_business_dependency():
         if target.startswith(("modules.", "interfaces.", "bootstrap."))
     ]
     assert sorted(violations) == []
+
+
+def test_tool_adapters_are_flattened_into_tools_boundary():
+    """工具适配器没有额外职责时直接放在 tools 边界下。"""
+
+    tools_root = SOURCE_ROOT / "modules" / "capabilities" / "tools"
+    adapters_root = tools_root / "adapters"
+    assert not any(adapters_root.glob("*.py"))
+    for filename in ("filesystem.py", "mcp_manage.py", "undo.py"):
+        assert (tools_root / filename).exists()

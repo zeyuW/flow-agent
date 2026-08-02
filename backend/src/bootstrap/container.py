@@ -23,7 +23,7 @@ from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
 from modules.delivery.application.ports import DeliveryPort
 from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
 from modules.capabilities.mcp.server_registry import McpServerRegistry
-from modules.capabilities.tools.adapters.mcp_manage import McpListTool
+from modules.capabilities.tools.mcp_manage import McpListTool
 from modules.conversation.application.agent import Agent
 from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.infra.context import ConversationContext
@@ -34,7 +34,7 @@ from modules.capabilities.llm.router import LLMRouter
 from modules.capabilities.behavior.persona import PersonaProfile, PersonaResolver
 from modules.conversation.infra.session_store import SessionStore
 from modules.conversation.infra.session_manager import SessionManager
-from modules.capabilities.tools.adapters.undo import UndoTool
+from modules.capabilities.tools.undo import UndoTool
 from modules.memory.application.memory_runtime import (
     build_memory_runtime,
     wire_memory_events,
@@ -86,7 +86,7 @@ from modules.proactive.application.tools import (
 from modules.capabilities.tools.guard import ProactiveFrequencyGuard, ToolGuard
 from modules.capabilities.skills.loader import SkillLoader
 from modules.capabilities.skills.registry import SkillRegistry
-from modules.capabilities.tools.adapters.filesystem import ReadFileTool
+from modules.capabilities.tools.filesystem import ReadFileTool
 from modules.delegation.application.spawn import SpawnTool
 from modules.capabilities.tools.registry import ToolRegistry
 from modules.capabilities.plugins.plugin_loader import PluginManager
