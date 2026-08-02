@@ -83,6 +83,10 @@ class TelegramChannel(Channel, EventSubscriber):
     async def stop(self) -> None:
         """停止 Telegram 渠道"""
         self._running = False
+        if self._context is not None:
+            self._context.bus.unsubscribe_outbound(self.name, self._on_response)
+            self._context.event_bus.unsubscribe(self)
+            self._context = None
         logger.info("telegram channel stopped")
     
     def status(self) -> ChannelStatus:

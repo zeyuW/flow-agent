@@ -197,10 +197,17 @@ def _run_service(config: AppConfig) -> None:
     import threading
     import asyncio
 
+    dispatch_loop_holder: dict[str, asyncio.AbstractEventLoop] = {}
+
     def run_dispatch():
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        loop.run_until_complete(message_bus.start_dispatch_task())
+        dispatch_loop_holder["loop"] = loop
+        try:
+            loop.run_until_complete(message_bus.start_dispatch_task())
+        finally:
+            dispatch_loop_holder.pop("loop", None)
+            loop.close()
 
     dispatch_thread = threading.Thread(target=run_dispatch, daemon=True)
     dispatch_thread.start()
@@ -220,6 +227,7 @@ def _run_service(config: AppConfig) -> None:
             proactive_runtime.request_stop()
         if memory_optimizer_loop is not None:
             memory_optimizer_loop.stop()
+        agent_loop.stop_background()
         background_runtime.stop()
         subagent_runtime.manager.shutdown()
         mcp_registry.stop_all()
@@ -238,4 +246,16 @@ def _run_service(config: AppConfig) -> None:
                     logger.exception("Telegram 渠道停止失败")
             if telegram_thread is not None:
                 telegram_thread.join(timeout=8.0)
+        if cfg.channels.http_enabled:
+            http.stop()
+        dispatch_loop = dispatch_loop_holder.get("loop")
+        if dispatch_loop is not None and not dispatch_loop.is_closed():
+            future = asyncio.run_coroutine_threadsafe(
+                message_bus.stop_dispatch_task(), dispatch_loop
+            )
+            try:
+                future.result(timeout=5.0)
+            except Exception:
+                logger.exception("消息总线停止失败")
+        dispatch_thread.join(timeout=5.0)
         print("Shutdown complete.")

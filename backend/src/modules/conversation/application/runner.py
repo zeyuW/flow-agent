@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import threading
 from collections import deque
 from typing import Protocol
@@ -20,7 +21,10 @@ class IncomingMessageSource(Protocol):
 
 
 class ConversationProcessor(Protocol):
-    """执行单个对话回合的应用端口。"""
+    """执行单个对话回合的应用端口。
+
+    新对话管道应提供 `process_async`；运行器仍兼容迁移期的同步 `process`。
+    """
 
     async def process(self, message: IncomingMessage) -> None:
         """处理一条消息直到回合终态。"""
@@ -45,6 +49,7 @@ class ConversationRunner:
         self._active_by_conversation: dict[str, asyncio.Task[None]] = {}
         self._pending_by_conversation: dict[str, deque[IncomingMessage]] = {}
         self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def run_forever(self) -> None:
         """持续领取消息，并让不同会话独立推进。"""
@@ -101,10 +106,30 @@ class ConversationRunner:
             return
 
         def run() -> None:
-            asyncio.run(self.run_forever())
+            loop = asyncio.new_event_loop()
+            self._loop = loop
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(self.run_forever())
+            finally:
+                self._loop = None
+                loop.close()
 
         self._thread = threading.Thread(target=run, daemon=True)
         self._thread.start()
+
+    def stop_background(self, timeout: float = 5.0) -> None:
+        """从同步入口停止后台事件循环，并等待线程退出。"""
+
+        loop = self._loop
+        thread = self._thread
+        if loop is not None and not loop.is_closed():
+            future = asyncio.run_coroutine_threadsafe(self.stop(timeout), loop)
+            future.result(timeout=max(1.0, timeout + 1.0))
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=max(0.0, timeout))
+        if thread is None or not thread.is_alive():
+            self._thread = None
 
     @property
     def running(self) -> bool:
@@ -134,12 +159,29 @@ class ConversationRunner:
         self._start(message)
 
     def _start(self, message: IncomingMessage) -> None:
-        task = asyncio.create_task(self._processor.process(message))
+        task = asyncio.create_task(self._process_one(message))
         conversation_id = message.conversation_id
         self._active_by_conversation[conversation_id] = task
         task.add_done_callback(
             lambda completed, owner=conversation_id: self._finish(completed, owner)
         )
+
+    async def _process_one(self, message: IncomingMessage) -> None:
+        """调用对话处理器，优先使用不会阻塞事件循环的异步入口。"""
+
+        process_async = getattr(self._processor, "process_async", None)
+        if callable(process_async):
+            result = process_async(message)
+            if inspect.isawaitable(result):
+                await result
+            return
+
+        process = getattr(self._processor, "process", None)
+        if not callable(process):
+            raise TypeError("对话处理器必须提供 process_async 或 process")
+        result = process(message)
+        if inspect.isawaitable(result):
+            await result
 
     def _finish(self, task: asyncio.Task[None], conversation_id: str) -> None:
         """一个回合结束后，才允许同会话中的下一条消息开始。"""
