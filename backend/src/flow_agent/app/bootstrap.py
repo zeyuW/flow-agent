@@ -58,8 +58,8 @@ from modules.scheduling.application.tools import (
     ScheduleTaskTool,
 )
 from infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
-from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
-from flow_agent.runtime.service import RuntimeService, RuntimeUnit
+from infra.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
+from infra.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.runtime.workspace import init_workspace
 from modules.delegation.application.runtime import SubagentRuntime, create_subagent_runtime
 from modules.proactive.application.runtime import build_proactive_runtime
