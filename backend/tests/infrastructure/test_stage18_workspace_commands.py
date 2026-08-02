@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-from bootstrap.cli import main as cli_main
 from modules.capabilities.plugins.manager import PluginManager
 from bootstrap.workspace import (
     detect_workspace,
@@ -81,22 +80,6 @@ def test_plugin_manager_install_enable_disable_uninstall(tmp_path: Path):
     assert manager.scan()[0].enabled is True
     manager.uninstall("pdf_parser")
     assert manager.scan() == []
-
-
-def test_cli_init_command(tmp_path: Path):
-    exit_code = cli_main(["init", "--workspace", str(tmp_path)])
-    assert exit_code == 0
-    assert (tmp_path / ".flow" / ".workspace").exists()
-
-
-def test_cli_without_subcommand_starts_service(monkeypatch):
-    calls = []
-    config = object()
-    monkeypatch.setattr("bootstrap.cli.load_application_config", lambda _: config)
-    monkeypatch.setattr("bootstrap.cli.run_service", lambda value: calls.append(value))
-
-    assert cli_main([]) == 0
-    assert calls == [config]
 
 
 def test_persist_workspace_profile_is_noop(tmp_path: Path):

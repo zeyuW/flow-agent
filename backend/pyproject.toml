@@ -27,9 +27,6 @@ package-dir = {"" = "src"}
 where = ["src"]
 include = ["modules*", "interfaces*", "infra*", "bootstrap*"]
 
-[project.scripts]
-flow-agent = "bootstrap.cli:main"
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

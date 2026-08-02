@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 import asyncio
+from pathlib import Path
 
+from bootstrap.config import load_application_config
 from bootstrap.container import create_app_runtime
 from infra.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
@@ -18,6 +20,8 @@ from infra.runtime.workspace_lock import (
 from infra.config.schema import AppConfig
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def run_service(config: AppConfig) -> None:
@@ -33,6 +37,16 @@ def run_service(config: AppConfig) -> None:
         _run_service(config)
     finally:
         lock.release()
+
+
+def run_from_project(project_root: Path = PROJECT_ROOT) -> None:
+    """从项目根目录加载配置并启动服务进程。"""
+
+    run_service(load_application_config(project_root))
+
+
+if __name__ == "__main__":
+    run_from_project()
 
 
 def _run_service(config: AppConfig) -> None:
