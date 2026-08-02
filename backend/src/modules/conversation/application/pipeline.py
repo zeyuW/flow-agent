@@ -22,8 +22,8 @@ from modules.conversation.application.delegation import DelegationPolicy
 from modules.conversation.application.phase import PhaseModule, TurnFlow
 from flow_agent.infra.trace import TraceRecorder
 from flow_agent.llm.client import LLMToolCall
-from flow_agent.memory.memory_engine import MemoryEngine
-from flow_agent.memory.markdown_store import MarkdownStore
+from modules.memory.memory_engine import MemoryEngine
+from modules.memory.markdown_store import MarkdownStore
 from flow_agent.tools.registry import ToolRegistry
 from infra.messaging.event_bus import (
     Event,
