@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from modules.proactive.domain.models import AgentTick
-from flow_agent.proactive.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
-from flow_agent.proactive.mcp_polling import McpPollingModule
+from modules.proactive.application.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
+from modules.proactive.application.mcp_polling import McpPollingModule
 
 logger = logging.getLogger(__name__)
 
