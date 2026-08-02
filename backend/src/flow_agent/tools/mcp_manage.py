@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from flow_agent.mcp.server_registry import McpServerRegistry
+from modules.capabilities.mcp.server_registry import McpServerRegistry
 from flow_agent.tools.base import ToolResult
 
 logger = logging.getLogger(__name__)

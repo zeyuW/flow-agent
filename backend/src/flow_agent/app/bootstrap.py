@@ -21,7 +21,7 @@ from modules.conversation.application.runner import ConversationRunner
 from modules.conversation.infra.legacy_message_bus import LegacyMessageBusSource
 from modules.delivery.application.ports import DeliveryPort
 from modules.delivery.infra.legacy_message_bus import LegacyMessageBusDeliveryPort
-from flow_agent.mcp.server_registry import McpServerRegistry
+from modules.capabilities.mcp.server_registry import McpServerRegistry
 from flow_agent.tools.mcp_manage import McpListTool
 from modules.conversation.application.agent import Agent
 from modules.conversation.application.delegation import DelegationPolicy
@@ -74,8 +74,8 @@ from flow_agent.proactive.tools import (
     GetProactiveStatusTool,
 )
 from flow_agent.guard.guards import ProactiveFrequencyGuard, ToolGuard
-from flow_agent.skills.loader import SkillLoader
-from flow_agent.skills.registry import SkillRegistry
+from modules.capabilities.skills.loader import SkillLoader
+from modules.capabilities.skills.registry import SkillRegistry
 from flow_agent.tools.filesystem import ReadFileTool
 from flow_agent.tools.spawn import SpawnTool
 from flow_agent.tools.registry import ToolRegistry
