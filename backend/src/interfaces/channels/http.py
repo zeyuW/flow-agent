@@ -10,8 +10,8 @@ from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from modules.conversation.domain.channel_message import InboundMessage
 from modules.delivery.domain.messages import OutboundMessage
 from flow_agent.messaging.message_bus import MessageBus
-from flow_agent.security.auth import APIKeyAuth
-from flow_agent.security.policy import SecurityPolicy
+from infra.security.auth import APIKeyAuth
+from infra.security.policy import SecurityPolicy
 
 
 logger = logging.getLogger(__name__)
