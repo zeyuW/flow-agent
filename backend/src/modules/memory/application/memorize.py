@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from modules.memory.markdown_store import MarkdownStore
-from flow_agent.memory.memorizer import Memorizer
+from modules.memory.application.memorizer import Memorizer
 from modules.capabilities.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)

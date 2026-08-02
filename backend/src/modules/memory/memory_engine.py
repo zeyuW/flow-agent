@@ -106,6 +106,6 @@ class MemoryEngine:
         if not result.hits:
             return ""
 
-        from flow_agent.memory.injection import format_injection_block
+        from modules.memory.application.injection import format_injection_block
 
         return format_injection_block(result.hits, max_chars=max_chars)
