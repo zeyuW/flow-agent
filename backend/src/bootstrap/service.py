@@ -6,12 +6,12 @@ import logging
 import asyncio
 
 from flow_agent.app.bootstrap import create_app_runtime
-from flow_agent.infra.logging import configure_logging
+from infra.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
-from flow_agent.infra.paths import WORKSPACE_LAYOUT
+from infra.paths import WORKSPACE_LAYOUT
 from interfaces.channels.telegram import TelegramChannel
 from flow_agent.tools.message_push import MessagePushTool
-from flow_agent.runtime.workspace_lock import (
+from infra.runtime.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
 )

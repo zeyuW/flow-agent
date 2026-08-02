@@ -372,7 +372,7 @@ class TelegramChannel(Channel, EventSubscriber):
             raise RuntimeError("Telegram 未返回图片路径")
         target_dir = self._attachment_dir
         if target_dir is None:
-            from flow_agent.infra.paths import WORKSPACE_LAYOUT
+            from infra.paths import WORKSPACE_LAYOUT
 
             target_dir = WORKSPACE_LAYOUT.inbound_attachments_dir / "telegram"
         target_dir.mkdir(parents=True, exist_ok=True)

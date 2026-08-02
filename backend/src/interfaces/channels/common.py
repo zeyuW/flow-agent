@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 from typing import Dict
-from flow_agent.infra.paths import WORKSPACE_LAYOUT
+from infra.paths import WORKSPACE_LAYOUT
 
 
 class AttachmentStore:

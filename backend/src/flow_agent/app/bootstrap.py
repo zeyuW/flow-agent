@@ -57,7 +57,7 @@ from flow_agent.scheduler.tools import (
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from flow_agent.infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
+from infra.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
 from flow_agent.runtime.models import RuntimeHealth, RuntimeUnitSnapshot
 from flow_agent.runtime.service import RuntimeService, RuntimeUnit
 from flow_agent.runtime.workspace import init_workspace
