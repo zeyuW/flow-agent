@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import asyncio
 
-from flow_agent.app.bootstrap import create_app_runtime
+from bootstrap.container import create_app_runtime
 from infra.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
 from infra.paths import WORKSPACE_LAYOUT
