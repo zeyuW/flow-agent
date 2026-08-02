@@ -36,7 +36,7 @@ from modules.conversation.infra.session_manager import SessionManager
 from flow_agent.tools.undo import UndoTool
 from flow_agent.memory.memory_runtime import build_memory_runtime, wire_memory_events
 from flow_agent.memory.memory_engine import MemoryEngine
-from flow_agent.memory.maintenance import (
+from modules.memory.application.maintenance import (
     ConversationConsolidator,
     MemoryOptimizer,
     MemoryOptimizerLoop,
