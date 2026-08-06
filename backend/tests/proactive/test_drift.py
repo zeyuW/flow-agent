@@ -6,16 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from modules.proactive.domain.drift import DriftSkill, DriftRun, DriftTick
-from modules.proactive.application.drift_pipeline import DriftTurnPipeline
-from modules.proactive.infra.drift_store import DriftStateStore
-from modules.proactive.application.drift_tools import (
+from application.proactive.domain.drift import DriftSkill, DriftRun, DriftTick
+from application.proactive.app.drift_pipeline import DriftTurnPipeline
+from application.proactive.infra.drift_store import DriftStateStore
+from application.proactive.app.drift_tools import (
     dispatch_drift_tool,
     get_drift_tool_schemas,
     get_post_push_tool_schemas,
 )
-from modules.proactive.infra.gate import ProactiveStateStore
-from modules.capabilities.llm.client import LLMToolCall
+from application.proactive.infra.gate import ProactiveStateStore
+from application.capabilities.llm.client import LLMToolCall
 
 
 # ── 工具函数测试 ──

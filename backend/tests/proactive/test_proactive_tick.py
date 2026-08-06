@@ -2,19 +2,19 @@
 
 from pathlib import Path
 
-from modules.capabilities.llm.client import LLMResult, LLMToolCall
-from modules.memory.markdown_store import MarkdownStore
-from modules.proactive.infra.gate import ProactiveStateStore, AnyActionGate, check_gate
-from modules.proactive.domain.models import (
+from application.capabilities.llm.client import LLMResult, LLMToolCall
+from application.memory.markdown_store import MarkdownStore
+from application.proactive.infra.gate import ProactiveStateStore, AnyActionGate, check_gate
+from application.proactive.domain.models import (
     AgentTick, GateResult, GatewayResult, DataItem,
     JudgeResult, ResolveResult, DeliverResult,
 )
-from modules.proactive.application.resolve import resolve_decision
-from modules.proactive.application.pipeline import ProactiveTurnPipeline
-from modules.proactive.infra.data_gateway import DataGateway
-from modules.proactive.application.judge_loop import JudgeLoop
-from modules.proactive.infra.mcp_pool import McpClientPool
-from modules.proactive.application.deliver import deliver_message
+from application.proactive.app.resolve import resolve_decision
+from application.proactive.app.pipeline import ProactiveTurnPipeline
+from application.proactive.infra.data_gateway import DataGateway
+from application.proactive.app.judge_loop import JudgeLoop
+from application.proactive.infra.mcp_pool import McpClientPool
+from application.proactive.app.deliver import deliver_message
 
 
 # ── fake helpers ──

@@ -4,11 +4,11 @@ import asyncio
 
 import pytest
 
-from modules.proactive.application.lifecycle import ProactiveLifecycle
-from modules.proactive.application.mcp_polling import McpPollingModule
-from modules.proactive.domain.models import AgentTick
-from modules.proactive.application.loop import ProactiveLoop
-from modules.proactive.domain.specs import RegisteredProactiveSource, ProactiveSourceSpecImpl
+from application.proactive.app.lifecycle import ProactiveLifecycle
+from application.proactive.app.mcp_polling import McpPollingModule
+from application.proactive.domain.models import AgentTick
+from application.proactive.app.loop import ProactiveLoop
+from application.proactive.domain.specs import RegisteredProactiveSource, ProactiveSourceSpecImpl
 
 
 class _Pool:

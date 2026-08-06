@@ -1,13 +1,13 @@
 import json
 from pathlib import Path
 
-from modules.capabilities.plugins.manager import PluginManager
+from application.capabilities.plugins.manager import PluginManager
 from bootstrap.workspace import (
     detect_workspace,
     init_workspace,
     persist_workspace_profile,
 )
-from modules.capabilities.skills.manager import SkillManager
+from application.capabilities.skills.manager import SkillManager
 
 
 def test_workspace_init_and_detect(tmp_path: Path):

@@ -10,8 +10,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from modules.conversation.domain.channel_message import InboundMessage
-from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
+from application.conversation.domain.channel_message import InboundMessage
+from infra.bus.models import ChannelDeliveryResult, OutboundMessage
 from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
 from infra.bus.event import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 

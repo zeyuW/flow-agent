@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from modules.capabilities.mcp import builtin_server
-from modules.capabilities.mcp.mcp_client import McpClient
-from modules.capabilities.mcp.config import McpServerSpec, load_project_mcp_specs
-from modules.capabilities.mcp.server_registry import McpServerRegistry
-from modules.capabilities.plugins.plugin_loader import PluginManager
-from modules.capabilities.tools.registry import ToolRegistry
+from application.capabilities.mcp import builtin_server
+from application.capabilities.mcp.mcp_client import McpClient
+from application.capabilities.mcp.config import McpServerSpec, load_project_mcp_specs
+from application.capabilities.mcp.server_registry import McpServerRegistry
+from application.capabilities.plugins.plugin_loader import PluginManager
+from application.capabilities.tools.registry import ToolRegistry
 
 
 _SERVER_SOURCE = '''
@@ -199,8 +199,8 @@ def test_plugin_declares_mcp_server_with_private_data_dir(tmp_path: Path):
     data_dir = tmp_path / "plugin-data"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "plugin.py").write_text(
-        '''from modules.capabilities.mcp.config import McpServerSpec
-from modules.capabilities.plugins.plugin_base import Plugin
+        '''from application.capabilities.mcp.config import McpServerSpec
+from application.capabilities.plugins.plugin_base import Plugin
 
 class DemoPlugin(Plugin):
     @classmethod

@@ -4,13 +4,13 @@ import asyncio
 from pathlib import Path
 
 from interfaces.channels.telegram import TelegramChannel
-from modules.conversation.application.agent import Agent
-from modules.conversation.application.pipeline import PassiveTurnPipeline
-from modules.conversation.application.phase import TurnFlow
-from modules.capabilities.llm.client import LLMResult
-from modules.capabilities.llm.client import LLMToolCall
-from modules.capabilities.skills.loader import SkillLoader
-from modules.delivery.application.message_push import MessagePushTool
+from application.conversation.app.agent import Agent
+from application.conversation.app.pipeline import PassiveTurnPipeline
+from application.conversation.app.phase import TurnFlow
+from application.capabilities.llm.client import LLMResult
+from application.capabilities.llm.client import LLMToolCall
+from application.capabilities.skills.loader import SkillLoader
+from application.capabilities.tools.message_push import MessagePushTool
 
 
 class _Bus:

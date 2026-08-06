@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from modules.capabilities.llm.client import OpenAILLMClient
+from application.capabilities.llm.client import OpenAILLMClient
 
 
 def _chunk(*, content=None, tool_calls=None):

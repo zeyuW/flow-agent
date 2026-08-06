@@ -9,7 +9,7 @@ SOURCE_ROOT = BACKEND_ROOT / "src"
 
 
 def test_python_packages_resolve_from_backend_src():
-    for package_name in ("modules", "interfaces", "infra", "bootstrap"):
+    for package_name in ("application", "interfaces", "infra", "bootstrap"):
         spec = find_spec(package_name)
         assert spec is not None
         locations = list(spec.submodule_search_locations or ())

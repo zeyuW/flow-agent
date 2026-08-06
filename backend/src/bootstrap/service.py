@@ -12,7 +12,7 @@ from infra.telemetry.logging import configure_logging
 from interfaces.channels.http import HTTPChannel
 from infra.lifecycle.paths import WORKSPACE_LAYOUT
 from interfaces.channels.telegram import TelegramChannel
-from modules.delivery.application.message_push import MessagePushTool
+from application.capabilities.tools.message_push import MessagePushTool
 from infra.lifecycle.workspace_lock import (
     WorkspaceAlreadyRunningError,
     WorkspaceProcessLock,
@@ -67,7 +67,7 @@ def _run_service(config: AppConfig) -> None:
             runtime_service,
             message_bus,
             event_bus,
-            agent_loop,
+            chat_worker,
             pipeline,
             tool_registry,
             memory_runtime,
@@ -161,7 +161,7 @@ def _run_service(config: AppConfig) -> None:
         http.start()
 
     # 启动 Agent 主循环（后台线程）
-    agent_loop.start_background()
+    chat_worker.start_background()
 
     background_runtime.start()
     print("scheduler started")
@@ -227,7 +227,7 @@ def _run_service(config: AppConfig) -> None:
             proactive_runtime.request_stop()
         if memory_optimizer_loop is not None:
             memory_optimizer_loop.stop()
-        agent_loop.stop_background()
+        chat_worker.stop_background()
         background_runtime.stop()
         subagent_runtime.manager.shutdown()
         mcp_registry.stop_all()

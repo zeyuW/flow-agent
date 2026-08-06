@@ -3,18 +3,18 @@ import json
 import os
 from pathlib import Path
 
-from modules.jobs.application.runtime import InMemoryJobRegistry
+from application.tasks.app.runtime import InMemoryJobRegistry
 from infra.bus.event import Event, EventBus
-from modules.capabilities.plugins.plugin_loader import PluginManager, _plugin_revision
-from modules.capabilities.tools.registry import ToolRegistry
+from application.capabilities.plugins.plugin_loader import PluginManager, _plugin_revision
+from application.capabilities.tools.registry import ToolRegistry
 
 
 def _write_plugin(path: Path, version: str) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "plugin.py").write_text(
-        f'''from modules.jobs.domain.models import JobSpec
-from modules.capabilities.plugins.plugin_base import Plugin
-from modules.capabilities.plugins.plugin_decorators import on_after_turn, on_tool_pre, tool
+        f'''from application.tasks.domain.models import JobSpec
+from application.capabilities.plugins.plugin_base import Plugin
+from application.capabilities.plugins.plugin_decorators import on_after_turn, on_tool_pre, tool
 
 class Phase:
     name = "demo-phase"
@@ -49,8 +49,8 @@ class DemoPlugin(Plugin):
 def _write_versioned_plugin(path: Path, name: str, version: str) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "plugin.py").write_text(
-        f'''from modules.capabilities.plugins.plugin_base import Plugin
-from modules.capabilities.plugins.plugin_decorators import tool
+        f'''from application.capabilities.plugins.plugin_base import Plugin
+from application.capabilities.plugins.plugin_decorators import tool
 
 class VersionedPlugin(Plugin):
     @tool(name="{name}_value", description="版本值")
@@ -167,9 +167,9 @@ def test_plugin_background_job_keeps_trigger_declaration(tmp_path: Path):
     plugin_dir = tmp_path / "plugins" / "triggered"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "plugin.py").write_text(
-        '''from modules.jobs.domain.models import JobSpec
+        '''from application.tasks.domain.models import JobSpec
 from infra.bus.event import TurnCommitted
-from modules.capabilities.plugins.plugin_base import Plugin
+from application.capabilities.plugins.plugin_base import Plugin
 
 class TriggeredPlugin(Plugin):
     def background_jobs(self):
@@ -208,8 +208,8 @@ def test_plugin_hot_reload_uses_fresh_relative_imports(tmp_path: Path):
     (plugin_dir / "helper.py").write_text('VALUE = "v1"\n', encoding="utf-8")
     (plugin_dir / "plugin.py").write_text(
         '''from .helper import VALUE
-from modules.capabilities.plugins.plugin_base import Plugin
-from modules.capabilities.plugins.plugin_decorators import tool
+from application.capabilities.plugins.plugin_base import Plugin
+from application.capabilities.plugins.plugin_decorators import tool
 
 class RelativePlugin(Plugin):
     @tool(name="relative_value")

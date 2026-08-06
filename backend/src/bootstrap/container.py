@@ -14,51 +14,50 @@ from infra.config.watcher import (
     ConfigWatcher,
     PreparedConfigChange,
 )
-from modules.delivery.infra.delivery_bus import DeliveryBus
-from modules.delivery.infra.outbox import SQLiteOutboxStore
+from infra.bus.message import MessageBus
+from infra.persistence.outbox import SQLiteOutboxStore
 from infra.bus.event import EventBus
-from modules.conversation.application.pipeline import PassiveTurnPipeline
-from modules.conversation.application.runner import ConversationRunner
-from modules.conversation.infra.inbound_source import InboundSource
-from modules.delivery.application.ports import DeliveryPort
-from modules.delivery.infra.port_adapter import DeliveryPortAdapter
-from modules.capabilities.mcp.server_registry import McpServerRegistry
-from modules.capabilities.tools.mcp_manage import McpListTool
-from modules.conversation.application.agent import Agent
-from modules.conversation.application.delegation import DelegationPolicy
-from modules.conversation.infra.context import ConversationContext
+from application.conversation.app.pipeline import PassiveTurnPipeline
+from application.conversation.app.chat_worker import ChatWorker
+from application.ports.message_sender import MessageSender
+from application.ports.message_consumer import MessageConsumer
+from application.capabilities.mcp.server_registry import McpServerRegistry
+from application.capabilities.tools.mcp_manage import McpListTool
+from application.conversation.app.agent import Agent
+from application.conversation.app.delegation import DelegationPolicy
+from application.conversation.infra.context import ConversationContext
 from infra.telemetry.trace import TraceRecorder
-from modules.capabilities.llm.client import OpenAILLMClient
-from modules.capabilities.llm.assembler import PromptAssembler, PromptBudget
-from modules.capabilities.llm.router import LLMRouter
-from modules.capabilities.behavior.persona import PersonaProfile, PersonaResolver
-from modules.conversation.infra.session_store import SessionStore
-from modules.conversation.infra.session_manager import SessionManager
-from modules.capabilities.tools.undo import UndoTool
-from modules.memory.application.memory_runtime import (
+from application.capabilities.llm.client import OpenAILLMClient
+from application.capabilities.llm.assembler import PromptAssembler, PromptBudget
+from application.capabilities.llm.router import LLMRouter
+from application.capabilities.behavior.persona import PersonaProfile, PersonaResolver
+from application.conversation.infra.session_store import SessionStore
+from application.conversation.infra.session_manager import SessionManager
+from application.capabilities.tools.undo import UndoTool
+from application.memory.app.memory_runtime import (
     build_memory_runtime,
     wire_memory_events,
 )
-from modules.memory.memory_engine import MemoryEngine
-from modules.memory.application.maintenance import (
+from application.memory.memory_engine import MemoryEngine
+from application.memory.app.maintenance import (
     ConversationConsolidator,
     MemoryOptimizer,
     MemoryOptimizerLoop,
 )
-from modules.memory.application.recall_memory import (
+from application.memory.app.recall_memory import (
     RecallMemoryTool,
     RecallMemoryToolAdapter,
 )
-from modules.memory.application.memorize import MemorizeTool, MemorizeToolAdapter
-from modules.jobs.application.runtime import BackgroundRuntime, InMemoryJobRegistry
-from modules.jobs.infra.store import SQLiteJobStore
-from modules.jobs.application.tools import (
+from application.memory.app.memorize import MemorizeTool, MemorizeToolAdapter
+from application.tasks.app.runtime import BackgroundRuntime, InMemoryJobRegistry
+from application.tasks.infra.store import SQLiteJobStore
+from application.tasks.app.tools import (
     ListBackgroundJobsTool,
     ListBackgroundRunsTool,
     RunBackgroundJobTool,
 )
-from modules.scheduling.application.runtime import SchedulerService
-from modules.scheduling.application.tools import (
+from application.scheduling.app.runtime import SchedulerService
+from application.scheduling.app.tools import (
     CancelScheduledTaskTool,
     CurrentTimeTool,
     ListScheduledTasksTool,
@@ -68,29 +67,29 @@ from infra.lifecycle.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
 from infra.lifecycle.models import RuntimeHealth, RuntimeUnitSnapshot
 from infra.lifecycle.service import RuntimeService, RuntimeUnit
 from infra.lifecycle.workspace import init_workspace
-from modules.delegation.application.runtime import (
+from application.delegation.app.runtime import (
     SubagentRuntime,
     create_subagent_runtime,
 )
-from modules.proactive.application.runtime import build_proactive_runtime
-from modules.proactive.infra.mcp_pool import RegistryMcpPool
-from modules.proactive.infra.gate import ProactiveStateStore
-from modules.proactive.domain.specs import (
+from application.proactive.app.runtime import build_proactive_runtime
+from application.proactive.infra.mcp_pool import RegistryMcpPool
+from application.proactive.infra.gate import ProactiveStateStore
+from application.proactive.domain.specs import (
     ProactiveSourceSpecImpl,
     RegisteredProactiveSource,
 )
-from modules.proactive.application.tools import (
+from application.proactive.app.tools import (
     ConfigureProactivePolicyTool,
     GetProactiveStatusTool,
 )
-from modules.capabilities.tools.guard import ProactiveFrequencyGuard, ToolGuard
-from modules.capabilities.skills.loader import SkillLoader
-from modules.capabilities.skills.registry import SkillRegistry
-from modules.capabilities.tools.filesystem import ReadFileTool
-from modules.delegation.application.spawn import SpawnTool
-from modules.capabilities.tools.registry import ToolRegistry
-from modules.capabilities.plugins.plugin_loader import PluginManager
-from modules.proactive.infra.sources import (
+from application.capabilities.tools.guard import ProactiveFrequencyGuard, ToolGuard
+from application.capabilities.skills.loader import SkillLoader
+from application.capabilities.skills.registry import SkillRegistry
+from application.capabilities.tools.filesystem import ReadFileTool
+from application.delegation.app.spawn import SpawnTool
+from application.capabilities.tools.registry import ToolRegistry
+from application.capabilities.plugins.plugin_loader import PluginManager
+from application.proactive.infra.sources import (
     LocalFileSource,
     LocalTaskSource,
     LocalTodoSource,
@@ -98,11 +97,11 @@ from modules.proactive.infra.sources import (
     WebSnapshotSource,
 )
 
-"""新架构组装：DeliveryBus + EventBus + AgentLoop + PassiveTurnPipeline
+"""新架构组装：MessageBus + EventBus + ChatWorker + PassiveTurnPipeline
 
 核心流程:
-  渠道 → DeliveryBus.publish_inbound → AgentLoop.consume → PassiveTurnPipeline.process
-    → AfterTurn: EventBus.fanout + DeliveryBus.dispatch_outbound → 渠道
+  渠道 → MessageBus.publish_inbound → ChatWorker.receive → PassiveTurnPipeline.process
+    → AfterTurn: EventBus.fanout + MessageBus.dispatch_outbound → 渠道
 """
 
 
@@ -202,9 +201,9 @@ def create_core_components(config: AppConfig):
     }
 
 
-def create_delivery_bus(storage: StorageConfig) -> DeliveryBus:
+def create_message_bus(storage: StorageConfig) -> MessageBus:
     """创建带可靠投递能力的业务总线。"""
-    return DeliveryBus(
+    return MessageBus(
         outbox_store=SQLiteOutboxStore(WORKSPACE_LAYOUT.outbound_messages_db),
         outbox_recovery_window_s=storage.outbox_recovery_window_seconds,
         outbox_recovery_limit=storage.outbox_recovery_limit,
@@ -219,7 +218,7 @@ def create_event_bus() -> EventBus:
 def create_passive_turn_pipeline(
     agent: Agent,
     tool_registry: ToolRegistry,
-    message_bus: DeliveryBus,
+    message_bus: MessageBus,
     event_bus: EventBus,
     memory_engine: MemoryEngine | None = None,
     markdown_store=None,
@@ -229,7 +228,7 @@ def create_passive_turn_pipeline(
     *,
     tooling: ToolingConfig,
     enable_thinking: bool,
-    delivery_port: DeliveryPort | None = None,
+    message_sender: MessageSender | None = None,
 ) -> PassiveTurnPipeline:
     """创建被动回合管道。
 
@@ -249,17 +248,17 @@ def create_passive_turn_pipeline(
         enable_thinking=enable_thinking,
         phase_modules_provider=phase_modules_provider,
         tool_hook_executor=tool_hook_executor,
-        delivery_port=delivery_port,
+        message_sender=message_sender,
     )
 
 
-def create_agent_loop(
-    message_bus: DeliveryBus,
+def create_chat_worker(
+    message_bus: MessageBus,
     pipeline: PassiveTurnPipeline,
-) -> ConversationRunner:
-    """创建新的对话应用运行器，并隔离迁移期旧实现。"""
-    return ConversationRunner(
-        source=InboundSource(message_bus),
+) -> ChatWorker:
+    """创建被动对话工作器。"""
+    return ChatWorker(
+        consumer=cast(MessageConsumer, message_bus),
         processor=cast(Any, pipeline),
         poll_interval_ms=100,
     )
@@ -270,7 +269,7 @@ def create_app_runtime(config: AppConfig):
 
     返回:
         (proactive_loop, background_runtime, subagent_runtime,
-         runtime_service, message_bus, event_bus, agent_loop, pipeline,
+         runtime_service, message_bus, event_bus, chat_worker, pipeline,
          tool_registry, memory_runtime, memory_optimizer_loop,
          mcp_registry, plugin_manager)
     """
@@ -289,9 +288,8 @@ def create_app_runtime(config: AppConfig):
     mcp_registry = components["mcp_registry"]
 
     # 创建总线
-    message_bus = create_delivery_bus(cfg.storage)
+    message_bus = create_message_bus(cfg.storage)
     event_bus = create_event_bus()
-    delivery_port = DeliveryPortAdapter(message_bus)
 
     background_registry = InMemoryJobRegistry()
     background_store = SQLiteJobStore(WORKSPACE_LAYOUT.background_jobs_db)
@@ -362,11 +360,11 @@ def create_app_runtime(config: AppConfig):
         tool_hook_executor=plugin_manager.tool_hook_executor,
         tooling=cfg.tooling,
         enable_thinking=cfg.llm.main.enable_thinking,
-        delivery_port=delivery_port,
+        message_sender=cast(MessageSender, message_bus),
     )
 
     # 创建 Agent 主循环
-    agent_loop = create_agent_loop(
+    chat_worker = create_chat_worker(
         message_bus=message_bus,
         pipeline=pipeline,
     )
@@ -374,7 +372,7 @@ def create_app_runtime(config: AppConfig):
     scheduler = SchedulerService(
         store_path=WORKSPACE_LAYOUT.scheduled_tasks_db,
         inbound_queue=message_bus.inbound,
-        outbound_port=message_bus.outbound_port,
+        message_sender=cast(MessageSender, message_bus),
     )
 
     background_runtime = BackgroundRuntime(
@@ -468,14 +466,14 @@ def create_app_runtime(config: AppConfig):
             memory_engine=memory_runtime.engine,
             markdown_store=memory_runtime.markdown_store,
             session_manager=session_manager,
-            outbound_port=message_bus.outbound_port,
+            message_sender=cast(MessageSender, message_bus),
             event_bus=event_bus,
             mcp_servers=mcp_servers,
             mcp_pool=RegistryMcpPool(mcp_registry),
             max_per_day=cfg.proactive.max_per_day,
             min_interval=cfg.proactive.min_interval,
             max_interval=cfg.proactive.max_interval,
-            is_busy_fn=lambda: agent_loop.is_processing(proactive_target),
+            is_busy_fn=lambda: chat_worker.is_processing(proactive_target),
             cooldown=cfg.proactive.cooldown,
             drift_enabled=cfg.drift.enabled,
             drift_data_dir=cfg.drift.data_dir,
@@ -564,7 +562,7 @@ def create_app_runtime(config: AppConfig):
         runtime_service,
         message_bus,
         event_bus,
-        agent_loop,
+        chat_worker,
         pipeline,
         tool_registry,
         memory_runtime,
@@ -706,7 +704,7 @@ class _RuntimeConfigApplier:
             raise ValueError(f"无效日志级别: {candidate.logging.level}")
 
         if self.proactive_loop is not None:
-            from modules.proactive.application.loop import HawkesConfig
+            from application.proactive.app.loop import HawkesConfig
 
             HawkesConfig(
                 base_intensity=candidate.proactive.hawkes_base_intensity,

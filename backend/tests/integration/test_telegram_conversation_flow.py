@@ -7,10 +7,10 @@ from types import SimpleNamespace
 def test_runner_uses_async_conversation_pipeline_for_telegram_input():
     """Telegram 入站消息必须交给对话管道的异步入口处理。"""
 
-    from bootstrap.container import create_agent_loop
-    from modules.conversation.domain.channel_message import InboundMessage
-    from modules.conversation.domain.messages import IncomingMessage
-    from modules.delivery.infra.delivery_bus import DeliveryBus
+    from bootstrap.container import create_chat_worker
+    from application.conversation.domain.channel_message import InboundMessage
+    from application.conversation.domain.messages import IncomingMessage
+    from infra.bus.message import MessageBus
 
     class Pipeline:
         def __init__(self) -> None:
@@ -22,9 +22,9 @@ def test_runner_uses_async_conversation_pipeline_for_telegram_input():
             self.done.set()
 
     async def scenario() -> None:
-        bus = DeliveryBus()
+        bus = MessageBus()
         pipeline = Pipeline()
-        runner = create_agent_loop(bus, pipeline)
+        runner = create_chat_worker(bus, pipeline)
         running = asyncio.create_task(runner.run_forever())
         try:
             bus.publish_inbound(
@@ -52,14 +52,12 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
     """Telegram 更新必须经过对话应用并回到同一个 chat_id。"""
 
     from interfaces.channels.telegram import TelegramChannel
-    from modules.conversation.application.runner import ConversationRunner
-    from modules.conversation.infra.inbound_source import InboundSource
-    from modules.delivery.application.ports import DeliveryRequest
-    from modules.delivery.infra.delivery_bus import DeliveryBus
-    from modules.delivery.infra.port_adapter import DeliveryPortAdapter
+    from application.conversation.app.chat_worker import ChatWorker
+    from application.ports.message_sender import SendMessage
+    from infra.bus.message import MessageBus
 
     async def scenario() -> None:
-        bus = DeliveryBus()
+        bus = MessageBus()
         channel = TelegramChannel("test-token")
         sent: list[tuple[int, str]] = []
         channel._send_text = lambda chat_id, text, max_retries=3: (
@@ -72,7 +70,6 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
         )
         bus.subscribe_outbound(channel.name, channel._on_response)
 
-        delivery = DeliveryPortAdapter(bus)
         processed = asyncio.Event()
 
         class Processor:
@@ -80,19 +77,18 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
                 assert message.channel == "telegram"
                 assert message.conversation_id == "42"
                 assert message.metadata["telegram_chat_id"] == 42
-                receipt = await delivery.send_and_wait(
-                    DeliveryRequest(
+                result = bus.send(
+                    SendMessage(
                         channel=message.channel,
                         conversation_id=message.conversation_id,
                         recipient_id=str(message.metadata["telegram_chat_id"]),
                         text=f"收到：{message.text}",
-                    ),
-                    timeout=1,
+                    )
                 )
-                assert receipt.delivered is True
+                assert result.accepted is True
                 processed.set()
 
-        runner = ConversationRunner(InboundSource(bus), Processor(), poll_interval_ms=1)
+        runner = ChatWorker(bus, Processor(), poll_interval_ms=1)
         dispatching = asyncio.create_task(bus.start_dispatch_task())
         running = asyncio.create_task(runner.run_forever())
         try:
@@ -107,6 +103,9 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
                 }
             )
             await asyncio.wait_for(processed.wait(), timeout=1)
+            deadline = asyncio.get_running_loop().time() + 1
+            while sent != [(42, "收到：你好")] and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
             assert sent == [(42, "收到：你好")]
         finally:
             await runner.stop()
@@ -122,7 +121,7 @@ def test_conversation_runner_background_thread_stops_cleanly():
 
     import time
 
-    from modules.conversation.application.runner import ConversationRunner
+    from application.conversation.app.runner import ChatWorker
 
     class Source:
         async def receive(self, poll_interval_ms: int):
@@ -134,7 +133,7 @@ def test_conversation_runner_background_thread_stops_cleanly():
         async def process_async(self, message) -> None:
             del message
 
-    runner = ConversationRunner(Source(), Processor(), poll_interval_ms=1)
+    runner = ChatWorker(Source(), Processor(), poll_interval_ms=1)
     runner.start_background()
     deadline = time.monotonic() + 1
     while not runner.running and time.monotonic() < deadline:
@@ -151,10 +150,10 @@ def test_telegram_channel_stop_removes_bus_subscriptions():
 
     from infra.bus.event import EventBus
     from interfaces.channels.telegram import TelegramChannel
-    from modules.delivery.infra.delivery_bus import DeliveryBus
+    from infra.bus.message import MessageBus
 
     async def scenario() -> None:
-        bus = DeliveryBus()
+        bus = MessageBus()
         event_bus = EventBus()
         channel = TelegramChannel("test-token")
         channel._context = SimpleNamespace(bus=bus, event_bus=event_bus, log=None)

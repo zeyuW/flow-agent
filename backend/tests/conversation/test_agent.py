@@ -1,7 +1,7 @@
-from modules.conversation.application.agent import Agent
-from modules.conversation.infra.context import ConversationContext
-from modules.capabilities.llm.client import FakeLLMClient, OpenAILLMClient
-from modules.capabilities.llm.prompts import build_messages
+from application.conversation.app.agent import Agent
+from application.conversation.infra.context import ConversationContext
+from application.capabilities.llm.client import FakeLLMClient, OpenAILLMClient
+from application.capabilities.llm.prompts import build_messages
 from infra.config.schema import ModelEndpointConfig
 
 
@@ -33,8 +33,8 @@ def test_openai_client_uses_one_explicit_endpoint(monkeypatch):
         created.append((api_key, base_url))
         return object()
 
-    monkeypatch.setattr("modules.capabilities.llm.client.OpenAI", create_client)
-    monkeypatch.setattr("modules.capabilities.llm.client.AsyncOpenAI", create_client)
+    monkeypatch.setattr("application.capabilities.llm.client.OpenAI", create_client)
+    monkeypatch.setattr("application.capabilities.llm.client.AsyncOpenAI", create_client)
     endpoint = ModelEndpointConfig(
         model="model-name",
         api_key="secret",

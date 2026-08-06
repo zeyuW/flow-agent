@@ -1,5 +1,5 @@
-from modules.capabilities.tools.base import ToolResult
-from modules.capabilities.tools.registry import ToolRegistry
+from application.capabilities.tools.base import ToolResult
+from application.capabilities.tools.registry import ToolRegistry
 
 
 class EchoTool:

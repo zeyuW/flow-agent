@@ -5,9 +5,9 @@ import json
 import threading
 import time
 
-from modules.delivery.infra.delivery_bus import DeliveryBus
-from modules.delegation.application.manager import SubagentManager
-from modules.delegation.application.spawn import SpawnTool
+from infra.bus.message import MessageBus
+from application.delegation.app.manager import SubagentManager
+from application.delegation.app.spawn import SpawnTool
 
 
 class AllowPolicy:
@@ -90,7 +90,7 @@ def test_background_spawn_survives_submission_return(tmp_path, monkeypatch):
 
 
 def test_background_spawn_notifies_original_telegram_chat(tmp_path):
-    bus = DeliveryBus()
+    bus = MessageBus()
     manager = SubagentManager(
         tasks_path=tmp_path / "tasks.jsonl",
         message_bus=bus,
@@ -127,7 +127,7 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
 
 
 def test_background_completion_keeps_long_result_and_chat_metadata(tmp_path):
-    bus = DeliveryBus()
+    bus = MessageBus()
     manager = SubagentManager(
         tasks_path=tmp_path / "tasks.jsonl",
         message_bus=bus,

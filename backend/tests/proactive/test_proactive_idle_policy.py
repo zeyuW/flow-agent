@@ -2,13 +2,13 @@ import asyncio
 import json
 import time
 
-from modules.proactive.infra.data_gateway import DataGateway
-from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore, check_gate
-from modules.proactive.domain.models import DataItem, GatewayResult
-from modules.proactive.application.judge_loop import JudgeLoop
-from modules.capabilities.llm.client import LLMToolCall
-from modules.proactive.application.pipeline import ProactiveTurnPipeline
-from modules.proactive.application.tools import (
+from application.proactive.infra.data_gateway import DataGateway
+from application.proactive.infra.gate import AnyActionGate, ProactiveStateStore, check_gate
+from application.proactive.domain.models import DataItem, GatewayResult
+from application.proactive.app.judge_loop import JudgeLoop
+from application.capabilities.llm.client import LLMToolCall
+from application.proactive.app.pipeline import ProactiveTurnPipeline
+from application.proactive.app.tools import (
     ConfigureProactivePolicyTool,
     GetProactiveStatusTool,
 )
@@ -64,7 +64,7 @@ class _UnusedJudge:
 
 class _EmptyDrift:
     async def run(self, connected_mcp):
-        from modules.proactive.domain.drift import DriftTick
+        from application.proactive.domain.drift import DriftTick
 
         return DriftTick()
 

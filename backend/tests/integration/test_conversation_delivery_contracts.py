@@ -5,7 +5,7 @@ import asyncio
 def test_conversation_message_preserves_channel_session_and_media():
     """渠道适配后的入站消息必须保留会话、发送者与媒体信息。"""
 
-    from modules.conversation.domain.messages import IncomingMessage
+    from application.conversation.domain.messages import IncomingMessage
 
     received_at = datetime(2026, 8, 2, tzinfo=timezone.utc)
     message = IncomingMessage(
@@ -25,38 +25,45 @@ def test_conversation_message_preserves_channel_session_and_media():
     assert message.received_at == received_at
 
 
-def test_delivery_request_creates_a_stable_receipt_identity():
-    """投递端口必须使用请求的稳定标识返回回执，供调用方关联结果。"""
+def test_message_send_preserves_a_stable_message_identity():
+    """业务发送端口必须保留调用方提供的稳定消息标识。"""
 
-    from modules.delivery.application.ports import DeliveryReceipt, DeliveryRequest
+    from application.ports.message_sender import SendMessage
+    from infra.bus.message import MessageBus
 
-    request = DeliveryRequest(
+    message = SendMessage(
         channel="telegram",
         conversation_id="telegram:42",
         text="回复",
         recipient_id="42",
-        delivery_id="delivery-1",
+        message_id="message-1",
     )
-    receipt = DeliveryReceipt.delivered_for(request, attempts=1)
+    result = MessageBus().send(message)
 
-    assert receipt.delivery_id == "delivery-1"
-    assert receipt.delivered is True
-    assert receipt.attempts == 1
+    assert result.message_id == "message-1"
+    assert result.accepted is True
 
 
 def test_conversation_runner_serializes_one_conversation_without_blocking_another():
     """同一会话必须 FIFO，不同会话在前一回合等待时仍可处理。"""
 
-    from modules.conversation.application.runner import ConversationRunner
-    from modules.conversation.domain.messages import IncomingMessage
+    from application.conversation.app.chat_worker import ChatWorker
+    from application.conversation.domain.messages import IncomingMessage
+    from application.ports.message_consumer import ReceivedMessage
 
     class Source:
         def __init__(self) -> None:
-            self.messages: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+            self.messages: asyncio.Queue[ReceivedMessage] = asyncio.Queue()
 
-        async def receive(self, poll_interval_ms: int) -> IncomingMessage:
+        async def receive(self, poll_interval_ms: int) -> ReceivedMessage:
             del poll_interval_ms
             return await self.messages.get()
+
+        async def ack(self, message_id: str) -> None:
+            del message_id
+
+        async def nack(self, message_id: str, *, retry: bool = True) -> None:
+            del message_id, retry
 
     class Processor:
         def __init__(self) -> None:
@@ -74,15 +81,15 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
     async def scenario() -> None:
         source = Source()
         processor = Processor()
-        runner = ConversationRunner(source, processor, poll_interval_ms=1)
+        runner = ChatWorker(source, processor, poll_interval_ms=1)
         task = asyncio.create_task(runner.run_forever())
         try:
-            await source.messages.put(IncomingMessage("cli", "same", "first"))
+            await source.messages.put(ReceivedMessage("1", "text", "cli", "same", "first"))
             await asyncio.wait_for(processor.first_started.wait(), timeout=0.2)
             assert runner.is_processing("same") is True
             assert runner.is_processing("other") is False
-            await source.messages.put(IncomingMessage("cli", "same", "second"))
-            await source.messages.put(IncomingMessage("cli", "other", "parallel"))
+            await source.messages.put(ReceivedMessage("2", "text", "cli", "same", "second"))
+            await source.messages.put(ReceivedMessage("3", "text", "cli", "other", "parallel"))
             deadline = asyncio.get_running_loop().time() + 0.2
             while "end:parallel" not in processor.steps:
                 if asyncio.get_running_loop().time() > deadline:
@@ -114,16 +121,23 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
 def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
     """停止超时后必须取消卡住的回合，不能遗留后台任务。"""
 
-    from modules.conversation.application.runner import ConversationRunner
-    from modules.conversation.domain.messages import IncomingMessage
+    from application.conversation.app.chat_worker import ChatWorker
+    from application.conversation.domain.messages import IncomingMessage
+    from application.ports.message_consumer import ReceivedMessage
 
     class Source:
         def __init__(self) -> None:
-            self.messages: asyncio.Queue[IncomingMessage] = asyncio.Queue()
+            self.messages: asyncio.Queue[ReceivedMessage] = asyncio.Queue()
 
-        async def receive(self, poll_interval_ms: int) -> IncomingMessage:
+        async def receive(self, poll_interval_ms: int) -> ReceivedMessage:
             del poll_interval_ms
             return await self.messages.get()
+
+        async def ack(self, message_id: str) -> None:
+            del message_id
+
+        async def nack(self, message_id: str, *, retry: bool = True) -> None:
+            del message_id, retry
 
     class Processor:
         def __init__(self) -> None:
@@ -142,9 +156,9 @@ def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
     async def scenario() -> None:
         source = Source()
         processor = Processor()
-        runner = ConversationRunner(source, processor, poll_interval_ms=1)
+        runner = ChatWorker(source, processor, poll_interval_ms=1)
         running = asyncio.create_task(runner.run_forever())
-        await source.messages.put(IncomingMessage("cli", "same", "hang"))
+        await source.messages.put(ReceivedMessage("1", "text", "cli", "same", "hang"))
         await asyncio.wait_for(processor.started.wait(), timeout=0.2)
 
         await runner.stop(timeout=0.01)
@@ -156,16 +170,14 @@ def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
     asyncio.run(scenario())
 
 
-def test_inbound_source_translates_channel_input_to_conversation_input():
-    """渠道消息进入应用层前必须完成协议转换。"""
+def test_message_consumer_translates_channel_input_to_received_message():
+    """消息消费者负责把渠道输入转换为统一的入站消息。"""
 
-    from interfaces.channels.models import InboundMessage
-    from modules.delivery.infra.delivery_bus import DeliveryBus
-    from modules.conversation.infra.inbound_source import InboundSource
+    from application.conversation.domain.channel_message import InboundMessage
+    from infra.bus.message import MessageBus
 
     async def scenario() -> None:
-        bus = DeliveryBus()
-        source = InboundSource(bus)
+        bus = MessageBus()
         bus.publish_inbound(
             InboundMessage(
                 channel="cli",
@@ -177,7 +189,7 @@ def test_inbound_source_translates_channel_input_to_conversation_input():
             )
         )
 
-        message = await source.receive(poll_interval_ms=1)
+        message = await bus.receive(poll_interval_ms=1)
 
         assert message.conversation_id == "cli:1"
         assert message.sender_id == "user-1"
@@ -190,29 +202,27 @@ def test_inbound_source_translates_channel_input_to_conversation_input():
 def test_bootstrap_assembles_the_new_conversation_runner():
     """组合根必须将既有消息总线接入新的对话应用运行器。"""
 
-    from bootstrap.container import create_agent_loop
-    from modules.delivery.infra.delivery_bus import DeliveryBus
-    from modules.conversation.application.runner import ConversationRunner
+    from bootstrap.container import create_chat_worker
+    from infra.bus.message import MessageBus
+    from application.conversation.app.chat_worker import ChatWorker
 
     class Pipeline:
         async def process_async(self, message) -> None:
             del message
 
-    runner = create_agent_loop(DeliveryBus(), Pipeline())
+    runner = create_chat_worker(MessageBus(), Pipeline())
 
-    assert isinstance(runner, ConversationRunner)
+    assert isinstance(runner, ChatWorker)
 
 
-def test_delivery_adapter_returns_the_real_channel_receipt():
-    """投递适配器必须把渠道确认结果转换为业务回执，而非提前报告成功。"""
+def test_message_bus_send_reaches_the_channel_dispatcher():
+    """消息发送端口提交的消息必须进入渠道分发器。"""
 
-    from modules.delivery.infra.delivery_bus import DeliveryBus
-    from modules.delivery.application.ports import DeliveryRequest
-    from modules.delivery.infra.port_adapter import DeliveryPortAdapter
+    from infra.bus.message import MessageBus
+    from application.ports.message_sender import SendMessage
 
     async def scenario() -> None:
-        bus = DeliveryBus()
-        port = DeliveryPortAdapter(bus)
+        bus = MessageBus()
         delivered_to = []
         bus.subscribe_outbound(
             "telegram",
@@ -220,18 +230,19 @@ def test_delivery_adapter_returns_the_real_channel_receipt():
         )
         runner = asyncio.create_task(bus.start_dispatch_task())
         try:
-            receipt = await port.send_and_wait(
-                DeliveryRequest(
+            result = bus.send(
+                SendMessage(
                     channel="telegram",
                     conversation_id="telegram:42",
                     recipient_id="42",
                     text="回复",
-                    delivery_id="delivery-42",
+                    message_id="message-42",
                 ),
-                timeout=1,
             )
-            assert receipt.delivery_id == "delivery-42"
-            assert receipt.delivered is True
+            assert result.accepted is True
+            deadline = asyncio.get_running_loop().time() + 1
+            while delivered_to != ["42"] and asyncio.get_running_loop().time() < deadline:
+                await asyncio.sleep(0.01)
             assert delivered_to == ["42"]
         finally:
             await bus.stop_dispatch_task()
@@ -240,25 +251,26 @@ def test_delivery_adapter_returns_the_real_channel_receipt():
     asyncio.run(scenario())
 
 
-def test_passive_pipeline_submits_reply_through_the_delivery_port():
-    """被动回复必须经 DeliveryPort 提交，不能直接依赖渠道投递对象。"""
+def test_passive_pipeline_submits_reply_through_message_sender():
+    """被动回复必须经 MessageSender 提交，不能直接依赖渠道投递对象。"""
 
     from types import SimpleNamespace
 
-    from modules.conversation.application.pipeline import PassiveTurnPipeline
-    from modules.capabilities.tools.registry import ToolRegistry
-    from modules.delivery.application.ports import DeliveryRequest
+    from application.conversation.app.pipeline import PassiveTurnPipeline
+    from application.capabilities.tools.registry import ToolRegistry
+    from application.ports.message_sender import SendMessage
 
-    submitted: list[DeliveryRequest] = []
+    submitted: list[SendMessage] = []
 
-    class Port:
-        def submit(self, request: DeliveryRequest) -> None:
-            submitted.append(request)
+    class Sender:
+        def send(self, message: SendMessage):
+            submitted.append(message)
+            return SimpleNamespace(message_id=message.message_id, accepted=True)
 
     pipeline = PassiveTurnPipeline(
         agent=object(),
         tool_registry=ToolRegistry(),
-        delivery_port=Port(),
+        message_sender=Sender(),
     )
     flow = SimpleNamespace(
         channel="telegram",
@@ -272,7 +284,7 @@ def test_passive_pipeline_submits_reply_through_the_delivery_port():
     pipeline._send_outbound_reply(flow)
 
     assert submitted == [
-        DeliveryRequest(
+        SendMessage(
             channel="telegram",
             conversation_id="telegram:42",
             recipient_id="42",

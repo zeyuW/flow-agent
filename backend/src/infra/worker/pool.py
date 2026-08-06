@@ -1,7 +1,7 @@
 """通用后台工作池。
 
 工作池只提供线程调度能力；任务的业务语义、重试和持久化状态由
-``modules/jobs`` 等业务模块负责，避免基础设施反向依赖业务。
+``application/tasks`` 等业务模块负责，避免基础设施反向依赖业务。
 """
 
 from __future__ import annotations

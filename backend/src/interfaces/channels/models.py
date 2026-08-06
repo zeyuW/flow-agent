@@ -1,7 +1,7 @@
 from typing import Protocol
 
-from modules.delivery.domain.messages import ChannelDeliveryResult, OutboundMessage
-from modules.conversation.domain.channel_message import InboundMessage
+from infra.bus.models import ChannelDeliveryResult, OutboundMessage
+from application.conversation.domain.channel_message import InboundMessage
 
 
 class OutboundSubscriber(Protocol):

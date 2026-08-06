@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from modules.proactive.application.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
+from application.proactive.app.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
 
 
 class _Module:
@@ -188,11 +188,11 @@ def test_compiler_rejects_synchronous_module_hook():
 def test_pipeline_runs_compiled_extensions_after_default_tick():
     """扩展模块只能在默认 tick 完成后读取其结果。"""
 
-    from modules.proactive.infra.data_gateway import DataGateway
-    from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore
-    from modules.proactive.application.judge_loop import JudgeLoop
-    from modules.proactive.infra.mcp_pool import McpClientPool
-    from modules.proactive.application.pipeline import ProactiveTurnPipeline
+    from application.proactive.infra.data_gateway import DataGateway
+    from application.proactive.infra.gate import AnyActionGate, ProactiveStateStore
+    from application.proactive.app.judge_loop import JudgeLoop
+    from application.proactive.infra.mcp_pool import McpClientPool
+    from application.proactive.app.pipeline import ProactiveTurnPipeline
 
     seen = []
 
@@ -217,11 +217,11 @@ def test_pipeline_runs_compiled_extensions_after_default_tick():
 def test_pipeline_extensions_share_declared_data_slots():
     """后续模块必须能读取前一模块生产的数据槽。"""
 
-    from modules.proactive.infra.data_gateway import DataGateway
-    from modules.proactive.infra.gate import AnyActionGate, ProactiveStateStore
-    from modules.proactive.application.judge_loop import JudgeLoop
-    from modules.proactive.infra.mcp_pool import McpClientPool
-    from modules.proactive.application.pipeline import ProactiveTurnPipeline
+    from application.proactive.infra.data_gateway import DataGateway
+    from application.proactive.infra.gate import AnyActionGate, ProactiveStateStore
+    from application.proactive.app.judge_loop import JudgeLoop
+    from application.proactive.infra.mcp_pool import McpClientPool
+    from application.proactive.app.pipeline import ProactiveTurnPipeline
 
     seen = []
 
@@ -257,7 +257,7 @@ def test_pipeline_extensions_share_declared_data_slots():
 def test_loop_starts_and_stops_pipeline_extensions_with_resources():
     """主动循环必须在资源可用后启动扩展，并在关闭资源前停止它们。"""
 
-    from modules.proactive.application.loop import ProactiveLoop
+    from application.proactive.app.loop import ProactiveLoop
 
     events: list[str] = []
 
@@ -298,7 +298,7 @@ def test_loop_starts_and_stops_pipeline_extensions_with_resources():
 def test_runtime_compiles_registered_proactive_modules():
     """运行时工厂必须在启动前编译插件声明的主动模块。"""
 
-    from modules.proactive.application.runtime import build_proactive_runtime
+    from application.proactive.app.runtime import build_proactive_runtime
 
     class Pool:
         async def connect_all(self):

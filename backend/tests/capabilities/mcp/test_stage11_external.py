@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from modules.capabilities.mcp.client import MCPClient
-from modules.capabilities.mcp.registry import MCPRegistry, MCPServerConfig
+from application.capabilities.mcp.client import MCPClient
+from application.capabilities.mcp.registry import MCPRegistry, MCPServerConfig
 # SourceGateway/ContentStore removed in new architecture
 # LocalFileSource removed in new architecture
-from modules.proactive.domain.types import SourceRecord
-from modules.capabilities.skills.loader import SkillLoader
-from modules.capabilities.skills.registry import SkillRegistry
+from application.proactive.domain.types import SourceRecord
+from application.capabilities.skills.loader import SkillLoader
+from application.capabilities.skills.registry import SkillRegistry
 
 
 class BrokenSource:
@@ -20,8 +20,8 @@ class BrokenSource:
 
 def test_source_gateway_isolates_source_failure(tmp_path: Path):
     # New architecture: DataGateway handles isolation via asyncio.gather(return_exceptions=True)
-    from modules.proactive.infra.data_gateway import DataGateway
-    from modules.proactive.infra.mcp_pool import McpClientPool
+    from application.proactive.infra.data_gateway import DataGateway
+    from application.proactive.infra.mcp_pool import McpClientPool
     import asyncio
     pool = McpClientPool()
     gateway = DataGateway(pool)
@@ -33,9 +33,9 @@ def test_source_gateway_isolates_source_failure(tmp_path: Path):
 
 def test_content_store_deduplicates_records():
     # New architecture: dedup done via ProactiveStateStore in resolve phase
-    from modules.proactive.infra.gate import ProactiveStateStore
-    from modules.proactive.application.resolve import resolve_decision
-    from modules.proactive.domain.models import JudgeResult
+    from application.proactive.infra.gate import ProactiveStateStore
+    from application.proactive.app.resolve import resolve_decision
+    from application.proactive.domain.models import JudgeResult
     import hashlib
     store = ProactiveStateStore()
     # Mark with the actual delivery key that _build_delivery_key will produce

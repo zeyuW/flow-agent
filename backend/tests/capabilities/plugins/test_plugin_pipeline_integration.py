@@ -2,11 +2,11 @@ import asyncio
 from types import SimpleNamespace
 
 from interfaces.channels.models import InboundMessage
-from modules.conversation.application.pipeline import PassiveTurnPipeline
-from modules.capabilities.llm.client import LLMResult, LLMToolCall
-from modules.capabilities.plugins.tool_hooks import HookOutcome, ToolHookExecutor, _PluginToolHook
-from modules.capabilities.tools.base import ToolResult
-from modules.capabilities.tools.registry import ToolRegistry
+from application.conversation.app.pipeline import PassiveTurnPipeline
+from application.capabilities.llm.client import LLMResult, LLMToolCall
+from application.capabilities.plugins.tool_hooks import HookOutcome, ToolHookExecutor, _PluginToolHook
+from application.capabilities.tools.base import ToolResult
+from application.capabilities.tools.registry import ToolRegistry
 
 
 class _EchoTool:

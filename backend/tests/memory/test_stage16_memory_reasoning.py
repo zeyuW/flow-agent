@@ -1,10 +1,10 @@
 import time
 from pathlib import Path
 
-from modules.memory.application.profile_extractor import ProfileExtractor
-from modules.proactive.application.judge_loop import JudgeLoop
-from modules.proactive.domain.models import DataItem
-from modules.delegation.application.manager import SubagentManager
+from application.memory.app.profile_extractor import ProfileExtractor
+from application.proactive.app.judge_loop import JudgeLoop
+from application.proactive.domain.models import DataItem
+from application.delegation.app.manager import SubagentManager
 
 
 def test_profile_extractor():
@@ -18,7 +18,7 @@ def test_profile_extractor():
 
 def test_proactive_judge_decision():
     # New architecture: JudgeLoop async LLM tool-call loop for content classification
-    from modules.proactive.domain.models import GatewayResult
+    from application.proactive.domain.models import GatewayResult
     class _FakeLLM:
         def generate(self, messages, tools=None):
             class _R:

@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from modules.memory.memory_engine import MemoryQueryResult
-from modules.memory.application.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
+from application.memory.memory_engine import MemoryQueryResult
+from application.memory.app.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 
 
 class RecordingMemoryEngine:

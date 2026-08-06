@@ -2,7 +2,7 @@
 
 import time
 
-from modules.proactive.infra.gate import ProactiveStateStore, AnyActionGate, check_gate
+from application.proactive.infra.gate import ProactiveStateStore, AnyActionGate, check_gate
 
 
 def test_gate_blocked_when_no_target():

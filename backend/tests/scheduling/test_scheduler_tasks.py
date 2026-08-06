@@ -1,13 +1,13 @@
 from datetime import datetime, timedelta, timezone
 
-from modules.delivery.infra.delivery_bus import InboundQueue
-from modules.scheduling.application.runtime import SchedulerService, parse_duration
-from modules.scheduling.application.tools import (
+from infra.bus.message import InboundQueue
+from application.scheduling.app.runtime import SchedulerService, parse_duration
+from application.scheduling.app.tools import (
     CancelScheduledTaskTool,
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from modules.capabilities.tools.registry import ToolRegistry
+from application.capabilities.tools.registry import ToolRegistry
 
 
 class MutableClock:

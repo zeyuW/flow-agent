@@ -12,9 +12,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
-from modules.conversation.domain.channel_message import InboundMessage
-from modules.delivery.domain.messages import OutboundMessage
-from modules.delivery.infra.delivery_bus import DeliveryBus
+from application.conversation.domain.channel_message import InboundMessage
+from infra.bus.models import OutboundMessage
+from infra.bus.message import MessageBus
 
 try:
     import websockets
@@ -51,14 +51,14 @@ _RECONNECT_BACKOFF = 2.0      # 退避倍数
 class QQBotChannel(MessageBusChannel):
     """QQ 官方机器人渠道 (spec 6a-6f)。
 
-    入站：WebSocket 接收事件 → 封装 InboundMessage → publish_inbound 到 DeliveryBus
-    出站：subscribe_outbound 注册回调 → DeliveryBus dispatch 调用 → HTTP POST 消息
+    入站：WebSocket 接收事件 → 封装 InboundMessage → publish_inbound 到 MessageBus
+    出站：subscribe_outbound 注册回调 → MessageBus dispatch 调用 → HTTP POST 消息
     """
 
     app_id: str = ""
     token: str = ""
     secret: str = ""
-    message_bus: DeliveryBus | None = None
+    message_bus: MessageBus | None = None
     allowed_users: set[int] = field(default_factory=set)
     allowed_groups: set[int] = field(default_factory=set)
     _running: bool = False
@@ -309,7 +309,7 @@ class QQBotChannel(MessageBusChannel):
         return text.strip()
 
     async def _publish_inbound(self, session_id: str, text: str, metadata: dict) -> None:
-        """发布入站消息到 DeliveryBus (spec 6c)。"""
+        """发布入站消息到 MessageBus (spec 6c)。"""
         if not self.message_bus:
             return
         inbound = InboundMessage(

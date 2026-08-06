@@ -1,17 +1,17 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from modules.conversation.application.pipeline import PassiveTurnPipeline
-from modules.conversation.application.phase import TurnFlow
-from modules.capabilities.tools.guard import ToolGuard
-from modules.capabilities.llm.client import LLMResult, LLMToolCall
-from modules.memory.markdown_store import MarkdownStore
-from modules.memory.memory_engine import MemoryEngine
-from modules.memory.application.memorizer import Memorizer
-from modules.memory.application.post_response import PostResponseContext, PostResponseMemoryWorker
-from modules.memory.infra.vector_store import MemoryStore
-from modules.memory.application.memorize import MemorizeTool, MemorizeToolAdapter
-from modules.capabilities.tools.registry import ToolRegistry
+from application.conversation.app.pipeline import PassiveTurnPipeline
+from application.conversation.app.phase import TurnFlow
+from application.capabilities.tools.guard import ToolGuard
+from application.capabilities.llm.client import LLMResult, LLMToolCall
+from application.memory.markdown_store import MarkdownStore
+from application.memory.memory_engine import MemoryEngine
+from application.memory.app.memorizer import Memorizer
+from application.memory.app.post_response import PostResponseContext, PostResponseMemoryWorker
+from application.memory.infra.vector_store import MemoryStore
+from application.memory.app.memorize import MemorizeTool, MemorizeToolAdapter
+from application.capabilities.tools.registry import ToolRegistry
 
 
 class FixedEmbedder:

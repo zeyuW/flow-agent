@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING
 
 from interfaces.channels.base import Channel, ChannelStatus, MessageBusChannel
 from interfaces.channels.models import OutboundSubscriber
-from modules.conversation.domain.channel_message import InboundMessage
-from modules.delivery.domain.messages import OutboundMessage
+from application.conversation.domain.channel_message import InboundMessage
+from infra.bus.models import OutboundMessage
 
 if TYPE_CHECKING:
     from interfaces.channels.cli import CLIChannel

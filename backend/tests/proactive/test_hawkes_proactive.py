@@ -7,18 +7,18 @@ from datetime import datetime, timezone
 
 from infra.bus.event import Event, EventBus
 from infra.telemetry.trace import TraceRecorder
-from modules.proactive.infra.gate import ProactiveStateStore
-from modules.proactive.infra.data_gateway import DataGateway
-from modules.proactive.infra.sources import LocalTaskSource, LocalTodoSource
-from modules.proactive.application.events import ProactiveEventBridge
-from modules.proactive.infra.mcp_pool import McpClientPool
-from modules.proactive.domain.models import AgentTick, GateResult
-from modules.proactive.application.loop import (
+from application.proactive.infra.gate import ProactiveStateStore
+from application.proactive.infra.data_gateway import DataGateway
+from application.proactive.infra.sources import LocalTaskSource, LocalTodoSource
+from application.proactive.app.events import ProactiveEventBridge
+from application.proactive.infra.mcp_pool import McpClientPool
+from application.proactive.domain.models import AgentTick, GateResult
+from application.proactive.app.loop import (
     HawkesConfig,
     HawkesProcessModel,
     ProactiveLoop,
 )
-from modules.proactive.application.runtime import build_proactive_runtime
+from application.proactive.app.runtime import build_proactive_runtime
 
 
 def test_hawkes_user_event_increases_intensity_and_then_decays():

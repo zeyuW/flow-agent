@@ -2,9 +2,9 @@
 
 import asyncio
 
-from modules.proactive.domain.models import DataItem, JudgeResult
-from modules.proactive.application.resolve import resolve_decision
-from modules.proactive.infra.gate import ProactiveStateStore
+from application.proactive.domain.models import DataItem, JudgeResult
+from application.proactive.app.resolve import resolve_decision
+from application.proactive.infra.gate import ProactiveStateStore
 
 
 class _Source:
@@ -67,8 +67,8 @@ def test_ambiguous_item_id_does_not_create_ack_effect():
 def test_delivery_failure_does_not_run_ack_effect():
     """渠道未确认送达时，任何投递后确认副作用都不能执行。"""
 
-    from modules.proactive.application.deliver import deliver_message
-    from modules.proactive.domain.models import ResolveResult
+    from application.proactive.app.deliver import deliver_message
+    from application.proactive.domain.models import ResolveResult
 
     called = []
 

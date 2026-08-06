@@ -3,8 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
 
-from modules.conversation.domain.channel_message import InboundMessage
-from modules.delivery.domain.messages import OutboundMessage
+from application.conversation.domain.channel_message import InboundMessage
+from infra.bus.models import OutboundMessage
 
 
 OutboundSender = Callable[[OutboundMessage], None]

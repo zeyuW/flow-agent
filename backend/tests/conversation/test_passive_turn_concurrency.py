@@ -3,15 +3,15 @@
 import asyncio
 
 from interfaces.channels.models import InboundMessage
-from modules.conversation.application.agent_loop import AgentLoop
-from modules.delivery.infra.delivery_bus import DeliveryBus
+from application.conversation.app.agent_loop import AgentLoop
+from infra.bus.message import MessageBus
 
 
 def test_different_sessions_start_without_waiting_for_each_other():
     """一个会话等待模型时，另一会话必须能够开始执行。"""
 
     async def scenario():
-        bus = DeliveryBus()
+        bus = MessageBus()
         first_started = asyncio.Event()
         second_started = asyncio.Event()
         release_first = asyncio.Event()
@@ -47,8 +47,8 @@ def test_different_sessions_start_without_waiting_for_each_other():
 def test_agent_builds_history_for_explicit_session():
     """并发回合必须按调用参数读取对应会话历史。"""
 
-    from modules.conversation.application.agent import Agent
-    from modules.conversation.infra.context import ConversationContext
+    from application.conversation.app.agent import Agent
+    from application.conversation.infra.context import ConversationContext
 
     context = ConversationContext()
     context.append_turn("session-a", "仅属于 A 的用户消息", "仅属于 A 的回复")
@@ -74,9 +74,9 @@ def test_agent_awaits_async_model_client():
 
     from types import SimpleNamespace
 
-    from modules.conversation.application.agent import Agent
-    from modules.conversation.infra.context import ConversationContext
-    from modules.capabilities.llm.client import LLMResult
+    from application.conversation.app.agent import Agent
+    from application.conversation.infra.context import ConversationContext
+    from application.capabilities.llm.client import LLMResult
 
     class AsyncClient:
         async def generate_async(self, messages, tools=None):
@@ -103,7 +103,7 @@ def test_openai_client_generates_with_async_transport():
 
     from types import SimpleNamespace
 
-    from modules.capabilities.llm.client import OpenAILLMClient
+    from application.capabilities.llm.client import OpenAILLMClient
 
     class Completions:
         async def create(self, **kwargs):
@@ -137,9 +137,9 @@ def test_passive_pipeline_allows_other_session_while_async_model_waits():
 
     from types import SimpleNamespace
 
-    from modules.conversation.application.pipeline import PassiveTurnPipeline
-    from modules.capabilities.llm.client import LLMResult
-    from modules.capabilities.tools.registry import ToolRegistry
+    from application.conversation.app.pipeline import PassiveTurnPipeline
+    from application.capabilities.llm.client import LLMResult
+    from application.capabilities.tools.registry import ToolRegistry
 
     async def scenario():
         first_model_started = asyncio.Event()
@@ -198,8 +198,8 @@ def test_cancelled_async_passive_turn_does_not_commit_reply():
 
     from types import SimpleNamespace
 
-    from modules.conversation.application.pipeline import PassiveTurnPipeline
-    from modules.capabilities.tools.registry import ToolRegistry
+    from application.conversation.app.pipeline import PassiveTurnPipeline
+    from application.capabilities.tools.registry import ToolRegistry
 
     async def scenario():
         model_started = asyncio.Event()
@@ -247,11 +247,11 @@ def test_async_pipeline_applies_tool_hook_before_execution():
 
     from types import SimpleNamespace
 
-    from modules.conversation.application.pipeline import PassiveTurnPipeline
-    from modules.capabilities.llm.client import LLMResult, LLMToolCall
-    from modules.capabilities.plugins.tool_hooks import HookOutcome, ToolHookExecutor
-    from modules.capabilities.tools.base import ToolResult
-    from modules.capabilities.tools.registry import ToolRegistry
+    from application.conversation.app.pipeline import PassiveTurnPipeline
+    from application.capabilities.llm.client import LLMResult, LLMToolCall
+    from application.capabilities.plugins.tool_hooks import HookOutcome, ToolHookExecutor
+    from application.capabilities.tools.base import ToolResult
+    from application.capabilities.tools.registry import ToolRegistry
 
     async def scenario():
         received = []
@@ -326,7 +326,7 @@ def test_same_session_async_pipeline_keeps_fifo_order():
     """同一会话的后续消息必须等待前一回合终态。"""
 
     async def scenario():
-        bus = DeliveryBus()
+        bus = MessageBus()
         first_started = asyncio.Event()
         release_first = asyncio.Event()
         steps = []

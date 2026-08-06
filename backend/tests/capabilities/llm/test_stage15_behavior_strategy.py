@@ -1,7 +1,7 @@
-from modules.capabilities.behavior.persona import PersonaProfile, PersonaResolver
-from modules.conversation.application.delegation import DelegationPolicy
-from modules.capabilities.llm.assembler import PromptAssembler, PromptBudget
-from modules.capabilities.llm.router import LLMRouter
+from application.capabilities.behavior.persona import PersonaProfile, PersonaResolver
+from application.conversation.app.delegation import DelegationPolicy
+from application.capabilities.llm.assembler import PromptAssembler, PromptBudget
+from application.capabilities.llm.router import LLMRouter
 
 
 class FakeResult:

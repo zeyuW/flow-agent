@@ -1,5 +1,5 @@
-from modules.conversation.infra.history import get_history
-from modules.conversation.domain.session import Session
+from application.conversation.infra.history import get_history
+from application.conversation.domain.session import Session
 
 
 def test_history_returns_empty_when_cursor_reaches_end():
