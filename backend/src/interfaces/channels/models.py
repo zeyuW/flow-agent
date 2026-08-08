@@ -1,6 +1,6 @@
 from typing import Protocol
 
-from infra.bus.models import ChannelDeliveryResult, OutboundMessage
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 from application.conversation.domain.channel_message import InboundMessage
 
 

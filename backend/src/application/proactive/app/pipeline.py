@@ -5,12 +5,19 @@ import time
 
 from application.proactive.infra.data_gateway import DataGateway
 from application.proactive.app.deliver import deliver_message
-from application.proactive.infra.gate import AnyActionGate, ProactiveStateStore, check_gate
+from application.proactive.infra.gate import (
+    AnyActionGate,
+    ProactiveStateStore,
+    check_gate,
+)
 from application.proactive.app.judge_loop import JudgeLoop
-from application.proactive.app.lifecycle import ProactiveLifecycle, ProactiveModuleContext
+from application.proactive.app.lifecycle import (
+    ProactiveLifecycle,
+    ProactiveModuleContext,
+)
 from application.proactive.domain.models import AgentTick, JudgeResult
 from application.proactive.app.resolve import resolve_decision
-from application.ports.message_sender import MessageSender
+from infra.bus.types import MessageSender
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +114,7 @@ class ProactiveTurnPipeline:
                 and drift_pipeline is not None
             ):
                 tick.phase_trace.append("drift")
-                connected_mcp = set(
-                    getattr(self._mcp_pool, "connected_names", set())
-                )
+                connected_mcp = set(getattr(self._mcp_pool, "connected_names", set()))
                 drift_tick = await drift_pipeline.run(connected_mcp=connected_mcp)
                 tick.drift_tick = drift_tick
                 if drift_tick.finished and drift_tick.runs:
@@ -147,7 +152,9 @@ class ProactiveTurnPipeline:
         finally:
             tick.finished_at = time.time()
 
-    def replace_contributions(self, sources: list, lifecycle: ProactiveLifecycle) -> None:
+    def replace_contributions(
+        self, sources: list, lifecycle: ProactiveLifecycle
+    ) -> None:
         """替换下一代数据源和已编译模块图。"""
 
         self._gateway.replace_proactive_sources(sources)
@@ -178,9 +185,7 @@ class ProactiveTurnPipeline:
             mcp_pool=self._mcp_pool,
             sources=self._proactive_sources,
             items=(
-                tick.gateway_result.all_items
-                if tick.gateway_result is not None
-                else []
+                tick.gateway_result.all_items if tick.gateway_result is not None else []
             ),
         )
         if tick.resolve_result.decision != "send":

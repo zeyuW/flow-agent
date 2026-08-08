@@ -5,8 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from application.tasks.domain.models import JobRun
-from infra.resilience.errors import ErrorCategory
-from infra.persistence.sqlite import SQLiteDatabase
+from infra.resilience import ErrorCategory
+from infra.persistence import SQLiteDatabase
 
 
 def _utc_now() -> datetime:

@@ -8,10 +8,9 @@ from typing import Callable
 
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.models import OutboundMessage
+from infra.bus.types import OutboundMessage
 from infra.bus.message import MessageBus
-from infra.security.auth import APIKeyAuth
-from infra.security.policy import SecurityPolicy
+from infra.security import APIKeyAuth, SecurityPolicy
 
 
 logger = logging.getLogger(__name__)

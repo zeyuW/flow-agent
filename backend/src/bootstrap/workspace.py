@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from infra.lifecycle.workspace import (
+from infra.workspace import (
     WorkspaceLayout,
     detect_workspace,
     init_workspace as _init_workspace,

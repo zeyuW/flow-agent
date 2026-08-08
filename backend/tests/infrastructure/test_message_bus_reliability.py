@@ -11,7 +11,7 @@ from interfaces.channels.models import (
 from interfaces.channels.telegram import TelegramChannel
 from application.conversation.app.agent_loop import AgentLoop
 from infra.bus.message import MessageBus, OutboundDispatch
-from infra.persistence.outbox import SQLiteOutboxStore
+from infra.persistence import SQLiteOutboxStore
 from application.proactive.app.deliver import deliver_message
 from application.proactive.domain.models import ResolveResult
 

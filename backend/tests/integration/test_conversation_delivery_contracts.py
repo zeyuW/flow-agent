@@ -28,7 +28,7 @@ def test_conversation_message_preserves_channel_session_and_media():
 def test_message_send_preserves_a_stable_message_identity():
     """业务发送端口必须保留调用方提供的稳定消息标识。"""
 
-    from application.ports.message_sender import SendMessage
+    from infra.bus.types import SendMessage
     from infra.bus.message import MessageBus
 
     message = SendMessage(
@@ -49,7 +49,7 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
 
     from application.conversation.app.chat_worker import ChatWorker
     from application.conversation.domain.messages import IncomingMessage
-    from application.ports.message_consumer import ReceivedMessage
+    from infra.bus.types import ReceivedMessage
 
     class Source:
         def __init__(self) -> None:
@@ -84,12 +84,18 @@ def test_conversation_runner_serializes_one_conversation_without_blocking_anothe
         runner = ChatWorker(source, processor, poll_interval_ms=1)
         task = asyncio.create_task(runner.run_forever())
         try:
-            await source.messages.put(ReceivedMessage("1", "text", "cli", "same", "first"))
+            await source.messages.put(
+                ReceivedMessage("1", "text", "cli", "same", "first")
+            )
             await asyncio.wait_for(processor.first_started.wait(), timeout=0.2)
             assert runner.is_processing("same") is True
             assert runner.is_processing("other") is False
-            await source.messages.put(ReceivedMessage("2", "text", "cli", "same", "second"))
-            await source.messages.put(ReceivedMessage("3", "text", "cli", "other", "parallel"))
+            await source.messages.put(
+                ReceivedMessage("2", "text", "cli", "same", "second")
+            )
+            await source.messages.put(
+                ReceivedMessage("3", "text", "cli", "other", "parallel")
+            )
             deadline = asyncio.get_running_loop().time() + 0.2
             while "end:parallel" not in processor.steps:
                 if asyncio.get_running_loop().time() > deadline:
@@ -123,7 +129,7 @@ def test_conversation_runner_cancels_hanging_turn_after_stop_timeout():
 
     from application.conversation.app.chat_worker import ChatWorker
     from application.conversation.domain.messages import IncomingMessage
-    from application.ports.message_consumer import ReceivedMessage
+    from infra.bus.types import ReceivedMessage
 
     class Source:
         def __init__(self) -> None:
@@ -219,7 +225,7 @@ def test_message_bus_send_reaches_the_channel_dispatcher():
     """消息发送端口提交的消息必须进入渠道分发器。"""
 
     from infra.bus.message import MessageBus
-    from application.ports.message_sender import SendMessage
+    from infra.bus.types import SendMessage
 
     async def scenario() -> None:
         bus = MessageBus()
@@ -241,7 +247,9 @@ def test_message_bus_send_reaches_the_channel_dispatcher():
             )
             assert result.accepted is True
             deadline = asyncio.get_running_loop().time() + 1
-            while delivered_to != ["42"] and asyncio.get_running_loop().time() < deadline:
+            while (
+                delivered_to != ["42"] and asyncio.get_running_loop().time() < deadline
+            ):
                 await asyncio.sleep(0.01)
             assert delivered_to == ["42"]
         finally:
@@ -258,7 +266,7 @@ def test_passive_pipeline_submits_reply_through_message_sender():
 
     from application.conversation.app.pipeline import PassiveTurnPipeline
     from application.capabilities.tools.registry import ToolRegistry
-    from application.ports.message_sender import SendMessage
+    from infra.bus.types import SendMessage
 
     submitted: list[SendMessage] = []
 

@@ -10,7 +10,7 @@ from bootstrap.container import (
     create_app_runtime,
     create_core_components,
 )
-from infra.config.schema import AppConfig
+from infra.config import AppConfig
 
 
 def test_bootstrap_loads_only_backend_config(tmp_path: Path):

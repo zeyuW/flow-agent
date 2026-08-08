@@ -4,8 +4,7 @@ from application.conversation.infra.context import ConversationContext
 from application.tasks.domain.models import JobSpec
 from application.tasks.app.runtime import BackgroundRuntime, InMemoryJobRegistry
 from application.tasks.infra.store import SQLiteJobStore
-from infra.resilience.errors import ErrorCategory, classify_error
-from infra.resilience.retry import RetryPolicy, retry_call
+from infra.resilience import ErrorCategory, RetryPolicy, classify_error, retry_call
 
 
 def test_turn_persistence_is_atomic_and_restores_history(tmp_path: Path):

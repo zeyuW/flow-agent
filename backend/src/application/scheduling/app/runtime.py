@@ -14,7 +14,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from application.conversation.domain.channel_message import InboundMessage
-from application.ports.message_sender import MessageSender, SendMessage
+from infra.bus.types import MessageSender, SendMessage
 from infra.bus.message import OutboundDispatch
 
 logger = logging.getLogger(__name__)
@@ -84,8 +84,7 @@ class ScheduledTaskStore:
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS scheduled_tasks (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -104,8 +103,7 @@ class ScheduledTaskStore:
                     created_at TEXT NOT NULL,
                     last_error TEXT
                 )
-                """
-            )
+                """)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_scheduled_due "
                 "ON scheduled_tasks(enabled, next_run_at)"
@@ -142,7 +140,9 @@ class ScheduledTaskStore:
                 ),
             )
 
-    def list_for_session(self, session_id: str, *, include_disabled: bool = False) -> list[ScheduledTask]:
+    def list_for_session(
+        self, session_id: str, *, include_disabled: bool = False
+    ) -> list[ScheduledTask]:
         query = "SELECT * FROM scheduled_tasks WHERE session_id = ?"
         params: list[object] = [session_id]
         if not include_disabled:
@@ -178,7 +178,9 @@ class ScheduledTaskStore:
             )
         return cursor.rowcount > 0
 
-    def complete(self, task: ScheduledTask, *, next_run_at: datetime | None, error: str | None) -> None:
+    def complete(
+        self, task: ScheduledTask, *, next_run_at: datetime | None, error: str | None
+    ) -> None:
         enabled = next_run_at is not None
         with self._connect() as connection:
             connection.execute(

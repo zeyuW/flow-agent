@@ -7,7 +7,7 @@ def test_chat_worker_consumes_message_processes_it_and_acknowledges_it():
     """处理成功后必须确认消息，避免同一消息被重复消费。"""
 
     from application.conversation.app.chat_worker import ChatWorker
-    from application.ports.message_consumer import ReceivedMessage
+    from infra.bus.types import ReceivedMessage
 
     class Consumer:
         def __init__(self) -> None:

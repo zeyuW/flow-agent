@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 from typing import Dict
-from infra.lifecycle.paths import WORKSPACE_LAYOUT
+from infra.workspace import WORKSPACE_LAYOUT
 
 
 class AttachmentStore:

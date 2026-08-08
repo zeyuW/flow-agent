@@ -1,6 +1,7 @@
 """记忆运行时：统一双层记忆架构并绑定事件总线。"""
 
 import logging
+from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ class MemoryRuntime:
     post_response_worker: PostResponseMemoryWorker
     query_rewriter: QueryRewriter | None = None
     dedup_decider: DedupDecider | None = None
+    event_executor: Executor | None = None
 
 
 def build_memory_runtime(
@@ -157,6 +159,7 @@ def wire_memory_events(
     runtime: MemoryRuntime,
     event_bus,
     consolidator=None,
+    executor: Executor | None = None,
 ) -> None:
     """绑定记忆相关事件（spec 1e）。
 
@@ -171,8 +174,14 @@ def wire_memory_events(
     """
     from infra.bus.event import EventSubscriber, TurnCommitted
 
+    memory_executor = executor or ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="memory-events",
+    )
+    runtime.event_executor = memory_executor
+
     class MemoryEventSubscriber:
-        """记忆事件订阅者：监听 TurnCommitted 事件。"""
+        """记忆事件订阅者：监听 TurnCommitted 事件并异步处理。"""
 
         def __init__(self, rt: MemoryRuntime) -> None:
             self.rt = rt
@@ -180,6 +189,15 @@ def wire_memory_events(
         def on_event(self, event) -> None:
             if not isinstance(event, TurnCommitted):
                 return
+
+            try:
+                future = memory_executor.submit(self._process, event)
+                future.add_done_callback(self._log_failure)
+            except Exception:
+                logger.exception("记忆事件入队失败")
+
+        def _process(self, event: TurnCommitted) -> None:
+            """在后台串行处理记忆更新，不能阻塞回复投递。"""
 
             session_id = event.session_id or "default"
             user_input = event.user_input or ""
@@ -213,6 +231,13 @@ def wire_memory_events(
                     )
                 except Exception:
                     logger.exception("memory consolidation failed")
+
+        @staticmethod
+        def _log_failure(future) -> None:
+            try:
+                future.result()
+            except Exception:
+                logger.exception("后台记忆事件处理失败")
 
     subscriber = MemoryEventSubscriber(runtime)
     event_bus.subscribe(subscriber)

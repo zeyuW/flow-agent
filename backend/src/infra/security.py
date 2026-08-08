@@ -1,8 +1,49 @@
+"""共享认证、命令权限和安全策略基础设施。"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from infra.security.permissions import CommandPermissions
+
+@dataclass(slots=True)
+class APIKeyAuth:
+    """验证可选的 API key；未配置 key 时允许本地调用。"""
+
+    expected_key: str | None = None
+
+    def verify(self, provided_key: str | None) -> bool:
+        if not self.expected_key:
+            return True
+        return bool(provided_key) and provided_key == self.expected_key
+
+
+@dataclass(slots=True)
+class CommandPermissions:
+    """按角色判断管理命令是否允许执行。"""
+
+    role_rules: dict[str, set[str]] = field(
+        default_factory=lambda: {
+            "admin": {
+                "runtime.start",
+                "runtime.stop",
+                "runtime.restart",
+                "runtime.reload",
+                "skills.install",
+                "skills.enable",
+                "skills.disable",
+                "plugins.install",
+                "plugins.uninstall",
+                "plugins.enable",
+                "plugins.disable",
+            },
+            "user": set(),
+        }
+    )
+
+    def allowed(self, role: str, action: str) -> bool:
+        if role == "admin":
+            return True
+        return action in self.role_rules.get(role, set())
 
 
 @dataclass(slots=True)

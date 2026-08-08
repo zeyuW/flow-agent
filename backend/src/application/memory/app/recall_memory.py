@@ -60,7 +60,14 @@ class RecallMemoryTool:
                 },
                 "memory_type": {
                     "type": "string",
-                    "enum": ["procedure", "preference", "event", "fact", "need", "task"],
+                    "enum": [
+                        "procedure",
+                        "preference",
+                        "event",
+                        "fact",
+                        "need",
+                        "task",
+                    ],
                     "description": "记忆类型过滤",
                 },
             },
@@ -82,7 +89,9 @@ class RecallMemoryTool:
             return json.dumps({"error": "invalid JSON payload"}, ensure_ascii=False)
 
         if not isinstance(args, dict):
-            return json.dumps({"error": "payload must be an object"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": "payload must be an object"}, ensure_ascii=False
+            )
 
         query_text = args.get("query", "")
         if not query_text:
@@ -104,14 +113,16 @@ class RecallMemoryTool:
 
         items = []
         for hit in result.hits:
-            items.append({
-                "id": hit.item.id,
-                "type": hit.item.memory_type,
-                "summary": hit.item.summary,
-                "score": round(hit.score, 4),
-                "reinforcement": hit.item.reinforcement,
-                "status": hit.item.status,
-            })
+            items.append(
+                {
+                    "id": hit.item.id,
+                    "type": hit.item.memory_type,
+                    "summary": hit.item.summary,
+                    "score": round(hit.score, 4),
+                    "reinforcement": hit.item.reinforcement,
+                    "status": hit.item.status,
+                }
+            )
 
         return json.dumps(
             {
@@ -153,7 +164,7 @@ class RecallMemoryToolAdapter:
         payload = json.dumps(kwargs)
         return self.tool(payload)
 
-    def run(self, tool_input: dict[str, str]) -> ToolResult:
+    def run(self, tool_input: dict[str, Any]) -> ToolResult:
         """按 ToolRegistry 协议执行记忆检索。"""
         content = self.execute(**tool_input)
         return ToolResult(ok=_json_result_ok(content), content=content)
@@ -183,7 +194,9 @@ def _normalize_max_items(value: Any) -> int:
 
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("max_items must be an integer between 1 and 50")
-    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+    if isinstance(value, float) and (
+        not math.isfinite(value) or not value.is_integer()
+    ):
         raise ValueError("max_items must be an integer between 1 and 50")
 
     normalized = int(value)

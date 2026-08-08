@@ -17,10 +17,15 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 from uuid import uuid4
 
-from application.ports.message_consumer import MessageConsumer, ReceivedMessage
-from application.ports.message_sender import MessageSender, SendMessage, SendResult
-from infra.bus.models import ChannelDeliveryResult, OutboundMessage
-from infra.persistence.outbox import SQLiteOutboxStore
+from infra.bus.types import (
+    MessageConsumer,
+    MessageSender,
+    ReceivedMessage,
+    SendMessage,
+    SendResult,
+)
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
+from infra.persistence import SQLiteOutboxStore
 from infra.bus.queues import InboundQueue, OutboundQueue
 
 logger = logging.getLogger(__name__)
@@ -32,6 +37,7 @@ class OutboundDispatch:
 
     由 BusOutboundPort 转换为 OutboundMessage 并投递到出站队列。
     """
+
     channel: str
     session_id: str
     text: str
@@ -93,15 +99,14 @@ class OutboundPort(Protocol):
     实现类 BusOutboundPort 负责将 OutboundDispatch 转换为 OutboundMessage
     并投递到出站队列。
     """
-    def send(self, dispatch: OutboundDispatch) -> DeliveryHandle:
-        ...
+
+    def send(self, dispatch: OutboundDispatch) -> DeliveryHandle: ...
 
     async def send_and_wait(
         self,
         dispatch: OutboundDispatch,
         timeout: float = 30.0,
-    ) -> DeliveryReceipt:
-        ...
+    ) -> DeliveryReceipt: ...
 
 
 @dataclass
@@ -110,6 +115,7 @@ class BusOutboundPort(OutboundPort):
 
     MessageBus 使用此接口持久化并投递消息，不向业务层暴露内部队列。
     """
+
     _queue: OutboundQueue
     _outbox: SQLiteOutboxStore | None = None
     _handles: dict[str, DeliveryHandle] = field(default_factory=dict)
@@ -355,7 +361,9 @@ class MessageBus(MessageSender, MessageConsumer):
         if retry and message is not None:
             self.inbound.publish(message)
 
-    def subscribe_outbound(self, channel: str, callback: Callable[[OutboundMessage], None]) -> None:
+    def subscribe_outbound(
+        self, channel: str, callback: Callable[[OutboundMessage], None]
+    ) -> None:
         """渠道适配器调用：注册出站订阅回调。
 
         渠道启动时调用此方法注册 on_response 回调函数。
@@ -363,7 +371,9 @@ class MessageBus(MessageSender, MessageConsumer):
         """
         self.outbound.subscribe(channel, callback)
 
-    def unsubscribe_outbound(self, channel: str, callback: Callable[[OutboundMessage], None]) -> None:
+    def unsubscribe_outbound(
+        self, channel: str, callback: Callable[[OutboundMessage], None]
+    ) -> None:
         """渠道适配器调用：取消出站订阅。"""
         self.outbound.unsubscribe(channel, callback)
 
@@ -430,7 +440,11 @@ class MessageBus(MessageSender, MessageConsumer):
                 continue
 
             channel = message.channel
-            logger.info("dispatching outbound message: channel=%s, text=%s", channel, message.text[:100] if message.text else "EMPTY")
+            logger.info(
+                "dispatching outbound message: channel=%s, text=%s",
+                channel,
+                message.text[:100] if message.text else "EMPTY",
+            )
 
             if not self.outbound.has_subscribers(channel):
                 logger.warning(
@@ -447,7 +461,9 @@ class MessageBus(MessageSender, MessageConsumer):
 
             # 同一渠道只要有一个真实发送者确认成功，本条消息即视为送达。
             subscribers = self._get_subscribers(channel)
-            logger.debug("found %d subscribers for channel=%s", len(subscribers), channel)
+            logger.debug(
+                "found %d subscribers for channel=%s", len(subscribers), channel
+            )
             delivered = False
             uncertain = False
             retryable = True
@@ -558,7 +574,7 @@ class MessageBus(MessageSender, MessageConsumer):
 
         retry_count = self._runtime_retry_counts.get(delivery_id, 0)
         delay = min(
-            self._runtime_retry_base_delay_s * (2 ** retry_count),
+            self._runtime_retry_base_delay_s * (2**retry_count),
             self._runtime_retry_max_delay_s,
         )
         self._runtime_retry_counts[delivery_id] = retry_count + 1
@@ -645,8 +661,6 @@ def _resolve_chat_id(
         return str(metadata.get("telegram_chat_id") or session_id)
     if channel in {"qq", "qqbot"}:
         return str(
-            metadata.get("qq_group_id")
-            or metadata.get("qq_user_id")
-            or session_id
+            metadata.get("qq_group_id") or metadata.get("qq_user_id") or session_id
         )
     return session_id

@@ -12,7 +12,10 @@ from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from application.proactive.domain.models import AgentTick
-from application.proactive.app.lifecycle import ProactiveLifecycle, compile_proactive_lifecycle
+from application.proactive.app.lifecycle import (
+    ProactiveLifecycle,
+    compile_proactive_lifecycle,
+)
 from application.proactive.app.mcp_polling import McpPollingModule
 
 logger = logging.getLogger(__name__)
@@ -109,7 +112,6 @@ class HawkesProcessModel:
                 self._events.append(
                     InteractionEvent(timestamp=ts, event_type=kind, weight=weight)
                 )
-
 
     @staticmethod
     def _local_hour(timestamp: float) -> int:
@@ -361,9 +363,14 @@ class ProactiveLoop:
                 logger.exception("主动链路状态存储关闭失败")
 
     async def _run_loop(self) -> None:
-        """首次立即检查，后续按霍克斯强度或固定间隔调度。"""
+        """启动后等待一个调度间隔，再按霍克斯强度或固定间隔检查。"""
 
-        next_interval = 0.0
+        next_interval = self._compute_next_interval()
+        self._last_interval = next_interval
+        logger.info(
+            "主动链路启动后首次检查: interval=%.2fs",
+            next_interval,
+        )
         while self._running:
             if next_interval > 0:
                 due = await self._wait_until_due(next_interval)
@@ -484,7 +491,9 @@ class ProactiveLoop:
             replace(list(sources), candidate_lifecycle)
             self._polling_module = candidate_polling
 
-    def request_contributions_refresh(self, sources: list, modules: list[object]) -> None:
+    def request_contributions_refresh(
+        self, sources: list, modules: list[object]
+    ) -> None:
         """从插件 watcher 线程安全地请求主动贡献刷新。"""
 
         loop = self._event_loop

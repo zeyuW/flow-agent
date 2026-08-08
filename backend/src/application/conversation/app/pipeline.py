@@ -20,7 +20,7 @@ from collections.abc import Callable
 from application.conversation.app.agent import Agent
 from application.conversation.app.delegation import DelegationPolicy
 from application.conversation.app.phase import PhaseModule, TurnFlow
-from infra.telemetry.trace import TraceRecorder
+from infra.telemetry import TraceRecorder
 from application.capabilities.llm.client import LLMToolCall
 from application.memory.memory_engine import MemoryEngine
 from application.memory.markdown_store import MarkdownStore
@@ -34,7 +34,7 @@ from infra.bus.event import (
     ToolCallCompleted,
 )
 from infra.bus.message import MessageBus, OutboundDispatch, OutboundPort
-from application.ports.message_sender import MessageSender, SendMessage
+from infra.bus.types import MessageSender, SendMessage
 from application.conversation.domain.messages import IncomingMessage
 
 logger = logging.getLogger(__name__)
@@ -717,7 +717,7 @@ class PassiveTurnPipeline:
         self,
         tool_call: LLMToolCall,
         flow: TurnFlow,
-    ) -> dict[str, str]:
+    ) -> dict[str, Any]:
         """为需要会话上下文的工具补充当前回合身份。"""
 
         tool_input = dict(tool_call.arguments)

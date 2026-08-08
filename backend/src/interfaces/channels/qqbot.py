@@ -13,7 +13,7 @@ from typing import Any
 
 from interfaces.channels.base import ChannelStatus, MessageBusChannel
 from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.models import OutboundMessage
+from infra.bus.types import OutboundMessage
 from infra.bus.message import MessageBus
 
 try:

@@ -18,16 +18,18 @@ class ToolRegistry:
         with self._lock:
             self._tools[tool.name] = tool
 
-    def register_with_meta(self, tool, risk="read-only", source_type="", source_name=""):
+    def register_with_meta(
+        self, tool, risk="read-only", source_type="", source_name=""
+    ):
         with self._lock:
             self._tools[tool.name] = tool
-            if hasattr(self, '_execution_policy'):
+            if hasattr(self, "_execution_policy"):
                 self._execution_policy.risk_by_tool[tool.name] = risk
 
     def unregister(self, tool_name):
         with self._lock:
             self._tools.pop(tool_name, None)
-            if hasattr(self, '_execution_policy'):
+            if hasattr(self, "_execution_policy"):
                 self._execution_policy.risk_by_tool.pop(tool_name, None)
 
     def replace_many(
@@ -80,7 +82,7 @@ class ToolRegistry:
             return "read-only"
         return policy.risk_by_tool.get(tool_name, "read-only")
 
-    def execute(self, tool_name: str, tool_input: dict[str, str]) -> ToolResult:
+    def execute(self, tool_name: str, tool_input: dict[str, Any]) -> ToolResult:
         with self._lock:
             tool = self._tools.get(tool_name)
         if tool is None:
@@ -88,16 +90,24 @@ class ToolRegistry:
         if self._guard is not None:
             decision = self._guard.check_tool(tool_name)
             if not decision.allowed:
-                return ToolResult(ok=False, content=f"Guard blocked tool: {decision.reason}")
+                return ToolResult(
+                    ok=False, content=f"Guard blocked tool: {decision.reason}"
+                )
             decision = self._guard.check_tool_input(tool_name, tool_input)
             if not decision.allowed:
-                return ToolResult(ok=False, content=f"Guard blocked input: {decision.reason}")
+                return ToolResult(
+                    ok=False, content=f"Guard blocked input: {decision.reason}"
+                )
         return tool.run(tool_input)
 
-    def execute_with_policy(self, tool_name: str, tool_input: dict[str, str]) -> tuple[ToolResult, dict[str, Any]]:
+    def execute_with_policy(
+        self, tool_name: str, tool_input: dict[str, Any]
+    ) -> tuple[ToolResult, dict[str, Any]]:
         policy = getattr(self, "_execution_policy", self.ToolExecutionPolicy())
         risk = self.get_risk_level(tool_name)
-        retries = max(0, policy.max_retries_by_risk.get(risk, policy.default_max_retries))
+        retries = max(
+            0, policy.max_retries_by_risk.get(risk, policy.default_max_retries)
+        )
         attempts = 0
         last_error = ""
         while attempts <= retries:
@@ -112,7 +122,9 @@ class ToolRegistry:
                 last_error = str(exc)
                 if attempts > retries:
                     break
-        return ToolResult(ok=False, content=f"Tool `{tool_name}` failed after retries: {last_error}"), {
+        return ToolResult(
+            ok=False, content=f"Tool `{tool_name}` failed after retries: {last_error}"
+        ), {
             "risk": risk,
             "attempts": attempts,
             "retries": retries,
@@ -134,7 +146,9 @@ class ToolRegistry:
             for tool in tools
         ]
 
-    def select_openai_tools(self, user_input: str, *, max_tools: int = 8) -> list[dict[str, Any]]:
+    def select_openai_tools(
+        self, user_input: str, *, max_tools: int = 8
+    ) -> list[dict[str, Any]]:
         all_tools = self.list_openai_tools()
         if not user_input.strip() or len(all_tools) <= max_tools:
             return all_tools[:max_tools]
@@ -142,12 +156,10 @@ class ToolRegistry:
         explicitly_named = [
             item
             for item in all_tools
-            if str(item.get("function", {}).get("name", "")).lower()
-            in normalized_input
+            if str(item.get("function", {}).get("name", "")).lower() in normalized_input
         ]
         explicitly_named_names = {
-            str(item.get("function", {}).get("name", ""))
-            for item in explicitly_named
+            str(item.get("function", {}).get("name", "")) for item in explicitly_named
         }
         query_tokens = _tokenize(user_input)
         scored: list[tuple[float, dict[str, Any]]] = []
@@ -184,5 +196,5 @@ def _tokenize(text: str) -> set[str]:
     tokens = {token.lower() for token in _TOKEN_RE.findall(text or "")}
     cjk = "".join(char for char in (text or "") if "\u4e00" <= char <= "\u9fff")
     tokens.update(cjk)
-    tokens.update(cjk[index:index + 2] for index in range(max(0, len(cjk) - 1)))
+    tokens.update(cjk[index : index + 2] for index in range(max(0, len(cjk) - 1)))
     return {token for token in tokens if token}

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from infra.config.loader import load_config
+from infra.config import load_config
 
 
 def test_load_config_maps_toml_directly(tmp_path: Path):

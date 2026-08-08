@@ -1,16 +1,73 @@
-"""出站消息持久化队列。"""
+"""共享 SQLite 持久化基础设施。
+
+本模块集中提供 SQLite 连接、事务边界和可靠出站消息存储。业务模块应在
+自己的 ``application/<feature>/infra`` 层定义业务仓储。
+"""
 
 from __future__ import annotations
 
-import json
 import sqlite3
+from contextlib import contextmanager
+import json
+from pathlib import Path
+from threading import RLock
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
-from infra.persistence.sqlite import SQLiteDatabase
+
+class SQLiteDatabase:
+    """提供线程安全的 SQLite 连接和显式事务。"""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        if str(self.path) != ":memory:":
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(
+            str(self.path),
+            check_same_thread=False,
+        )
+        self._lock = RLock()
+        self._closed = False
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        """返回连接对象，供仓储执行查询或配置连接。"""
+
+        if self._closed:
+            raise RuntimeError("SQLite 数据库连接已经关闭")
+        return self._connection
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """开启事务，成功提交，异常回滚并继续抛出。"""
+
+        with self._lock:
+            connection = self.connection
+            connection.execute("BEGIN")
+            try:
+                yield connection
+            except BaseException:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
+
+    def close(self) -> None:
+        """关闭连接；重复关闭不会产生副作用。"""
+
+        with self._lock:
+            if self._closed:
+                return
+            self._connection.close()
+            self._closed = True
+
+    def __enter__(self) -> "SQLiteDatabase":
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.close()
 
 
 @dataclass(slots=True, frozen=True)
@@ -49,8 +106,7 @@ class SQLiteOutboxStore:
     def _initialize(self) -> None:
         self._database.connection.execute("PRAGMA journal_mode=WAL")
         with self._lock, self._database.transaction() as connection:
-            connection.execute(
-                """
+            connection.execute("""
                 CREATE TABLE IF NOT EXISTS outbound_deliveries (
                     delivery_id TEXT PRIMARY KEY,
                     channel TEXT NOT NULL,
@@ -64,8 +120,7 @@ class SQLiteOutboxStore:
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL
                 )
-                """
-            )
+                """)
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_outbound_status_created "
                 "ON outbound_deliveries(status, created_at)"
@@ -153,7 +208,7 @@ class SQLiteOutboxStore:
         self._mark_terminal(delivery_id, "unknown", error)
 
     def expire_before(self, cutoff: float) -> int:
-        """将恢复窗口之前的可重试消息标记为过期，避免启动时补发旧消息。"""
+        """将恢复窗口之前的消息标记为过期，避免启动时补发旧消息。"""
 
         with self._lock, self._database.transaction() as connection:
             cursor = connection.execute(
@@ -169,7 +224,11 @@ class SQLiteOutboxStore:
             )
         return int(cursor.rowcount)
 
-    def mark_expired(self, delivery_id: str, error: str = "outbound retry window expired") -> None:
+    def mark_expired(
+        self,
+        delivery_id: str,
+        error: str = "outbound retry window expired",
+    ) -> None:
         """只将指定出站消息标记为过期，避免影响其他待处理消息。"""
 
         self._mark_terminal(delivery_id, "expired", error)

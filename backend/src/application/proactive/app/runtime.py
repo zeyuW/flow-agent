@@ -2,7 +2,7 @@
 
 from collections.abc import Mapping
 from pathlib import Path
-from infra.telemetry.trace import TraceRecorder
+from infra.telemetry import TraceRecorder
 
 from application.proactive.infra.data_gateway import DataGateway
 from application.proactive.app.drift_pipeline import DriftTurnPipeline
@@ -15,7 +15,7 @@ from application.proactive.app.mcp_polling import McpPollingModule
 from application.proactive.infra.mcp_pool import McpClientPool
 from application.proactive.app.loop import HawkesConfig, ProactiveLoop
 from application.proactive.app.pipeline import ProactiveTurnPipeline
-from application.ports.message_sender import MessageSender
+from infra.bus.types import MessageSender
 
 
 def _flatten_sources(proactive_sources) -> list:

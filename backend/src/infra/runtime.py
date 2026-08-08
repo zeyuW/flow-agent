@@ -1,3 +1,5 @@
+"""共享运行时生命周期、健康状态和运行单元管理。"""
+
 from __future__ import annotations
 
 import logging
@@ -5,7 +7,36 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from infra.lifecycle.models import RuntimeHealth, RuntimeServiceSnapshot, RuntimeUnitSnapshot
+
+@dataclass(slots=True)
+class RuntimeHealth:
+    """一个运行单元的健康状态。"""
+
+    name: str
+    ok: bool
+    detail: str = ""
+    status: str = "healthy"
+    restart_policy: str = "manual"
+
+
+@dataclass(slots=True)
+class RuntimeUnitSnapshot:
+    """一个运行单元的可观测快照。"""
+
+    name: str
+    running: bool
+    details: dict[str, Any] = field(default_factory=dict)
+    health: str = "unknown"
+    restart_policy: str = "manual"
+
+
+@dataclass(slots=True)
+class RuntimeServiceSnapshot:
+    """整个运行时服务的快照。"""
+
+    runtimes: list[RuntimeUnitSnapshot]
+    metrics: dict[str, Any]
+    event_summary: dict[str, Any]
 
 
 logger = logging.getLogger(__name__)
@@ -92,7 +123,9 @@ class RuntimeService:
                 runtime_rows.append(unit.snapshot())
             except Exception as exc:
                 runtime_rows.append(
-                    RuntimeUnitSnapshot(name=unit.name, running=False, details={"error": str(exc)})
+                    RuntimeUnitSnapshot(
+                        name=unit.name, running=False, details={"error": str(exc)}
+                    )
                 )
         event_summary = self._event_summary()
         metrics = {
@@ -122,6 +155,7 @@ class RuntimeService:
         if unit is None:
             raise ValueError(f"unknown runtime unit: {name}")
         return unit
+
 
 def create_runtime_service(
     proactive_loop=None,

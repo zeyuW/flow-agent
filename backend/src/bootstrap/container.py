@@ -2,31 +2,30 @@ from pathlib import Path
 from dataclasses import asdict
 from typing import Any, cast
 
-from infra.config.schema import (
+from infra.config import (
     AppConfig,
     McpConfig,
     ModelEndpointConfig,
     StorageConfig,
     ToolingConfig,
 )
-from infra.config.watcher import (
+from infra.config import (
     ConfigWatchLoop,
     ConfigWatcher,
     PreparedConfigChange,
 )
 from infra.bus.message import MessageBus
-from infra.persistence.outbox import SQLiteOutboxStore
+from infra.persistence import SQLiteOutboxStore
 from infra.bus.event import EventBus
 from application.conversation.app.pipeline import PassiveTurnPipeline
 from application.conversation.app.chat_worker import ChatWorker
-from application.ports.message_sender import MessageSender
-from application.ports.message_consumer import MessageConsumer
+from infra.bus.types import MessageConsumer, MessageSender
 from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.capabilities.tools.mcp_manage import McpListTool
 from application.conversation.app.agent import Agent
 from application.conversation.app.delegation import DelegationPolicy
 from application.conversation.infra.context import ConversationContext
-from infra.telemetry.trace import TraceRecorder
+from infra.telemetry import TraceRecorder
 from application.capabilities.llm.client import OpenAILLMClient
 from application.capabilities.llm.assembler import PromptAssembler, PromptBudget
 from application.capabilities.llm.router import LLMRouter
@@ -63,10 +62,8 @@ from application.scheduling.app.tools import (
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from infra.lifecycle.paths import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
-from infra.lifecycle.models import RuntimeHealth, RuntimeUnitSnapshot
-from infra.lifecycle.service import RuntimeService, RuntimeUnit
-from infra.lifecycle.workspace import init_workspace
+from infra.workspace import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT, init_workspace
+from infra.runtime import RuntimeHealth, RuntimeService, RuntimeUnit, RuntimeUnitSnapshot
 from application.delegation.app.runtime import (
     SubagentRuntime,
     create_subagent_runtime,

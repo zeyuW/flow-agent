@@ -6,7 +6,7 @@ import asyncio
 def test_message_bus_sends_outbound_message_to_channel_queue():
     """业务发送端口提交的消息必须进入总线出站队列。"""
 
-    from application.ports.message_sender import SendMessage
+    from infra.bus.types import SendMessage
     from infra.bus.message import MessageBus
 
     bus = MessageBus()

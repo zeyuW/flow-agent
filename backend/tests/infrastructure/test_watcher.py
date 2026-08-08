@@ -1,8 +1,7 @@
 from pathlib import Path
 import threading
 
-from infra.config.schema import AppConfig
-from infra.config.watcher import ConfigWatchLoop, ConfigWatcher, PreparedConfigChange
+from infra.config import AppConfig, ConfigWatchLoop, ConfigWatcher, PreparedConfigChange
 
 
 def config(model: str) -> AppConfig:

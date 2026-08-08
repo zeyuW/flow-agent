@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.models import ChannelDeliveryResult, OutboundMessage
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
 from infra.bus.event import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
@@ -376,7 +376,7 @@ class TelegramChannel(Channel, EventSubscriber):
             raise RuntimeError("Telegram 未返回图片路径")
         target_dir = self._attachment_dir
         if target_dir is None:
-            from infra.lifecycle.paths import WORKSPACE_LAYOUT
+            from infra.workspace import WORKSPACE_LAYOUT
 
             target_dir = WORKSPACE_LAYOUT.inbound_attachments_dir / "telegram"
         target_dir.mkdir(parents=True, exist_ok=True)

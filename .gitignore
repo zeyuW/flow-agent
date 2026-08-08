@@ -1,38 +1,7 @@
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
-.mypy_cache/
-.coverage
-dist/
-build/
-*.egg-info/
-.idea/
-.vscode/
+# 根目录运行时数据
 .flow/
-*.db
-*.db-journal
-.cursor/
-.workspace
-CLAUDE.md
 
-# 查看数据库脚本后续删掉
-view_db.sh
-
-stage.md
-
-
-AKASHIC_AGENT_CODEBASE.md
-FLOW_AGENT_CODEBASE.md
-PROJECT_SCAN_REPORT.md
-
-_handbook/
-docs
-
-AGENTS.md
-config.example.toml
+# 配置文件
 config.toml
-!config.example.toml
-ARCHITECTURE.md
-# !docs/ARCHITECTURE.md
-scripts
+
+docs

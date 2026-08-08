@@ -1,0 +1,20 @@
+# Python 运行缓存
+.venv/
+__pycache__/
+*.py[cod]
+
+# 测试、类型检查和覆盖率缓存
+.pytest_cache/
+.mypy_cache/
+.pyright/
+.coverage
+htmlcov/
+
+# Python 构建和打包产物
+dist/
+build/
+*.egg-info/
+
+# 后端本地数据库
+*.db
+*.db-journal

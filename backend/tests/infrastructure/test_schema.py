@@ -3,7 +3,7 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from infra.config.schema import AppConfig
+from infra.config import AppConfig
 
 
 def minimal_config() -> dict[str, object]:

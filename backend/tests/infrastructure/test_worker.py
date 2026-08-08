@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from infra.worker.pool import WorkerPool
+from infra.worker import WorkerPool
 
 
 def test_worker_pool_runs_submitted_work_and_returns_result():

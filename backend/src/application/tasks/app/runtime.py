@@ -8,8 +8,7 @@ from typing import Any, Callable
 
 from application.tasks.domain.models import JobSpec, JobRun
 from application.tasks.infra.writer import JobStoreWriter
-from infra.resilience.errors import classify_error
-from infra.resilience.retry import RetryPolicy, retry_call
+from infra.resilience import RetryPolicy, classify_error, retry_call
 
 
 logger = logging.getLogger(__name__)

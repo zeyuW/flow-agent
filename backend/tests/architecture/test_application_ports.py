@@ -1,4 +1,4 @@
-"""业务层共享消息端口的架构契约。"""
+"""消息传输契约的架构约束。"""
 
 import inspect
 
@@ -6,8 +6,8 @@ import inspect
 def test_message_ports_expose_narrow_send_and_consume_contracts():
     """发送和消费端口必须分离，业务方不应依赖完整总线。"""
 
-    from application.ports.message_consumer import MessageConsumer
-    from application.ports.message_sender import MessageSender, SendMessage
+    from infra.bus.types import MessageConsumer
+    from infra.bus.types import MessageSender, SendMessage
 
     assert inspect.isabstract(MessageSender) is False
     assert inspect.isabstract(MessageConsumer) is False
@@ -25,8 +25,8 @@ def test_message_ports_expose_narrow_send_and_consume_contracts():
 def test_message_bus_implements_the_two_transport_roles():
     """MessageBus 应实现收发端口，但业务只注入其中一个角色。"""
 
-    from application.ports.message_consumer import MessageConsumer
-    from application.ports.message_sender import MessageSender
+    from infra.bus.types import MessageConsumer
+    from infra.bus.types import MessageSender
     from infra.bus.message import MessageBus
 
     bus = MessageBus()

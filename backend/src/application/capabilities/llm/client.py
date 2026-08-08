@@ -4,14 +4,21 @@ import logging
 from typing import Any, Callable, Iterator
 from typing import Protocol
 
-from openai import AsyncOpenAI, APIConnectionError, APIError, APITimeoutError, AuthenticationError, OpenAI
+from openai import (
+    AsyncOpenAI,
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    AuthenticationError,
+    OpenAI,
+)
 
-from infra.resilience.fallback import with_fallback
-from infra.resilience.retry import RetryPolicy, retry_call
-from infra.config.schema import ModelEndpointConfig
-
+from infra.resilience import RetryPolicy, retry_call, with_fallback
+from infra.config import ModelEndpointConfig
 
 logger = logging.getLogger(__name__)
+
+
 @dataclass(slots=True)
 class LLMResult:
     content: str
@@ -23,28 +30,28 @@ class LLMToolCall:
     id: str
     name: str
     arguments_json: str
-    arguments: dict[str, str]
+    arguments: dict[str, Any]
 
 
 # LLMClient is a协议(Protocol)类, 用于规定LLM客户端必须实现的接口（如generate方法）。
 # 它没有真正"继承"什么类，只是继承了typing.Protocol，
 # 作用是用于类型检查和定义接口规范，让像OpenAILLMClient这类实现类可以被类型安全、灵活地替换和调用。
 
+
 class LLMClient(Protocol):
     def generate(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
-    ) -> LLMResult:
-        ...
-    
+    ) -> LLMResult: ...
+
     def generate_stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         on_delta: Callable[[str], None] | None = None,
-    ) -> LLMResult:
-        ...
+    ) -> LLMResult: ...
+
 
 # OpenAILLMClient 是 OpenAI 模型的客户端实现
 class OpenAILLMClient:
@@ -76,8 +83,12 @@ class OpenAILLMClient:
         def _request():
             return retry_call(
                 lambda: self.client.chat.completions.create(**request_kwargs),  # type: ignore[arg-type]
-                policy=RetryPolicy(max_attempts=2, delay_seconds=0.1, backoff_factor=1.8),
-                should_retry=lambda exc: isinstance(exc, (APIConnectionError, APITimeoutError)),
+                policy=RetryPolicy(
+                    max_attempts=2, delay_seconds=0.1, backoff_factor=1.8
+                ),
+                should_retry=lambda exc: isinstance(
+                    exc, (APIConnectionError, APITimeoutError)
+                ),
             )
 
         try:
@@ -123,7 +134,7 @@ class OpenAILLMClient:
             return LLMResult(content="模型返回了空内容，请重试一次。")
 
         return LLMResult(content=content, tool_calls=parsed_tool_calls or None)
-    
+
     async def generate_async(
         self,
         messages: list[dict[str, Any]],
@@ -194,8 +205,12 @@ class OpenAILLMClient:
         def _request():
             return retry_call(
                 lambda: self.client.chat.completions.create(**request_kwargs),  # type: ignore[arg-type]
-                policy=RetryPolicy(max_attempts=2, delay_seconds=0.1, backoff_factor=1.8),
-                should_retry=lambda exc: isinstance(exc, (APIConnectionError, APITimeoutError)),
+                policy=RetryPolicy(
+                    max_attempts=2, delay_seconds=0.1, backoff_factor=1.8
+                ),
+                should_retry=lambda exc: isinstance(
+                    exc, (APIConnectionError, APITimeoutError)
+                ),
             )
 
         try:
@@ -218,7 +233,7 @@ class OpenAILLMClient:
 
         full_content = ""
         tool_call_parts: dict[int, dict[str, str]] = {}
-        
+
         try:
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
@@ -226,7 +241,7 @@ class OpenAILLMClient:
                     full_content += delta
                     if on_delta:
                         on_delta(delta)
-                
+
                 # 工具参数会被拆成多个增量片段，需要按 index 重新组装。
                 if chunk.choices and chunk.choices[0].delta.tool_calls:
                     for tool_call in chunk.choices[0].delta.tool_calls:
@@ -247,24 +262,26 @@ class OpenAILLMClient:
                         arguments = getattr(function, "arguments", None)
                         if arguments:
                             part["arguments"] += str(arguments)
-                    
+
         except Exception as e:
             logger.exception("Error during streaming")
             # 如果流式失败，回退到非流式
             return self.generate(messages, tools)
-        
+
         parsed_tool_calls: list[LLMToolCall] = []
         for index in sorted(tool_call_parts):
             part = tool_call_parts[index]
             if not part["name"]:
                 continue
             arguments_json = part["arguments"] or "{}"
-            parsed_tool_calls.append(LLMToolCall(
-                id=part["id"] or f"stream_call_{index}",
-                name=part["name"],
-                arguments_json=arguments_json,
-                arguments=self._parse_tool_arguments(arguments_json),
-            ))
+            parsed_tool_calls.append(
+                LLMToolCall(
+                    id=part["id"] or f"stream_call_{index}",
+                    name=part["name"],
+                    arguments_json=arguments_json,
+                    arguments=self._parse_tool_arguments(arguments_json),
+                )
+            )
 
         if parsed_tool_calls:
             return LLMResult(content=full_content, tool_calls=parsed_tool_calls)
@@ -274,17 +291,17 @@ class OpenAILLMClient:
         logger.warning("流式模型返回空内容，回退到非流式请求")
         return self.generate(messages, tools)
 
-    def _parse_tool_arguments(self, arguments_json: str) -> dict[str, str]:
+    def _parse_tool_arguments(self, arguments_json: str) -> dict[str, Any]:
         try:
             raw = json.loads(arguments_json)
         except json.JSONDecodeError:
             return {}
         if not isinstance(raw, dict):
             return {}
-        normalized: dict[str, str] = {}
+        normalized: dict[str, Any] = {}
         for key, value in raw.items():
             if isinstance(key, str):
-                normalized[key] = str(value)
+                normalized[key] = value
         return normalized
 
 

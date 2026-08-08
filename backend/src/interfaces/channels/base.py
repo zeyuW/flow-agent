@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Protocol
 
 from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.models import OutboundMessage
+from infra.bus.types import OutboundMessage
 
 
 OutboundSender = Callable[[OutboundMessage], None]

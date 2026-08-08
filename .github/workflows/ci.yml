@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   test:
-    name: Python 3.10 编译与测试
+    name: Python 3.11 编译与测试
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -29,7 +29,7 @@ jobs:
       - name: 配置 Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: "3.11"
           cache: pip
 
       - name: 安装项目
@@ -42,4 +42,17 @@ jobs:
         env:
           PYTHONPATH: backend/src
           TMPDIR: /tmp
-        run: bash scripts/verify.sh
+        run: |
+          python -m compileall -q backend/src
+          git diff --check
+          python -m pytest -q backend/tests
+          python -m pyright --project backend/pyproject.toml \
+            backend/src/infra/config \
+            backend/src/bootstrap \
+            backend/tests/architecture \
+            backend/tests/infrastructure
+          python -m black --check --target-version py311 --fast \
+            backend/src/infra/config \
+            backend/src/bootstrap \
+            backend/tests/architecture \
+            backend/tests/infrastructure

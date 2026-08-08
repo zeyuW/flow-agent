@@ -2,11 +2,11 @@ import asyncio
 
 from interfaces.channels.models import ChannelDeliveryResult
 from infra.bus.message import MessageBus, OutboundDispatch
-from infra.persistence.outbox import SQLiteOutboxStore
+from infra.persistence import SQLiteOutboxStore
 from application.proactive.app.deliver import deliver_message
 from application.proactive.domain.models import ResolveResult
 from application.delegation.app.manager import SubagentManager
-from infra.persistence.sqlite import SQLiteDatabase
+from infra.persistence import SQLiteDatabase
 
 
 def test_proactive_delivery_uses_stable_delivery_key():

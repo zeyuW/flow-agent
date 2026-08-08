@@ -2,7 +2,7 @@ from application.conversation.app.agent import Agent
 from application.conversation.infra.context import ConversationContext
 from application.capabilities.llm.client import FakeLLMClient, OpenAILLMClient
 from application.capabilities.llm.prompts import build_messages
-from infra.config.schema import ModelEndpointConfig
+from infra.config import ModelEndpointConfig
 
 
 def test_build_messages():

@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from infra.worker.pool import WorkerPool
+from infra.worker import WorkerPool
 
 
 class JobStoreWriter:

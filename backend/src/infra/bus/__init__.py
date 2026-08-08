@@ -2,7 +2,7 @@
 
 from infra.bus.event import Event, EventBus, EventSubscription
 from infra.bus.message import MessageBus
-from infra.bus.models import ChannelDeliveryResult, OutboundMessage
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 from infra.bus.queues import InboundQueue, OutboundQueue
 
 __all__ = [

@@ -1,9 +1,16 @@
+"""共享工作区布局、初始化、发现和进程锁基础设施。
+
+本模块集中管理 ``.flow`` 目录下的运行时路径，以及保证同一工作区只启动
+一个服务进程的文件锁。业务模块通过这里获取路径，不自行拼接运行时目录。
+"""
+
 from __future__ import annotations
 
+import fcntl
 import os
 from dataclasses import dataclass
 from pathlib import Path
-
+from typing import TextIO
 
 WORKSPACE_MARKER = ".workspace"
 WORKSPACE_VERSION = "flow-agent-workspace-v2"
@@ -208,13 +215,87 @@ def apply_workspace_env(layout: WorkspaceLayout) -> None:
     os.environ.setdefault("FLOW_AGENT_MEMORY_DB_PATH", str(layout.memory_db))
     os.environ.setdefault("FLOW_AGENT_TRACE_PATH", str(layout.trace_file))
     os.environ.setdefault("FLOW_AGENT_SKILLS_DIR", str(layout.skills_dir))
-    os.environ.setdefault("FLOW_AGENT_PROACTIVE_SOURCE_FILE", str(layout.proactive_source_file))
-    os.environ.setdefault("FLOW_AGENT_PROACTIVE_TODO_FILE", str(layout.proactive_todo_file))
-    os.environ.setdefault("FLOW_AGENT_PROACTIVE_TASKS_FILE", str(layout.proactive_tasks_file))
-    os.environ.setdefault("FLOW_AGENT_SUBAGENT_TASKS_FILE", str(layout.subagent_tasks_file))
+    os.environ.setdefault(
+        "FLOW_AGENT_PROACTIVE_SOURCE_FILE", str(layout.proactive_source_file)
+    )
+    os.environ.setdefault(
+        "FLOW_AGENT_PROACTIVE_TODO_FILE", str(layout.proactive_todo_file)
+    )
+    os.environ.setdefault(
+        "FLOW_AGENT_PROACTIVE_TASKS_FILE", str(layout.proactive_tasks_file)
+    )
+    os.environ.setdefault(
+        "FLOW_AGENT_SUBAGENT_TASKS_FILE", str(layout.subagent_tasks_file)
+    )
 
 
 def persist_workspace_profile(layout: WorkspaceLayout, profile: str) -> None:
     """已废弃：运行配置只从项目根目录的 config.toml 读取。"""
 
     del layout, profile
+
+
+# 供仍需固定项目根目录的基础设施和启动入口使用的全局布局。
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+WORKSPACE_LAYOUT = build_layout(PROJECT_ROOT)
+DATA_DIR = WORKSPACE_LAYOUT.data_dir
+
+
+def get_memory_db_path() -> Path:
+    """返回统一布局中的主数据库路径。"""
+
+    return WORKSPACE_LAYOUT.memory_db
+
+
+class WorkspaceAlreadyRunningError(RuntimeError):
+    """同一工作区已经有运行实例。"""
+
+
+class WorkspaceProcessLock:
+    """使用内核文件锁保护工作区运行时所有权。"""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._handle: TextIO | None = None
+
+    def acquire(self) -> None:
+        """非阻塞获取锁，并写入当前进程号。"""
+
+        if self._handle is not None:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            handle.seek(0)
+            owner = handle.read().strip() or "unknown"
+            handle.close()
+            raise WorkspaceAlreadyRunningError(
+                f"工作区已有运行实例: pid={owner}"
+            ) from exc
+        handle.seek(0)
+        handle.truncate()
+        handle.write(str(os.getpid()))
+        handle.flush()
+        os.fsync(handle.fileno())
+        self._handle = handle
+
+    def release(self) -> None:
+        """释放工作区所有权；残留锁文件不会阻止下次启动。"""
+
+        handle = self._handle
+        if handle is None:
+            return
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+            self._handle = None
+
+    def __enter__(self) -> "WorkspaceProcessLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.release()

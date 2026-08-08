@@ -9,7 +9,7 @@ from collections import deque
 from typing import Protocol
 
 from application.conversation.domain.messages import IncomingMessage
-from application.ports.message_consumer import MessageConsumer, ReceivedMessage
+from infra.bus.types import MessageConsumer, ReceivedMessage
 
 
 class ChatProcessor(Protocol):

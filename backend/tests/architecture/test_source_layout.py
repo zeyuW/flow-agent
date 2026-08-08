@@ -22,6 +22,6 @@ def test_legacy_python_package_is_not_present():
 
 
 def test_runtime_workspace_stays_at_repository_root():
-    from infra.lifecycle.paths import PROJECT_ROOT
+    from infra.workspace import PROJECT_ROOT
 
     assert PROJECT_ROOT == REPOSITORY_ROOT

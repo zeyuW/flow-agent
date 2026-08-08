@@ -10,16 +10,24 @@ def _chunk(*, content=None, tool_calls=None):
 
 def test_streaming_client_reassembles_tool_call_arguments():
     chunks = [
-        _chunk(tool_calls=[SimpleNamespace(
-            index=0,
-            id="call-1",
-            function=SimpleNamespace(name="recall_memory", arguments='{"que'),
-        )]),
-        _chunk(tool_calls=[SimpleNamespace(
-            index=0,
-            id=None,
-            function=SimpleNamespace(name=None, arguments='ry":"偏好"}'),
-        )]),
+        _chunk(
+            tool_calls=[
+                SimpleNamespace(
+                    index=0,
+                    id="call-1",
+                    function=SimpleNamespace(name="recall_memory", arguments='{"que'),
+                )
+            ]
+        ),
+        _chunk(
+            tool_calls=[
+                SimpleNamespace(
+                    index=0,
+                    id=None,
+                    function=SimpleNamespace(name=None, arguments='ry":"偏好"}'),
+                )
+            ]
+        ),
     ]
 
     class Completions:
@@ -44,3 +52,18 @@ def test_streaming_client_reassembles_tool_call_arguments():
     assert result.tool_calls[0].id == "call-1"
     assert result.tool_calls[0].name == "recall_memory"
     assert result.tool_calls[0].arguments == {"query": "偏好"}
+
+
+def test_tool_argument_parser_preserves_json_value_types():
+    client = OpenAILLMClient.__new__(OpenAILLMClient)
+
+    arguments = client._parse_tool_arguments(
+        '{"query":"偏好","max_items":10,"enabled":true,"tags":["ai"]}'
+    )
+
+    assert arguments == {
+        "query": "偏好",
+        "max_items": 10,
+        "enabled": True,
+        "tags": ["ai"],
+    }

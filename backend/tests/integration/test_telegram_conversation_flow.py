@@ -53,7 +53,7 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
 
     from interfaces.channels.telegram import TelegramChannel
     from application.conversation.app.chat_worker import ChatWorker
-    from application.ports.message_sender import SendMessage
+    from infra.bus.types import SendMessage
     from infra.bus.message import MessageBus
 
     async def scenario() -> None:
@@ -104,7 +104,10 @@ def test_telegram_update_runs_conversation_and_delivers_reply():
             )
             await asyncio.wait_for(processed.wait(), timeout=1)
             deadline = asyncio.get_running_loop().time() + 1
-            while sent != [(42, "收到：你好")] and asyncio.get_running_loop().time() < deadline:
+            while (
+                sent != [(42, "收到：你好")]
+                and asyncio.get_running_loop().time() < deadline
+            ):
                 await asyncio.sleep(0.01)
             assert sent == [(42, "收到：你好")]
         finally:

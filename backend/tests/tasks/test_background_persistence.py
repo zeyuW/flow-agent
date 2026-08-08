@@ -4,7 +4,7 @@ import threading
 from application.tasks.domain.models import JobSpec
 from application.tasks.app.runtime import BackgroundRuntime, InMemoryJobRegistry
 from application.tasks.infra.store import SQLiteJobStore
-from infra.persistence.sqlite import SQLiteDatabase
+from infra.persistence import SQLiteDatabase
 from application.tasks.app.tools import (
     ListBackgroundJobsTool,
     ListBackgroundRunsTool,

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from infra.persistence.sqlite import SQLiteDatabase
+from infra.persistence import SQLiteDatabase
 
 
 def test_sqlite_database_creates_parent_and_commits_transaction(tmp_path: Path):

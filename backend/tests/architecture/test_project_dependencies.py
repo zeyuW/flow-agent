@@ -46,7 +46,6 @@ def test_shared_infrastructure_has_no_business_dependency():
         if source.startswith("infra.")
         for target in targets
         if target.startswith(("application.", "interfaces.", "bootstrap."))
-        and not target.startswith("application.ports.")
     ]
     assert sorted(violations) == []
 
@@ -83,8 +82,8 @@ def test_bus_adapters_use_role_names_instead_of_legacy_names():
     """总线适配器按职责命名，不保留迁移期 legacy 前缀。"""
 
     conversation_infra = SOURCE_ROOT / "application" / "conversation" / "infra"
-    assert (SOURCE_ROOT / "application" / "ports" / "message_sender.py").exists()
-    assert (SOURCE_ROOT / "application" / "ports" / "message_consumer.py").exists()
+    assert (SOURCE_ROOT / "infra" / "bus" / "types.py").exists()
+    assert not (SOURCE_ROOT / "application" / "ports").exists()
     assert not (conversation_infra / "inbound_source.py").exists()
     assert not (conversation_infra / "legacy_message_bus.py").exists()
 
@@ -92,6 +91,6 @@ def test_bus_adapters_use_role_names_instead_of_legacy_names():
 def test_worker_manager_uses_accurate_lifecycle_name():
     """后台常驻线程管理器不使用暗示故障恢复的 Supervisor 名称。"""
 
-    worker_root = SOURCE_ROOT / "infra" / "worker"
-    assert (worker_root / "manager.py").exists()
+    worker_root = SOURCE_ROOT / "infra"
+    assert (worker_root / "worker.py").exists()
     assert not (worker_root / "supervisor.py").exists()

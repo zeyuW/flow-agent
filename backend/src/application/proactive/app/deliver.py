@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from application.proactive.domain.models import DeliverResult, ResolveResult
-from application.ports.message_sender import MessageSender, SendMessage
+from infra.bus.types import MessageSender, SendMessage
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 
 from infra.bus.event import Event, EventBus
-from infra.telemetry.trace import TraceRecorder
+from infra.telemetry import TraceRecorder
 from application.proactive.infra.gate import ProactiveStateStore
 from application.proactive.infra.data_gateway import DataGateway
 from application.proactive.infra.sources import LocalTaskSource, LocalTodoSource
@@ -113,6 +113,33 @@ def test_loop_stop_wakes_long_scheduler_wait():
         assert pool.connected is True
         assert pool.closed is True
         assert loop._hawkes.get_event_count(3600.0) == 0
+
+    asyncio.run(run_scenario())
+
+
+def test_loop_waits_before_first_startup_tick():
+    """服务重启后不应立即抓取并推送主动内容。"""
+
+    async def run_scenario() -> None:
+        pipeline = _FakePipeline()
+        loop = ProactiveLoop(
+            pipeline=pipeline,
+            mcp_pool=_FakePool(),
+            chat_id="target",
+            hawkes_config=HawkesConfig(
+                base_intensity=0.01,
+                time_constant=60.0,
+                min_interval=60.0,
+                max_interval=600.0,
+            ),
+        )
+
+        await loop.start_background()
+        await asyncio.sleep(0.05)
+
+        assert pipeline.calls == 0
+
+        await loop.stop()
 
     asyncio.run(run_scenario())
 
@@ -232,6 +259,7 @@ def test_data_gateway_reads_workspace_local_source(tmp_path):
 
     assert [item.content for item in result.content] == ["需要提醒用户的事项"]
 
+
 def test_proactive_state_and_hawkes_events_survive_restart(tmp_path):
     """主动配额、去重、漂移和互动事件应在重启后恢复。"""
 
@@ -274,6 +302,7 @@ def test_proactive_tick_writes_structured_trace(tmp_path):
     assert payload["event"] == "proactive_tick"
     assert payload["gate_reason"] == "ok"
     assert payload["sent"] is False
+
 
 def test_data_gateway_reads_task_and_todo_sources(tmp_path):
     """任务和待办目录文件都应进入主动内容通道。"""

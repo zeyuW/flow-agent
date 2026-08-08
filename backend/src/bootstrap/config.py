@@ -1,7 +1,6 @@
 from pathlib import Path
 
-from infra.config.loader import load_config
-from infra.config.schema import AppConfig
+from infra.config import AppConfig, load_config
 
 
 def load_application_config(project_root: Path) -> AppConfig:
