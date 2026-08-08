@@ -9,7 +9,7 @@ SOURCE_ROOT = BACKEND_ROOT / "src"
 
 
 def test_python_packages_resolve_from_backend_src():
-    for package_name in ("flow_agent", "modules", "interfaces", "infra", "bootstrap"):
+    for package_name in ("application", "interfaces", "infra", "bootstrap"):
         spec = find_spec(package_name)
         assert spec is not None
         locations = list(spec.submodule_search_locations or ())
@@ -17,11 +17,11 @@ def test_python_packages_resolve_from_backend_src():
         assert Path(locations[0]).resolve().is_relative_to(SOURCE_ROOT.resolve())
 
 
-def test_legacy_python_package_is_not_at_repository_root():
-    assert not (REPOSITORY_ROOT / "flow_agent").exists()
+def test_legacy_python_package_is_not_present():
+    assert not (SOURCE_ROOT / "flow_agent").exists()
 
 
 def test_runtime_workspace_stays_at_repository_root():
-    from flow_agent.infra.paths import PROJECT_ROOT
+    from infra.lifecycle.paths import PROJECT_ROOT
 
     assert PROJECT_ROOT == REPOSITORY_ROOT

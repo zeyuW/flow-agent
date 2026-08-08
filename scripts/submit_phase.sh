@@ -17,11 +17,11 @@ case "${PHASE}" in
     SUMMARY="feat: 完善事件总线生命周期管理"
     DETAILS=$'增加事件订阅和取消订阅能力
 补充事件总线生命周期测试'
-    TEST_TARGET="backend/tests/test_event_bus_lifecycle.py"
+    TEST_TARGET="backend/tests/delivery/test_event_bus_lifecycle.py"
     FILES=(
-      backend/src/flow_agent/messaging/event_bus.py
-      backend/src/flow_agent/messaging/__init__.py
-      backend/tests/test_event_bus_lifecycle.py
+      backend/src/infra/messaging/event_bus.py
+      backend/src/infra/messaging/__init__.py
+      backend/tests/delivery/test_event_bus_lifecycle.py
     )
     ;;
   phase2)
@@ -30,21 +30,21 @@ case "${PHASE}" in
 增加任务状态和错误分类
 增加重试与恢复语义
 补充阶段二状态恢复测试'
-    TEST_TARGET="backend/tests/test_phase2_state_recovery.py"
+    TEST_TARGET="backend/tests/jobs/test_phase2_state_recovery.py"
     FILES=(
-      backend/src/flow_agent/background/runtime.py
-      backend/src/flow_agent/background/store.py
-      backend/src/flow_agent/background/tools.py
-      backend/src/flow_agent/core/agent.py
-      backend/src/flow_agent/core/context.py
-      backend/src/flow_agent/core/passive_turn_pipeline.py
-      backend/src/flow_agent/runtime/errors.py
-      backend/src/flow_agent/runtime/retry.py
-      backend/src/flow_agent/runtime/__init__.py
-      backend/src/flow_agent/scheduler/runtime.py
-      backend/src/flow_agent/session/session_manager.py
-      backend/src/flow_agent/session/session_store.py
-      backend/tests/test_phase2_state_recovery.py
+      backend/src/modules/jobs/application/runtime.py
+      backend/src/modules/jobs/infra/store.py
+      backend/src/modules/jobs/application/tools.py
+      backend/src/modules/conversation/application/agent.py
+      backend/src/modules/conversation/infra/context.py
+      backend/src/modules/conversation/application/pipeline.py
+      backend/src/infra/resilience/errors.py
+      backend/src/infra/resilience/retry.py
+      backend/src/infra/runtime/__init__.py
+      backend/src/modules/scheduling/application/runtime.py
+      backend/src/modules/conversation/infra/session_manager.py
+      backend/src/modules/conversation/infra/session_store.py
+      backend/tests/jobs/test_phase2_state_recovery.py
     )
     ;;
   phase3)
@@ -53,25 +53,25 @@ case "${PHASE}" in
 增加运行期间失败退避重试
 禁止启动时批量恢复历史消息
 补充出站恢复和重复投递测试'
-    TEST_TARGET="backend/tests/test_reliable_delivery.py backend/tests/test_phase3_boundaries.py backend/tests/test_proactive_tick.py backend/tests/test_spawn_runtime.py"
+    TEST_TARGET="backend/tests/delivery/test_reliable_delivery.py backend/tests/delivery/test_phase3_boundaries.py backend/tests/proactive/test_proactive_tick.py backend/tests/delegation/test_spawn_runtime.py"
     FILES=(
-      backend/src/flow_agent/app/bootstrap.py
-      backend/src/flow_agent/channels/models.py
-      backend/src/flow_agent/channels/telegram.py
-      backend/src/flow_agent/core/agent_loop.py
-      backend/src/flow_agent/messaging/message_bus.py
-      backend/src/flow_agent/messaging/outbox.py
-      backend/src/flow_agent/proactive/deliver.py
-      backend/src/flow_agent/runtime/workspace.py
-      backend/src/flow_agent/config/loader.py
-      backend/src/flow_agent/config/settings.py
-      backend/src/flow_agent/subagent/manager.py
-      backend/src/flow_agent/subagent/models.py
-      backend/src/flow_agent/tools/spawn.py
-      backend/tests/test_proactive_tick.py
-      backend/tests/test_spawn_runtime.py
-      backend/tests/test_phase3_boundaries.py
-      backend/tests/test_reliable_delivery.py
+      backend/src/bootstrap/container.py
+      backend/src/interfaces/channels/models.py
+      backend/src/interfaces/channels/telegram.py
+      backend/src/modules/conversation/application/agent_loop.py
+      backend/src/modules/delivery/infra/delivery_bus.py
+      backend/src/modules/delivery/infra/outbox.py
+      backend/src/modules/proactive/application/deliver.py
+      backend/src/infra/runtime/workspace.py
+      backend/src/infra/config/loader.py
+      backend/src/infra/config/schema.py
+      backend/src/modules/delegation/application/manager.py
+      backend/src/modules/delegation/application/models.py
+      backend/src/modules/delegation/application/spawn.py
+      backend/tests/proactive/test_proactive_tick.py
+      backend/tests/delegation/test_spawn_runtime.py
+      backend/tests/delivery/test_phase3_boundaries.py
+      backend/tests/delivery/test_reliable_delivery.py
     )
     ;;
   automation)
@@ -79,7 +79,7 @@ case "${PHASE}" in
     DETAILS=$'增加统一验证脚本
 增加 Agent 自动生成提交说明和自动提交
 增加提交前检查和 GitHub Actions CI'
-    TEST_TARGET="backend/tests/test_reliable_delivery.py"
+    TEST_TARGET="backend/tests/delivery/test_reliable_delivery.py"
     FILES=(
       .github/workflows/ci.yml
       .githooks/pre-commit

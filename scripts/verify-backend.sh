@@ -61,7 +61,7 @@ with open(config_path, "w", encoding="utf-8") as config_file:
   backend/src/infra/config \
   backend/src/bootstrap \
   backend/tests/architecture \
-  backend/tests/infra/config
+  backend/tests/infrastructure
 
 echo "[6/6] 检查新增架构与配置格式"
 export BLACK_CACHE_DIR="${TMPDIR}/flow-agent-black-cache"
@@ -73,7 +73,7 @@ done < <(
     backend/src/infra/config \
     backend/src/bootstrap \
     backend/tests/architecture \
-    backend/tests/infra/config \
+    backend/tests/infrastructure \
   | rg '\.py$'
 )
 

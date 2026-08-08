@@ -11,4 +11,4 @@ ENV PYTHONPATH=/app/backend/src
 
 EXPOSE 8787 8788
 
-CMD ["python", "-m", "bootstrap.cli"]
+CMD ["python", "-m", "bootstrap.service"]

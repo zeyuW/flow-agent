@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from architecture.import_graph import build_import_graph, find_import_cycles
+from .import_graph import build_import_graph, find_import_cycles
 
 
 def write_module(source: Path, name: str, content: str) -> None:

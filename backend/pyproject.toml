@@ -25,10 +25,7 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["flow_agent*", "modules*", "interfaces*", "infra*", "bootstrap*"]
-
-[project.scripts]
-flow-agent = "bootstrap.cli:main"
+include = ["application*", "interfaces*", "infra*", "bootstrap*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
