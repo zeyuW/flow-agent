@@ -110,9 +110,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run python -m pytest -q \
 - 修改：`backend/src/interfaces/channels/__init__.py`
 - 删除：`backend/src/interfaces/channels/protocol.py`
 - 删除：`backend/src/interfaces/channels/models.py`
-- 修改：`backend/src/application/conversation/domain/channel_message.py`
-- 修改：`backend/src/application/conversation/domain/messages.py`
-- 修改：`backend/src/application/conversation/app/phase.py`
+- 修改：`backend/src/infra/bus/types.py`
+- 修改：`backend/src/application/passive/domain/messages.py`
+- 修改：`backend/src/application/passive/app/phase.py`
 
 **接口：**
 
@@ -149,7 +149,7 @@ class ChannelCapabilities:
 
 - [ ] **步骤 3：给消息领域模型增加通用 `chat_id`**
 
-在 `InboundMessage` 和 `IncomingMessage` 增加 `chat_id: str`，在 `TurnFlow` 增加 `chat_id`。更新 `ChatWorker`、`PassiveTurnPipeline` 和相关构造调用，使消息从入站渠道到对话流程始终携带通用目标。
+在 `InboundMessage` 和 `IncomingMessage` 增加 `chat_id: str`，在 `TurnFlow` 增加 `chat_id`。更新 `AgentLoop`、`PassiveLoop`、`PassiveTurnPipeline` 和相关构造调用，使消息从入站渠道到对话流程始终携带通用目标。
 
 - [ ] **步骤 4：收敛公开导出并删除重复模块**
 
@@ -276,7 +276,6 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run python -m pytest -q \
 **文件：**
 
 - 修改：`backend/src/interfaces/channels/telegram.py`
-- 修改：`backend/src/interfaces/channels/common.py`
 - 修改：`backend/tests/interfaces/test_telegram_multimodal.py`
 - 修改：`backend/tests/interfaces/test_telegram_security.py`
 - 修改：`backend/tests/integration/test_telegram_conversation_flow.py`
@@ -320,9 +319,9 @@ PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run python -m pytest -q \
 
 **文件：**
 
-- 修改：`backend/src/application/conversation/app/pipeline.py`
+- 修改：`backend/src/application/passive/app/pipeline.py`
 - 修改：`backend/src/application/proactive/app/deliver.py`
-- 修改：`backend/src/application/scheduling/app/runtime.py`
+- 修改：`backend/src/application/schedule/app/runtime.py`
 - 修改：`backend/src/application/delegation/app/manager.py`
 - 修改：`backend/src/infra/bus/message.py`
 - 修改：`backend/src/bootstrap/service_app.py`

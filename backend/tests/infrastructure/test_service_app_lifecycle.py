@@ -164,6 +164,12 @@ def test_stop_dispatch_waits_for_dispatch_loop_to_be_ready():
         app._dispatch_ready.set()
         loop_ready.set()
         asyncio.set_event_loop(loop)
+        # 真实 MessageBus 的分发任务会周期性轮询队列；保持测试 loop
+        # 有周期性调度，避免把跨线程停止误测成空闲 loop 唤醒问题。
+        def tick() -> None:
+            loop.call_later(0.01, tick)
+
+        loop.call_soon(tick)
         loop.run_forever()
         loop.close()
 

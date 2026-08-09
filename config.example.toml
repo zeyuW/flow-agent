@@ -1,49 +1,48 @@
-# 主模型是唯一必需的运行凭据。
-[llm.main]
-model = "replace-me"
-api_key = "replace-me"
-base_url = "https://api.example.com/v1"
-system_prompt = "You are a helpful AI assistant."
-enable_thinking = true
+# 主模型推介deepseek-v4-flash，其他模型推介使用阿里云，一个api使用多个模型
 
-# 接入层默认关闭，按部署需要启用。每个 IM 只需增加一个渠道配置块。
+[llm.main]
+model = "deepseek-v4-flash"
+api_key = ""
+base_url = "https://api.deepseek.com/v1"
+
+# 快速判断和视觉能力使用的模型；需要时取消注释并填写对应 api_key。
+# [llm.fast]
+# model = "qwen-turbo"
+# api_key = ""
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+#
+# [llm.vision]
+# model = "qwen3-vl-plus"
+# api_key = ""
+# base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+[embedding]
+provider = "qwen"
+model = "text-embedding-v3"
+api_key = ""
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+# 当前使用 Telegram 作为外部消息渠道。
 [channels.telegram]
 enabled = false
-bot_token = "replace-me"
-allowed_users = ["replace-me"]
+bot_token = ""
+allowed_users = []
 allowed_groups = []
 
-[channels.http]
-enabled = false
-host = "127.0.0.1"
-port = 8788
-api_key = ""
-
-[channels.cli]
-enabled = false
-default_session_id = "default"
-
-# 主动线路启用后必须填写目标用户。
+# 主动线路默认关闭；启用时填写 Telegram 目标用户。
 [proactive]
 enabled = false
-telegram_target_user_id = "replace-me"
+telegram_target_user_id = ""
 max_per_day = 10
-min_interval = 60.0
-max_interval = 600.0
-cooldown = 60.0
+min_interval = 60
+max_interval = 600
+cooldown = 60
+idle_enabled = false
+idle_threshold_minutes = 120
+interest_topics = []
 
-# 后台任务线程池和有界队列。
-[jobs]
-max_async_queue = 64
-max_async_workers = 4
-timeout_seconds = 30.0
-
-# 委托任务的并发与持久化位置。
-[subagent]
-max_concurrency = 2
-tasks_file = ".flow/sessions/subagent_tasks.jsonl"
-
-# 超过本地阈值的请求可进入委托线路。
-[delegation_policy]
+# Drift 后台整理默认开启，但没有目标数据时不会主动推送。
+[drift]
 enabled = true
-max_local_chars = 500
+min_interval_hours = 24.0
+max_steps = 50

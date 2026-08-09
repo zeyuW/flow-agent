@@ -2,172 +2,213 @@
 
 状态：当前生效
 
-版本：3.0
+版本：4.0
 
-更新日期：2026-08-02
+更新日期：2026-08-09
 
-本文是项目当前唯一生效的架构规范，覆盖 `docs/specs/2026-08-01-ddd-refactor/` 中的阶段性设计、需求和任务文档。旧文档保留用于追溯，不再作为新增代码和迁移代码的判断依据。
+本文是项目当前生效的架构总规范。历史设计文档继续保留用于追溯，但不再作为
+新增代码和迁移代码的判断依据。
 
 ## 文档目录与生效顺序
 
-项目文档按用途分为以下几类：
+- `docs/specs/`：正式架构、功能设计、需求和实施计划，是开发的主要依据。
+- `docs/superpowers/`：开发过程记录，用于保存讨论、计划和验证过程，不替代正式规范。
+- 根目录 `README.md` 和 `backend/README.md`：快速开始、目录概览和使用说明。
 
-- `docs/specs/`：正式开发规范。功能设计、需求和实施任务都应放在这里，
-  是新增代码和迁移代码的主要依据。
-- `docs/superpowers/`：开发辅助过程文档，由开发工具生成，用于记录设计讨论、
-  执行计划和验证过程，不替代 `docs/specs/` 中的正式规范。
-- 根目录 `README.md` 和 `backend/README.md`：项目使用说明、快速开始、目录概览，
-  不承担单个功能的详细设计。
-
-当不同文档出现冲突时，优先级如下：
+出现冲突时，按以下顺序处理：
 
 1. 用户当前明确提出的要求；
-2. 本文件和 `docs/specs/` 中当前生效的功能规范；
+2. 本文件和 `docs/specs/` 中当前生效的规范；
 3. 根目录和 `backend/` 下的使用说明；
-4. `docs/superpowers/` 中的开发过程记录；
+4. `docs/superpowers/` 中的过程记录；
 5. 历史设计和已完成任务文档。
 
 除代码标识符、命令、路径和第三方专有名词外，新增项目文档统一使用中文。
 
-## 一、总体原则
+当前重点规范：
 
-项目采用“业务模块 DDD + Agent 能力组件 + 共享基础设施”的混合结构：
+- [统一 IM 渠道适配层设计](2026-08-09-unified-channel-adapters/design.md)
+- [统一 IM 渠道适配层实施计划](2026-08-09-unified-channel-adapters/tasks.md)
 
-- 用业务模块划分业务边界，不建立全局万能 `core`。
-- 领域规则只放在对应模块的 `domain`。
-- 应用用例、Agent 编排、事务边界和失败策略放在 `application`。
-- 数据库、文件系统、第三方 SDK、消息、连接池等实现放在 `infra`。
-- HTTP、CLI、MCP 和第三方 IM 渠道协议适配放在 `interfaces`。
-- LLM、Tools、MCP、Skills 等可复用 Agent 能力放在 `modules/capabilities`。
-- `bootstrap` 是唯一组合根，负责配置加载、依赖装配、启动和关闭。
-- `flow_agent` 旧实现和转发层已删除，源码只保留新的业务模块边界。
-
-## 二、目录职责
+## 一、顶层目录职责
 
 ```text
 backend/src/
-├── modules/
-│   ├── conversation/       # 被动回复
-│   ├── proactive/          # 主动回复
-│   ├── jobs/               # 后台任务
-│   ├── delivery/           # 消息投递
-│   ├── memory/             # 记忆能力
-│   ├── delegation/         # 委托与子代理
-│   ├── scheduling/         # 调度规则
-│   └── capabilities/       # LLM、Tools、MCP、Skills 等通用能力
-├── interfaces/             # 外部协议和渠道接入
-├── infra/                  # 共享技术基础设施
-└── bootstrap/              # 组合根和进程入口
+├── application/       # 业务模块、领域模型和应用用例
+├── interfaces/        # HTTP、CLI、MCP 和 IM 等外部协议适配
+├── infra/             # 所有业务共用的技术基础设施
+└── bootstrap/         # 配置装配、进程生命周期和组合根
 ```
 
-复杂业务模块按需使用三层：
+### `application/`：业务实现
+
+业务按语义边界组织，包括 `agent`、`passive`、`proactive`、`schedule`、
+`automation`、`delegation`、`memory` 和 `capabilities`。
 
 ```text
-modules/<business-module>/
-├── domain/                 # 实体、值对象、领域服务、领域事件
-├── application/            # 用例、Agent 编排、端口、事务边界
-└── infra/                  # 仓储、网关、持久化和第三方实现
+application/
+├── agent/         # Agent 通用执行内核
+├── passive/       # 被动接收消息并回复
+├── proactive/     # 主动发现内容并推送
+├── schedule/      # 用户创建的定时任务
+├── automation/    # 系统和插件自动化作业
+├── delegation/    # 子 Agent 委派
+├── memory/        # 记忆管理
+└── capabilities/  # LLM、MCP、Skills、Tools 和 Plugins
 ```
 
-简单能力模块可以只保留实际需要的目录，不为目录完整而创建空层。
-
-## 三、依赖方向
-
-允许的方向：
+复杂业务按需拆分为：
 
 ```text
-interfaces  → application / capabilities / infra
-bootstrap   → interfaces / application / capabilities / infra
-application → domain / capabilities / 端口协议
-infra       → domain / capabilities 的协议实现
+application/<feature>/
+├── domain/       # 领域对象、规则和领域事实
+├── app/          # 用例编排、流程、端口和事务边界
+└── infra/        # 仅属于本业务的存储、网关和技术实现
 ```
 
-禁止的方向：
+业务自己的 `application/<feature>/infra` 属于业务实现，可以被该业务的
+`app` 使用；它不能被其他业务模块或顶层共享 `infra` 反向依赖。
 
-- `domain` 导入 `application`、`infra`、`interfaces` 或 `bootstrap`。
-- `application` 直接依赖具体基础设施实现，应依赖端口或协议。
-- 业务模块依赖其他业务模块的 `infra` 或 `domain`；跨模块交互使用应用端口、事件或明确的公共协议。
-- `modules` 反向导入 `interfaces` 或 `bootstrap`。
-- 共享 `infra` 反向依赖业务模块。
+### `interfaces/`：外部接入层
 
-## 四、Agent、Tools、MCP 与 Skills
+接口层负责把外部协议转换为统一的应用消息，并把应用输出转换回平台协议。
+它可以依赖稳定的应用消息模型和顶层 `infra`，但不应直接操作业务私有仓储。
 
-### Agent
-
-Agent 是应用层编排器，不建立全局 `src/agent`：
+其中 `interfaces/channels` 是统一 IM 接入层：
 
 ```text
-modules/conversation/application/agent.py
-modules/proactive/application/loop.py
-modules/delegation/application/agent.py
+interfaces/channels/
+├── base.py       # 渠道协议、能力、上下文、状态和生命周期基类
+├── service.py    # 渠道注册、配置构造、启动、停止和 join
+├── cli.py        # CLI 适配器
+├── http.py       # 通用 HTTP Webhook 适配器
+├── telegram.py   # Telegram Bot API 适配器
+├── qq.py         # OneBot QQ 适配器
+└── qqbot.py      # QQ 官方 Bot WebSocket 适配器
 ```
 
-### Tools
+新增 IM 时，新增一个适配器文件、在 `service.py` 注册一次工厂，并增加一个
+`[channels.<name>]` 配置块。`application`、消息总线和 `ServiceApp` 不得增加
+平台特判。
 
-工具协议和注册表属于通用能力：
+渠道统一使用 `session_id`、`chat_id`、`sender_id` 和 `recipient_id`。平台专属
+字段只能留在适配器内部或扩展元数据中，不能作为应用层路由依据。
+
+### `infra/`：共享技术基础设施
+
+顶层 `infra` 只放多个业务共同使用的技术能力：
 
 ```text
-modules/capabilities/tools/
+infra/
+├── bus/          # 入站、出站、事件和可靠投递
+├── config.py     # 配置模型、TOML 加载和热更新
+├── persistence.py # SQLite 和通用 outbox
+├── resilience.py # 重试、错误分类和降级
+├── runtime.py    # 运行单元和健康状态
+├── security.py   # API key、权限和安全策略
+├── telemetry.py  # 日志、trace 和观测
+├── worker.py     # worker、线程池和后台执行
+└── workspace.py  # `.flow` 工作区和进程锁
 ```
 
-具体业务工具放回业务模块的 `application`，例如 `modules/jobs/application/tools.py`。
+业务专属实现必须留在对应业务的 `application/<feature>/infra`，不能因为使用
+SQLite、线程或 HTTP 就移动到顶层 `infra`。
 
-### MCP
+### `bootstrap/`：组合根
 
-MCP 客户端、服务器、连接池和传输实现属于能力或基础设施；MCP 不承载业务规则：
+`bootstrap` 是唯一负责对象装配和进程生命周期的地方：
+
+- `config.py` 加载项目根目录的 `config.toml`；
+- `container.py` 创建应用运行时和业务依赖；
+- `service_app.py` 管理进程级 `init()`、`start()`、`wait()` 和 `stop()`；
+- `main.py` 创建 `ServiceApp` 并处理进程入口。
+
+## 二、依赖方向
 
 ```text
-interfaces/mcp/                 # 协议接入
-modules/capabilities/mcp/       # 通用 MCP 能力
-modules/<module>/infra/         # 业务模块专属 MCP 适配
+bootstrap
+  ├── application
+  ├── interfaces ──> application 消息模型、infra
+  └── infra
+
+application
+  ├── 自身 domain / app / infra
+  └── 顶层 infra
+
+infra
+  └── 标准库和第三方技术库
 ```
 
-### Skills
+约束如下：
 
-Skill 的说明、脚本和资源放在仓库根目录 `skills/`；加载器、注册表和解析器放在 `modules/capabilities/skills/`。
+- `domain` 不依赖 `app`、`interfaces`、顶层 `infra` 或 `bootstrap`；
+- `application` 可以依赖自己的 `domain`、自己的 `infra` 和顶层共享 `infra`；
+- `interfaces` 可以依赖应用消息模型和顶层 `infra`，不能依赖业务私有存储；
+- 顶层 `infra` 不得依赖 `application`、`interfaces` 或 `bootstrap`；
+- `bootstrap` 可以依赖所有实现层，但只负责装配，不承载业务规则；
+- 所有层都不能形成循环依赖。
 
-## 五、三条核心业务路线
-
-### 被动回复
+因此需要区分：
 
 ```text
-interfaces/channels
-  → conversation.application
-  → conversation.domain
-  → delivery.application
-  → delivery.infra
+application/passive/infra/      # 被动业务专属实现
+application/schedule/infra/     # 用户定时任务专属实现
+application/automation/infra/   # 系统和插件自动化作业实现
+infra/                          # 所有业务共用的技术能力
 ```
 
-### 主动回复
+## 三、渠道配置和生命周期
 
-```text
-proactive.application
-  → proactive.domain
-  → proactive.infra
-  → delivery.application
+渠道采用配置驱动注册：
+
+```toml
+[channels.telegram]
+enabled = true
+bot_token = "..."
+allowed_users = ["..."]
+allowed_groups = []
+
+[channels.qq]
+enabled = false
+host = "127.0.0.1"
+port = 8789
+api_base = "http://127.0.0.1:5700"
 ```
 
-### 后台任务
+`ChannelService` 负责按配置构造渠道，并统一调用：
 
-```text
-conversation/application/tools
-  → jobs.application
-  → jobs.domain
-  → jobs.infra
+```python
+channel_service.start_all()
+channel_service.stop_all()
+channel_service.join_all(timeout=8.0)
 ```
 
-## 六、配置和组合根
+适配器内部可以使用线程、asyncio、HTTP 服务或 WebSocket，但这些细节不能泄漏
+到 `ServiceApp` 或业务层。
 
-- 配置文件使用单一 TOML 来源。
-- 配置模型、加载器和热更新位于 `infra/config`。
-- 业务模块不得主动读取全局配置。
-- `bootstrap` 负责把配置切片显式注入 Agent、Worker、渠道和基础设施。
-- 不使用全局 Settings Proxy、服务定位器或隐式模块级缓存。
+进程停止顺序是：停止渠道入口、停止业务运行时、停止消息分发、join 渠道和后台
+线程、释放进程锁。
 
-## 七、迁移规则
+## 四、业务消息和消息总线
 
-- 新代码不得新增 `flow_agent` 导入。
-- 迁移时先移动真实实现，再更新应用入口和组合根。
-- 迁移完成后不保留旧路径转发层。
-- 每批迁移必须通过架构检查、全量测试、类型检查和格式检查。
-- 不为了兼容旧内部导入路径而保留重复实现。
+`infra.bus` 是进程内唯一消息总线。入站消息经过渠道规范化后进入总线，出站消息
+通过统一 `ChannelDeliveryResult` 返回投递结果，可靠重试由消息总线负责。
+
+对话管道使用 `TurnFlow.chat_id` 构造被动回复、错误回复、流式事件和主动工具
+调用目标。主动消息、定时消息和委托完成消息也只使用通用渠道地址。
+
+## 五、开发规则
+
+- 新业务规则放在 `application`，不要塞入顶层 `infra`；
+- 新外部平台通过接口适配器和 `ChannelService` 接入；
+- 不在业务代码中直接创建第三方客户端；
+- 行为变更必须补充测试，并验证依赖方向；
+- 不恢复已删除的旧导入路径或兼容转发层；
+- 修改后至少运行架构测试和全量测试。
+
+后端测试命令：
+
+```bash
+cd backend
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run python -m pytest -q
+```

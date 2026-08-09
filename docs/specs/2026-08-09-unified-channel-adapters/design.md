@@ -2,7 +2,7 @@
 
 ## 文档状态
 
-已确认设计方向，等待进入实施计划。
+设计已确认并已完成实施；本文记录当前统一渠道适配层的结构和约束。
 
 ## 一、目标
 
@@ -95,7 +95,6 @@ backend/src/interfaces/channels/
 ├── __init__.py       # 渠道包的稳定公开导出
 ├── base.py           # 协议、上下文、状态、能力和通用基类
 ├── service.py        # 注册、配置装配、启动、停止和等待
-├── common.py         # 少量真正跨平台的附件或 HTTP 工具
 ├── cli.py            # stdin/stdout 渠道适配器
 ├── http.py           # 通用 HTTP 渠道适配器
 ├── qq.py             # OneBot 兼容 QQ 适配器
@@ -108,9 +107,8 @@ backend/src/interfaces/channels/
 `protocol.py`、`models.py` 和 `base.py` 中重复的渠道声明会被移除，稳定公开
 类型统一从 `base.py` 和 `__init__.py` 导出。
 
-当前 `common.py` 中未被多个适配器使用的 `SessionIdentityIndex` 和
-`MessageDeduper` 不再保留。只有至少两个适配器确实使用的工具才能放在
-`common.py`；平台专属工具必须留在对应平台文件中。
+没有实际被多个适配器复用的工具不单独保留公共文件；平台专属工具留在对应
+平台文件中，真正跨业务的技术能力放在顶层 `infra`。
 
 ## 五、核心渠道协议
 
