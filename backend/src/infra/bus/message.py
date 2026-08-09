@@ -347,6 +347,7 @@ class MessageBus(MessageSender, MessageConsumer):
             sender_id=inbound.sender,
             media=tuple(inbound.media),
             metadata=dict(inbound.metadata),
+            chat_id=inbound.chat_id,
         )
 
     async def ack(self, message_id: str) -> None:
@@ -655,12 +656,7 @@ def _resolve_chat_id(
     session_id: str,
     metadata: dict[str, object],
 ) -> str:
-    """从旧调用携带的渠道元数据中推导目标标识。"""
+    """为未显式填写目标地址的旧内部请求提供统一会话回退。"""
 
-    if channel == "telegram":
-        return str(metadata.get("telegram_chat_id") or session_id)
-    if channel in {"qq", "qqbot"}:
-        return str(
-            metadata.get("qq_group_id") or metadata.get("qq_user_id") or session_id
-        )
+    del channel, metadata
     return session_id

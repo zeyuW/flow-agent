@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from application.memory.memory_engine import MemoryEngine, MemoryQuery
+from application.memory.app.engine import MemoryEngine, MemoryQuery
 from application.capabilities.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)

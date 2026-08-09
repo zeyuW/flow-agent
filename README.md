@@ -55,7 +55,7 @@ OpenAI 兼容服务还需要按实际服务填写 `base_url`。Telegram、HTTP �
 ./scripts/start.sh
 ```
 
-启动脚本会自动进入 `backend`、清理 ROS 环境变量，并通过 `uv run` 使用后端环境；不需要手动 `source .venv/bin/activate`。按 `Ctrl+C` 停止服务。
+启动脚本会自动进入 `backend`，并通过 `uv run` 使用后端环境；不需要手动 `source .venv/bin/activate`。按 `Ctrl+C` 停止服务。
 
 ### 4. Docker（可选）
 

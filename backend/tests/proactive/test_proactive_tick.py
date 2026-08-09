@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from application.capabilities.llm.client import LLMResult, LLMToolCall
-from application.memory.markdown_store import MarkdownStore
+from application.memory.infra.markdown_store import MarkdownStore
 from application.proactive.infra.gate import ProactiveStateStore, AnyActionGate, check_gate
 from application.proactive.domain.models import (
     AgentTick, GateResult, GatewayResult, DataItem,
@@ -242,3 +242,224 @@ def test_judge_returns_recall_result_to_model():
     assert result.decision == "reply"
     assert result.message == "Rust 有一条值得关注的新动态。"
     assert result.cited_item_ids == ["rust-1"]
+
+
+class _StaticGateway:
+    def __init__(self, result: GatewayResult):
+        self.result = result
+
+    async def run(self) -> GatewayResult:
+        return self.result
+
+
+class _RecordingJudge:
+    def __init__(self, result: JudgeResult | None = None):
+        self.calls: list[list[DataItem]] = []
+        self.result = result or JudgeResult(decision="skip")
+
+    async def evaluate(self, gateway: GatewayResult, *args, **kwargs) -> JudgeResult:
+        del args, kwargs
+        self.calls.append(list(gateway.all_items))
+        return self.result
+
+
+def _build_stateful_pipeline(store, gateway, judge):
+    return ProactiveTurnPipeline(
+        state_store=store,
+        gateway=gateway,
+        judge=judge,
+        any_action=AnyActionGate(max_per_day=100),
+        cooldown=0.0,
+    )
+
+
+def test_first_startup_fetch_establishes_baseline_without_judging(tmp_path: Path):
+    """首次启动只记录已有候选，不应把历史内容当成新内容推送。"""
+
+    store = ProactiveStateStore(tmp_path / "proactive.db")
+    judge = _RecordingJudge()
+    gateway = _StaticGateway(
+        GatewayResult(content=[
+            DataItem(
+                source="feed",
+                source_key="feed:tech",
+                item_id="old-1",
+                title="启动前已存在的内容",
+            ),
+        ])
+    )
+    pipeline = _build_stateful_pipeline(store, gateway, judge)
+
+    import asyncio
+    tick = asyncio.run(pipeline.run(chat_id="target"))
+
+    assert tick.judge_result is not None
+    assert tick.judge_result.decision == "skip"
+    assert tick.judge_result.evidence["reason"] == "startup_baseline"
+    assert judge.calls == []
+    store.close()
+
+
+def test_restart_does_not_rejudge_seen_candidate(tmp_path: Path):
+    """重启后仍存在的数据源内容不能再次进入 Judge。"""
+
+    state_path = tmp_path / "proactive.db"
+    gateway = _StaticGateway(
+        GatewayResult(content=[
+            DataItem(
+                source="feed",
+                source_key="feed:tech",
+                item_id="old-1",
+                title="已经观察过的内容",
+            ),
+        ])
+    )
+
+    first = ProactiveStateStore(state_path)
+    first_pipeline = _build_stateful_pipeline(first, gateway, _RecordingJudge())
+    import asyncio
+    asyncio.run(first_pipeline.run(chat_id="target"))
+    first.close()
+
+    second = ProactiveStateStore(state_path)
+    judge = _RecordingJudge()
+    second_pipeline = _build_stateful_pipeline(second, gateway, judge)
+    tick = asyncio.run(second_pipeline.run(chat_id="target"))
+
+    assert tick.judge_result is not None
+    assert tick.judge_result.evidence["reason"] == "no_new_candidates"
+    assert judge.calls == []
+    second.close()
+
+
+def test_new_candidate_after_baseline_is_sent_to_judge(tmp_path: Path):
+    """建立基线后出现的新候选仍必须进入评估流程。"""
+
+    store = ProactiveStateStore(tmp_path / "proactive.db")
+    old_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="old-1",
+        title="旧内容",
+    )
+    gateway = _StaticGateway(GatewayResult(content=[old_item]))
+    asyncio_run = __import__("asyncio").run
+    asyncio_run(_build_stateful_pipeline(store, gateway, _RecordingJudge()).run(
+        chat_id="target"
+    ))
+
+    new_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="new-1",
+        title="新内容",
+    )
+    gateway.result = GatewayResult(content=[old_item, new_item])
+    judge = _RecordingJudge()
+    tick = asyncio_run(_build_stateful_pipeline(store, gateway, judge).run(
+        chat_id="target"
+    ))
+
+    assert tick.judge_result is not None
+    assert len(judge.calls) == 1
+    assert [item.item_id for item in judge.calls[0]] == ["new-1"]
+    store.close()
+
+
+def test_duplicate_candidate_in_one_fetch_is_judged_once(tmp_path: Path):
+    """同一轮多个通道返回相同候选时只能评估一次。"""
+
+    store = ProactiveStateStore(tmp_path / "proactive.db")
+    old_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="old-1",
+        title="旧内容",
+    )
+    new_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="new-1",
+        title="新内容",
+    )
+    gateway = _StaticGateway(GatewayResult(content=[old_item]))
+    import asyncio
+    asyncio.run(_build_stateful_pipeline(store, gateway, _RecordingJudge()).run(
+        chat_id="target"
+    ))
+
+    gateway.result = GatewayResult(content=[new_item, new_item])
+    judge = _RecordingJudge()
+    asyncio.run(_build_stateful_pipeline(store, gateway, judge).run(
+        chat_id="target"
+    ))
+
+    assert len(judge.calls) == 1
+    assert [item.item_id for item in judge.calls[0]] == ["new-1"]
+    store.close()
+
+
+def test_delivery_failure_keeps_candidate_for_retry(tmp_path: Path):
+    """首次投递失败时不应消耗候选，下一轮仍需重新评估并发送。"""
+
+    store = ProactiveStateStore(tmp_path / "proactive.db")
+    old_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="old-1",
+        title="旧内容",
+    )
+    new_item = DataItem(
+        source="feed",
+        source_key="feed:tech",
+        item_id="new-1",
+        title="新内容",
+    )
+    gateway = _StaticGateway(GatewayResult(content=[old_item]))
+    import asyncio
+    asyncio.run(_build_stateful_pipeline(store, gateway, _RecordingJudge()).run(
+        chat_id="target"
+    ))
+
+    gateway.result = GatewayResult(content=[new_item])
+    judge = _RecordingJudge(
+        JudgeResult(
+            decision="reply",
+            message="新内容提醒",
+            cited_item_ids=["new-1"],
+        )
+    )
+
+    class Sender:
+        def __init__(self):
+            self.calls = 0
+
+        async def send_and_wait(self, message, timeout=30.0):
+            del message, timeout
+            self.calls += 1
+            return type(
+                "Result",
+                (),
+                {
+                    "accepted": self.calls > 1,
+                    "error": "temporary failure" if self.calls == 1 else "",
+                },
+            )()
+
+    sender = Sender()
+    first_pipeline = ProactiveTurnPipeline(
+        state_store=store,
+        gateway=gateway,
+        judge=judge,
+        any_action=AnyActionGate(max_per_day=100),
+        cooldown=0.0,
+        message_sender=sender,
+    )
+    first = asyncio.run(first_pipeline.run(chat_id="target"))
+    second = asyncio.run(first_pipeline.run(chat_id="target"))
+
+    assert first.sent is False
+    assert second.sent is True
+    assert sender.calls == 2
+    assert len(judge.calls) == 2
+    store.close()

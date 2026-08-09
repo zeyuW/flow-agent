@@ -7,6 +7,7 @@ from infra.config import (
     McpConfig,
     ModelEndpointConfig,
     StorageConfig,
+    resolve_config_paths,
     ToolingConfig,
 )
 from infra.config import (
@@ -17,52 +18,49 @@ from infra.config import (
 from infra.bus.message import MessageBus
 from infra.persistence import SQLiteOutboxStore
 from infra.bus.event import EventBus
-from application.conversation.app.pipeline import PassiveTurnPipeline
-from application.conversation.app.chat_worker import ChatWorker
+from application.passive.app.pipeline import PassiveTurnPipeline
+from application.passive.app.passive_loop import PassiveLoop
 from infra.bus.types import MessageConsumer, MessageSender
 from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.capabilities.tools.mcp_manage import McpListTool
-from application.conversation.app.agent import Agent
-from application.conversation.app.delegation import DelegationPolicy
-from application.conversation.infra.context import ConversationContext
+from application.agent.app.agent import Agent
+from application.agent.domain.policies import DelegationPolicy
+from application.passive.infra.session_manager import ConversationContext
 from infra.telemetry import TraceRecorder
 from application.capabilities.llm.client import OpenAILLMClient
 from application.capabilities.llm.assembler import PromptAssembler, PromptBudget
 from application.capabilities.llm.router import LLMRouter
 from application.capabilities.behavior.persona import PersonaProfile, PersonaResolver
-from application.conversation.infra.session_store import SessionStore
-from application.conversation.infra.session_manager import SessionManager
+from application.passive.infra.session_store import SessionStore
+from application.passive.infra.session_manager import SessionManager
 from application.capabilities.tools.undo import UndoTool
 from application.memory.app.memory_runtime import (
     build_memory_runtime,
     wire_memory_events,
 )
-from application.memory.memory_engine import MemoryEngine
-from application.memory.app.maintenance import (
-    ConversationConsolidator,
-    MemoryOptimizer,
-    MemoryOptimizerLoop,
-)
+from application.memory.app.engine import MemoryEngine
+from application.memory.app.maintenance import ConversationConsolidator
+from application.memory.app.optimizer import MemoryOptimizer, MemoryOptimizerLoop
 from application.memory.app.recall_memory import (
     RecallMemoryTool,
     RecallMemoryToolAdapter,
 )
 from application.memory.app.memorize import MemorizeTool, MemorizeToolAdapter
-from application.tasks.app.runtime import BackgroundRuntime, InMemoryJobRegistry
-from application.tasks.infra.store import SQLiteJobStore
-from application.tasks.app.tools import (
-    ListBackgroundJobsTool,
-    ListBackgroundRunsTool,
-    RunBackgroundJobTool,
+from application.automation.app.runtime import AutomationRuntime, AutomationRegistry
+from application.automation.infra.store import SQLiteJobStore
+from application.capabilities.tools.automation import (
+    ListAutomationJobsTool,
+    ListAutomationRunsTool,
+    RunAutomationJobTool,
 )
-from application.scheduling.app.runtime import SchedulerService
-from application.scheduling.app.tools import (
+from application.schedule.app.runtime import SchedulerService
+from application.schedule.app.tools import (
     CancelScheduledTaskTool,
     CurrentTimeTool,
     ListScheduledTasksTool,
     ScheduleTaskTool,
 )
-from infra.workspace import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT, init_workspace
+from infra.workspace import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
 from infra.runtime import RuntimeHealth, RuntimeService, RuntimeUnit, RuntimeUnitSnapshot
 from application.delegation.app.runtime import (
     SubagentRuntime,
@@ -71,7 +69,7 @@ from application.delegation.app.runtime import (
 from application.proactive.app.runtime import build_proactive_runtime
 from application.proactive.infra.mcp_pool import RegistryMcpPool
 from application.proactive.infra.gate import ProactiveStateStore
-from application.proactive.domain.specs import (
+from application.capabilities.plugins.proactive import (
     ProactiveSourceSpecImpl,
     RegisteredProactiveSource,
 )
@@ -94,10 +92,10 @@ from application.proactive.infra.sources import (
     WebSnapshotSource,
 )
 
-"""新架构组装：MessageBus + EventBus + ChatWorker + PassiveTurnPipeline
+"""新架构组装：MessageBus + EventBus + PassiveLoop + PassiveTurnPipeline
 
 核心流程:
-  渠道 → MessageBus.publish_inbound → ChatWorker.receive → PassiveTurnPipeline.process
+  渠道 → MessageBus.publish_inbound → PassiveLoop.receive → PassiveTurnPipeline.process
     → AfterTurn: EventBus.fanout + MessageBus.dispatch_outbound → 渠道
 """
 
@@ -107,8 +105,7 @@ def create_core_components(config: AppConfig):
 
     返回组装好的组件字典，供 create_app_runtime 使用。
     """
-    init_workspace(PROJECT_ROOT)
-    cfg = config
+    cfg = resolve_config_paths(config, PROJECT_ROOT)
 
     # 会话上下文
     session_store = SessionStore(Path(cfg.storage.memory_db_path))
@@ -249,14 +246,16 @@ def create_passive_turn_pipeline(
     )
 
 
-def create_chat_worker(
+def create_passive_loop(
     message_bus: MessageBus,
     pipeline: PassiveTurnPipeline,
-) -> ChatWorker:
-    """创建被动对话工作器。"""
-    return ChatWorker(
+    event_bus: EventBus | None = None,
+) -> PassiveLoop:
+    """创建被动消息循环。"""
+    return PassiveLoop(
         consumer=cast(MessageConsumer, message_bus),
         processor=cast(Any, pipeline),
+        event_bus=event_bus,
         poll_interval_ms=100,
     )
 
@@ -265,12 +264,12 @@ def create_app_runtime(config: AppConfig):
     """组装完整应用运行时。
 
     返回:
-        (proactive_loop, background_runtime, subagent_runtime,
-         runtime_service, message_bus, event_bus, chat_worker, pipeline,
+        (proactive_loop, automation_runtime, subagent_runtime,
+         runtime_service, message_bus, event_bus, passive_loop, pipeline,
          tool_registry, memory_runtime, memory_optimizer_loop,
          mcp_registry, plugin_manager)
     """
-    cfg = config
+    cfg = resolve_config_paths(config, PROJECT_ROOT)
 
     # MCP 服务器配置
     mcp_servers = []  # 主动数据源仅连接已显式组装的 MCP
@@ -288,7 +287,7 @@ def create_app_runtime(config: AppConfig):
     message_bus = create_message_bus(cfg.storage)
     event_bus = create_event_bus()
 
-    background_registry = InMemoryJobRegistry()
+    background_registry = AutomationRegistry()
     background_store = SQLiteJobStore(WORKSPACE_LAYOUT.background_jobs_db)
 
     plugin_manager = PluginManager(
@@ -361,9 +360,10 @@ def create_app_runtime(config: AppConfig):
     )
 
     # 创建 Agent 主循环
-    chat_worker = create_chat_worker(
+    passive_loop = create_passive_loop(
         message_bus=message_bus,
         pipeline=pipeline,
+        event_bus=event_bus,
     )
 
     scheduler = SchedulerService(
@@ -372,7 +372,7 @@ def create_app_runtime(config: AppConfig):
         message_sender=cast(MessageSender, message_bus),
     )
 
-    background_runtime = BackgroundRuntime(
+    automation_runtime = AutomationRuntime(
         registry=background_registry,
         store=background_store,
         scheduler=scheduler,
@@ -383,15 +383,15 @@ def create_app_runtime(config: AppConfig):
         trace_recorder=recorder,
     )
     tool_registry.register_with_meta(
-        RunBackgroundJobTool(background_runtime),
+        RunAutomationJobTool(automation_runtime),
         risk="external-side-effect",
     )
     tool_registry.register_with_meta(
-        ListBackgroundJobsTool(background_runtime),
+        ListAutomationJobsTool(automation_runtime),
         risk="read-only",
     )
     tool_registry.register_with_meta(
-        ListBackgroundRunsTool(background_runtime),
+        ListAutomationRunsTool(automation_runtime),
         risk="read-only",
     )
     tool_registry.register_with_meta(CurrentTimeTool(), risk="read-only")
@@ -455,7 +455,11 @@ def create_app_runtime(config: AppConfig):
     # 主动链路关闭时不创建资源，也不要求配置目标用户。
     proactive_loop = None
     if cfg.proactive.enabled:
-        proactive_channel = "telegram" if cfg.channels.telegram_enabled else "cli"
+        enabled_channels = {
+            name for name, options in cfg.channels.adapters.items()
+            if bool(options.get("enabled", False))
+        }
+        proactive_channel = "telegram" if "telegram" in enabled_channels else "cli"
         proactive_loop = build_proactive_runtime(
             enabled=True,
             chat_id=proactive_target,
@@ -470,7 +474,7 @@ def create_app_runtime(config: AppConfig):
             max_per_day=cfg.proactive.max_per_day,
             min_interval=cfg.proactive.min_interval,
             max_interval=cfg.proactive.max_interval,
-            is_busy_fn=lambda: chat_worker.is_processing(proactive_target),
+            is_busy_fn=lambda: passive_loop.is_processing(proactive_target),
             cooldown=cfg.proactive.cooldown,
             drift_enabled=cfg.drift.enabled,
             drift_data_dir=cfg.drift.data_dir,
@@ -512,10 +516,10 @@ def create_app_runtime(config: AppConfig):
         proactive_target=proactive_target,
         proactive_state=proactive_state,
         pipeline=pipeline,
-        background_runtime=background_runtime,
+        automation_runtime=automation_runtime,
         mcp_registry=mcp_registry,
     )
-    background_runtime.config_watcher = ConfigWatchLoop(
+    automation_runtime.config_watcher = ConfigWatchLoop(
         ConfigWatcher(
             PROJECT_ROOT / "config.toml",
             current=cfg,
@@ -554,12 +558,12 @@ def create_app_runtime(config: AppConfig):
 
     return (
         proactive_loop,
-        background_runtime,
+        automation_runtime,
         subagent_runtime,
         runtime_service,
         message_bus,
         event_bus,
-        chat_worker,
+        passive_loop,
         pipeline,
         tool_registry,
         memory_runtime,
@@ -664,14 +668,14 @@ class _RuntimeConfigApplier:
         proactive_target: str,
         proactive_state,
         pipeline,
-        background_runtime,
+        automation_runtime,
         mcp_registry,
     ) -> None:
         self.proactive_loop = proactive_loop
         self.proactive_target = proactive_target
         self.proactive_state = proactive_state
         self.pipeline = pipeline
-        self.background_runtime = background_runtime
+        self.automation_runtime = automation_runtime
         self.mcp_registry = mcp_registry
 
     def prepare(
@@ -737,7 +741,7 @@ class _RuntimeConfigApplier:
             logging.getLogger().setLevel(level)
             self.pipeline.max_tool_steps = candidate.tooling.max_tool_steps
             self.pipeline.tool_selection_max = candidate.tooling.tool_selection_max
-            self.background_runtime.shutdown_timeout_seconds = (
+            self.automation_runtime.shutdown_timeout_seconds = (
                 candidate.jobs.timeout_seconds
             )
             self.mcp_registry.startup_timeout = candidate.mcp.startup_timeout_seconds

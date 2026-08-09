@@ -1,16 +1,17 @@
+"""基于 OneBot HTTP 协议的 QQ 渠道适配器。"""
+
+from __future__ import annotations
+
 import json
 import logging
 import threading
 import urllib.request
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Callable
-from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from interfaces.channels.base import ChannelStatus, MessageBusChannel
-from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.types import OutboundMessage
-from infra.bus.message import MessageBus
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
+from interfaces.channels.base import BaseChannelAdapter, ChannelCapabilities
 
 
 logger = logging.getLogger(__name__)
@@ -45,82 +46,70 @@ def _read_chunked(handler: BaseHTTPRequestHandler) -> bytes:
         if size <= 0:
             handler.rfile.readline()
             break
-        chunk = handler.rfile.read(size)
-        body.extend(chunk)
+        body.extend(handler.rfile.read(size))
         handler.rfile.read(2)
     return bytes(body)
 
 
-@dataclass
-class QQChannel(MessageBusChannel):
-    """QQ 渠道：基于 MessageBus 的 OneBot 兼容渠道。
+class QQChannel(BaseChannelAdapter):
+    """接收 OneBot 私聊事件并发送私聊文本。"""
 
-    入站：接收 OneBot HTTP POST → 封装 InboundMessage → publish_inbound
-    出站：通过 subscribe_outbound 注册 _on_response 回调
-          → MessageBus 后台 dispatch 任务调用回调 → POST send_private_msg
-    """
+    capabilities = ChannelCapabilities(text=True)
 
-    host: str
-    port: int
-    message_bus: MessageBus
-    api_base: str
-    access_token: str = ""
-    _server: HTTPServer | None = None
-    _thread: threading.Thread | None = None
-    _running: bool = False
-    _last_error: str | None = None
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        api_base: str,
+        access_token: str = "",
+    ) -> None:
+        super().__init__()
+        self.host = host
+        self.port = port
+        self.api_base = api_base
+        self.access_token = access_token
+        self._server: HTTPServer | None = None
+        self._thread: threading.Thread | None = None
 
     @property
     def name(self) -> str:
         return "qq"
 
-    def start(self) -> None:
-        if self._running:
-            return
-        self._last_error = None
-        # 通过 subscribe_outbound 注册 _on_response 回调
-        self.message_bus.subscribe_outbound(self.name, self._on_response)
+    def _start_platform(self) -> None:
         self._server = HTTPServer((self.host, self.port), self._make_handler())
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever,
+            name="qq-channel",
+            daemon=True,
+        )
         self._thread.start()
-        self._running = True
-        logger.info("qq channel webhook started on %s:%s (outbound subscriber registered)", self.host, self.port)
+        logger.info("OneBot QQ 渠道启动: %s:%s", self.host, self.port)
 
-    def stop(self) -> None:
-        if not self._running:
-            return
-        # 取消出站订阅
-        self.message_bus.unsubscribe_outbound(self.name, self._on_response)
+    def _stop_platform(self) -> None:
         if self._server is not None:
             self._server.shutdown()
             self._server.server_close()
         self._server = None
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout)
         self._thread = None
-        self._running = False
-        logger.info("qq channel stopped")
 
-    def status(self) -> ChannelStatus:
-        return ChannelStatus(running=self._running, last_error=self._last_error)
+    def send_text(self, *, recipient_id: str, text: str) -> ChannelDeliveryResult:
+        self._send_private_msg(int(recipient_id), text)
+        return ChannelDeliveryResult(delivered=True)
 
-    def _on_response(self, message: OutboundMessage) -> None:
-        """收到出站回复时的回调函数。
-
-        由 MessageBus 后台 dispatch_outbound 任务调用。
-        负责调用 QQ API 将消息发送给用户。
-        """
-        qq_user_id = int(message.metadata.get("qq_user_id", 0))
-        if qq_user_id <= 0:
-            logger.warning("qq outbound: no qq_user_id in metadata, skipping")
-            return
-        try:
-            self._send_private_msg(user_id=qq_user_id, message=message.text)
-        except Exception:
-            logger.exception("qq outbound send failed")
-            raise  # 让 MessageBus 的容错重试机制处理
-
-    def on_outbound(self, message: OutboundMessage) -> None:
-        """收到出站回复（兼容旧接口，转发到 _on_response）。"""
-        self._on_response(message)
+    def _deliver_outbound(self, message: OutboundMessage) -> ChannelDeliveryResult:
+        target = message.chat_id or message.session_id
+        if not target:
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error="QQ 出站消息缺少 chat_id",
+            )
+        self._send_private_msg(int(target), message.text)
+        return ChannelDeliveryResult(delivered=True)
 
     def _make_handler(self) -> Callable[..., BaseHTTPRequestHandler]:
         parent = self
@@ -129,8 +118,7 @@ class QQChannel(MessageBusChannel):
             def do_POST(self) -> None:
                 try:
                     if self.path != "/onebot/event":
-                        self.send_response(404)
-                        self.end_headers()
+                        _ok(self, {"ok": False, "error": "not_found"}, status=404)
                         return
                     event = _read_json(self)
                     if str(event.get("post_type") or "") != "message":
@@ -144,50 +132,55 @@ class QQChannel(MessageBusChannel):
                     if user_id <= 0 or not text:
                         _ok(self, {"ok": True, "ignored": "invalid_payload"})
                         return
-                    inbound = InboundMessage(parent.name, f"qq_{user_id}", text)
-                    inbound.metadata["qq_user_id"] = user_id
-                    # 通过 MessageBus 发布入站消息
-                    parent.message_bus.publish_inbound(inbound)
+                    parent.publish_inbound(
+                        session_id=f"qq:{user_id}",
+                        chat_id=str(user_id),
+                        sender_id=str(user_id),
+                        text=text,
+                        metadata={"provider_user_id": user_id},
+                    )
                     _ok(self, {"ok": True, "queued": True})
                 except Exception as exc:
                     parent._last_error = str(exc)
-                    logger.exception("qq channel request failed")
-                    raw = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
-                    self.send_response(500)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.send_header("Content-Length", str(len(raw)))
-                    self.end_headers()
-                    self.wfile.write(raw)
+                    logger.exception("OneBot QQ 请求失败")
+                    _ok(self, {"ok": False, "error": str(exc)}, status=500)
 
             def log_message(self, format: str, *args) -> None:
+                del format, args
                 return
 
         return Handler
 
     def _send_private_msg(self, user_id: int, message: str) -> None:
-        payload = json.dumps({"user_id": user_id, "message": message}, ensure_ascii=False).encode("utf-8")
+        payload = json.dumps(
+            {"user_id": user_id, "message": message}, ensure_ascii=False
+        ).encode("utf-8")
         url = f"{self.api_base.rstrip('/')}/send_private_msg"
         headers = {"Content-Type": "application/json"}
         if self.access_token:
             headers["Authorization"] = f"Bearer {self.access_token}"
             headers["X-Access-Token"] = self.access_token
             url = _with_access_token(url, self.access_token)
-        req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            resp.read()
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        with urllib.request.urlopen(request, timeout=3) as response:
+            response.read()
 
 
 def _with_access_token(url: str, token: str) -> str:
     parsed = urlparse(url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     query.setdefault("access_token", token)
-    new_query = urlencode(query)
-    return urlunparse(parsed._replace(query=new_query))
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
-def _ok(handler: BaseHTTPRequestHandler, payload: dict[str, object]) -> None:
+def _ok(
+    handler: BaseHTTPRequestHandler,
+    payload: dict[str, object],
+    *,
+    status: int = 200,
+) -> None:
     raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    handler.send_response(200)
+    handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(raw)))
     handler.end_headers()

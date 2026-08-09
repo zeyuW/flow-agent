@@ -7,15 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from application.memory.infra.embedder import OpenAIEmbedder
-from application.memory.markdown_store import MarkdownStore
-from application.memory.memory_engine import MemoryEngine
+from application.memory.infra.markdown_store import MarkdownStore
+from application.memory.app.engine import MemoryEngine
 from application.memory.infra.retriever import DualChannelRetriever
 from application.memory.app.memorizer import Memorizer
 from application.memory.app.post_response import PostResponseMemoryWorker
 from application.memory.app.supersede import SupersedeDetector
 from application.memory.infra.vector_store import MemoryStore
 from application.memory.app.query_rewriter import QueryRewriter
-from application.memory.domain.dedup_decider import DedupDecider
+from application.memory.app.dedup import DedupDecider
 
 logger = logging.getLogger(__name__)
 

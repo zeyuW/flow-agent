@@ -5,21 +5,24 @@ import json
 import logging
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from application.delegation.app.models import (
     AgentBackgroundJobSpec,
     JobRunResult,
-    RunningSubagentJob,
-    SpawnCompletionEvent,
-    SpawnCompletionItem,
-    SpawnDecision,
     SubagentSpec,
 )
 from application.delegation.app.runner import AgentBackgroundJobRunner
 from application.delegation.app.profiles import build_spawn_spec, PROFILE_RESEARCH
+from application.delegation.domain.models import (
+    RunningSubagentJob,
+    SpawnCompletionEvent,
+    SpawnCompletionItem,
+    SpawnDecision,
+    SubagentTask,
+)
+from application.delegation.infra.store import JsonlTaskStore
 
 logger = logging.getLogger(__name__)
 _SPAWN_MAX_ITERATIONS = 30
@@ -32,11 +35,11 @@ class SubagentManager:
     def __init__(
         self,
         *,
-        tasks_path: Path,
+        task_store: JsonlTaskStore,
         message_bus: Any = None,
         llm_client: Any = None,
     ) -> None:
-        self.tasks_path = tasks_path
+        self._task_store = task_store
         self._bus = message_bus
         self._llm = llm_client
         self._persist_lock = threading.Lock()
@@ -51,7 +54,6 @@ class SubagentManager:
         self.max_concurrency = 2
 
     def create_task(self, kind: str, payload: dict, *, parent_trace_id: str | None = None) -> Any:
-        from application.delegation.app.models import SubagentTask
         task = SubagentTask(
             task_id=uuid4().hex[:12],
             kind=kind,
@@ -81,16 +83,7 @@ class SubagentManager:
         threading.Thread(target=_run, daemon=True).start()
 
     def list_recent_tasks(self, limit: int = 10) -> list:
-        if not self.tasks_path.exists():
-            return []
-        lines = self.tasks_path.read_text(encoding="utf-8").splitlines()
-        rows = []
-        for line in lines[-max(1, limit):]:
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-        return rows
+        return self._task_store.list_recent(limit)
 
     def _persist(self, task) -> None:
         try:
@@ -112,10 +105,7 @@ class SubagentManager:
     def _append_record(self, record: dict[str, Any]) -> None:
         """以线程安全方式追加一条子代理运行记录。"""
 
-        with self._persist_lock:
-            self.tasks_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.tasks_path.open("a", encoding="utf-8") as file:
-                file.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._task_store.append(record)
 
     def _trace(self, job_id: str, phase: str, payload: dict[str, Any]) -> None:
         """记录后台子代理状态，追踪失败不得影响任务本身。"""
@@ -273,7 +263,7 @@ class SubagentManager:
             origin_channel=origin_channel,
             origin_chat_id=origin_chat_id,
             origin_session_id=origin_session_id or origin_chat_id,
-            task_dir=str(self.tasks_path.parent),
+            task_dir=str(self._task_store.path.parent),
             retry_count=retry_count,
         )
 
@@ -411,8 +401,8 @@ class SubagentManager:
             decision=decision,
         )
 
-        # 完成事件重新进入 ChatWorker，由主代理组织最终用户回复。
-        from application.conversation.domain.channel_message import InboundMessage
+        # 完成事件重新进入 AgentLoop，由主代理组织最终用户回复。
+        from infra.bus.types import InboundMessage
         msg = InboundMessage(
             channel=origin_channel,
             session_id=origin_session_id or origin_chat_id,
@@ -423,13 +413,9 @@ class SubagentManager:
                 "status": status,
                 "result": result[:_COMPLETION_RESULT_MAX_CHARS],
             }, ensure_ascii=False),
+            chat_id=origin_chat_id,
             metadata={
                 "background_completion": True,
-                **(
-                    {"telegram_chat_id": origin_chat_id}
-                    if origin_channel == "telegram"
-                    else {}
-                ),
             },
         )
         self._bus.publish_inbound(msg)

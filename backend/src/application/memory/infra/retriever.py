@@ -8,23 +8,13 @@
 
 import logging
 import math
-from dataclasses import dataclass, field
 from typing import Protocol
 
 from application.memory.infra.embedder import Embedder
-from application.memory.infra.vector_store import MemoryItem, MemoryStore
+from application.memory.domain.models import MemoryItem, RetrievalHit
+from application.memory.infra.vector_store import MemoryStore
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class RetrievalHit:
-    """单条检索命中。"""
-
-    item: MemoryItem
-    score: float  # RRF 融合分数
-    vector_score: float = 0.0  # 向量通道原始分数
-    keyword_score: float = 0.0  # 关键词通道原始分数
 
 
 class MemoryRetrieverProtocol(Protocol):
@@ -219,4 +209,4 @@ def _tokenize(text: str) -> set[str]:
         # 对中文做字符级补充
         if all(0x4E00 <= ord(ch) <= 0x9FFF for ch in t_lower) and len(t_lower) > 1:
             tokens.update(t_lower)
-    return tokens
+        return tokens

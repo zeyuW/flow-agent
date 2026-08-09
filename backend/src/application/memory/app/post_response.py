@@ -9,7 +9,7 @@
 import logging
 from dataclasses import dataclass, field
 
-from application.memory.markdown_store import MarkdownStore
+from application.memory.infra.markdown_store import MarkdownStore
 from application.memory.app.memorizer import Memorizer
 from application.memory.app.profile_extractor import ExtractedProfileItem, ProfileExtractor
 from application.memory.app.supersede import SupersedeDetector

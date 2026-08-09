@@ -4,9 +4,9 @@ import asyncio
 from pathlib import Path
 
 from interfaces.channels.telegram import TelegramChannel
-from application.conversation.app.agent import Agent
-from application.conversation.app.pipeline import PassiveTurnPipeline
-from application.conversation.app.phase import TurnFlow
+from application.agent.app.agent import Agent
+from application.passive.app.pipeline import PassiveTurnPipeline
+from application.passive.app.phase import TurnFlow
 from application.capabilities.llm.client import LLMResult
 from application.capabilities.llm.client import LLMToolCall
 from application.capabilities.skills.loader import SkillLoader
@@ -117,8 +117,9 @@ def test_telegram_send_image_uploads_local_photo(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(channel, "_post_photo", upload)
 
-    channel.send_image(chat_id="42", path=str(image))
+    result = channel.send_image(recipient_id="42", path=str(image))
 
+    assert result.delivered is True
     assert calls == [(42, image, "")]
 
 
@@ -132,8 +133,12 @@ def test_telegram_send_image_passes_public_url_to_send_photo(monkeypatch):
 
     monkeypatch.setattr(channel, "_post_photo_url", send_url)
 
-    channel.send_image(chat_id="42", path="https://images.example.test/cat.png")
+    result = channel.send_image(
+        recipient_id="42",
+        path="https://images.example.test/cat.png",
+    )
 
+    assert result.delivered is True
     assert calls == [(42, "https://images.example.test/cat.png", "")]
 
 
@@ -165,7 +170,7 @@ def test_passive_message_push_uses_current_telegram_chat_identity():
         session_id="telegram:42",
         channel="telegram",
         trace_id="trace",
-        inbound_metadata={"telegram_chat_id": 42},
+        chat_id="42",
     )
     tool_call = LLMToolCall(
         id="call",

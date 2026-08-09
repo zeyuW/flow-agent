@@ -2,11 +2,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from application.memory.app.maintenance import ConversationConsolidator, MemoryOptimizer
-from application.memory.markdown_store import MarkdownStore
+from application.memory.infra.markdown_store import MarkdownStore
 from application.memory.app.memorizer import Memorizer
 from application.memory.infra.vector_store import MemoryStore
-from application.conversation.infra.session_manager import SessionManager
-from application.conversation.infra.session_store import SessionStore
+from application.passive.infra.session_manager import SessionManager
+from application.passive.infra.session_store import SessionStore
 
 
 class FixedEmbedder:

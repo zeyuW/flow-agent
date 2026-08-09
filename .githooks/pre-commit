@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 export PYTHONPATH="${ROOT_DIR}/backend/src${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
-python -m compileall -q backend/src
-git diff --check
-python -m pytest -q backend/tests
+git diff --cached --check
+uv run --project backend python -m compileall -q backend/src
+uv run --project backend python -m pytest -q backend/tests

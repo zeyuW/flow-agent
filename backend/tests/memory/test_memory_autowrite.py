@@ -1,12 +1,12 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from application.conversation.app.pipeline import PassiveTurnPipeline
-from application.conversation.app.phase import TurnFlow
+from application.passive.app.pipeline import PassiveTurnPipeline
+from application.passive.app.phase import TurnFlow
 from application.capabilities.tools.guard import ToolGuard
 from application.capabilities.llm.client import LLMResult, LLMToolCall
-from application.memory.markdown_store import MarkdownStore
-from application.memory.memory_engine import MemoryEngine
+from application.memory.infra.markdown_store import MarkdownStore
+from application.memory.app.engine import MemoryEngine
 from application.memory.app.memorizer import Memorizer
 from application.memory.app.post_response import PostResponseContext, PostResponseMemoryWorker
 from application.memory.infra.vector_store import MemoryStore

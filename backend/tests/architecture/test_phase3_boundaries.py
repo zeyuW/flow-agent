@@ -1,6 +1,6 @@
 import asyncio
 
-from interfaces.channels.models import ChannelDeliveryResult
+from infra.bus.types import ChannelDeliveryResult
 from infra.bus.message import MessageBus, OutboundDispatch
 from infra.persistence import SQLiteOutboxStore
 from application.proactive.app.deliver import deliver_message
@@ -72,10 +72,11 @@ def test_outbox_uses_shared_sqlite_infrastructure(tmp_path):
 
 def test_subagent_completion_is_idempotent(tmp_path):
     from infra.bus.message import MessageBus
+    from application.delegation.infra.store import JsonlTaskStore
 
     bus = MessageBus()
     manager = SubagentManager(
-        tasks_path=tmp_path / "tasks.jsonl",
+        task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"),
         message_bus=bus,
     )
 
@@ -102,7 +103,7 @@ def test_subagent_completion_is_idempotent(tmp_path):
 
 
 def test_agent_loop_stop_cancels_hanging_task():
-    from application.conversation.app.agent_loop import AgentLoop
+    from application.agent.app.loop import AgentLoop
 
     class Bus:
         pass

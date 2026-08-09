@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,7 +195,11 @@ class WebSnapshotSource:
                     title=snapshot.stem,
                     content=text,
                     summary=text[:160],
-                    dedup_key=f"web:{snapshot.name}:{hash(text)}",
+                        dedup_key=(
+                            "web:"
+                            f"{snapshot.name}:"
+                            f"{hashlib.sha256(text.encode('utf-8')).hexdigest()[:24]}"
+                        ),
                     priority_hint=0.45,
                     fetched_at=datetime.now(tz=timezone.utc),
                 )

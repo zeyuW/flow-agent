@@ -36,6 +36,32 @@ def test_bootstrap_does_not_search_parent_directories(tmp_path: Path):
         load_application_config(backend_root)
 
 
+def test_bootstrap_anchors_runtime_paths_to_project_root(tmp_path: Path):
+    (tmp_path / "config.toml").write_text(
+        """
+[llm.main]
+model = "main-model"
+api_key = "secret"
+
+[storage]
+memory_db_path = ".flow/data/custom-memory.db"
+
+[proactive]
+state_path = ".flow/data/custom-proactive.db"
+""",
+        encoding="utf-8",
+    )
+
+    config = load_application_config(tmp_path)
+
+    assert config.storage.memory_db_path == str(
+        tmp_path / ".flow/data/custom-memory.db"
+    )
+    assert config.proactive.state_path == str(
+        tmp_path / ".flow/data/custom-proactive.db"
+    )
+
+
 def test_runtime_composition_requires_explicit_config():
     core_parameter = signature(create_core_components).parameters["config"]
     runtime_parameter = signature(create_app_runtime).parameters["config"]
@@ -59,7 +85,7 @@ def test_runtime_config_applier_commits_only_reloadable_values():
         proactive_target="",
         proactive_state=object(),
         pipeline=pipeline,
-        background_runtime=background,
+        automation_runtime=background,
         mcp_registry=mcp,
     )
     current = app_config()
@@ -84,7 +110,7 @@ def test_runtime_config_applier_rejects_restart_required_changes():
         proactive_target="",
         proactive_state=object(),
         pipeline=SimpleNamespace(max_tool_steps=5, tool_selection_max=8),
-        background_runtime=SimpleNamespace(shutdown_timeout_seconds=30.0),
+        automation_runtime=SimpleNamespace(shutdown_timeout_seconds=30.0),
         mcp_registry=SimpleNamespace(startup_timeout=30.0, call_timeout=60.0),
     )
     current = app_config()

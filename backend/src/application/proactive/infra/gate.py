@@ -18,6 +18,7 @@ class ProactiveStateStore:
     db_path: str | Path | None = None
     _last_sent: float = 0.0
     _delivery_keys: dict[str, float] = field(default_factory=dict)
+    _candidate_keys: dict[str, float] = field(default_factory=dict)
     _daily_count: int = 0
     _day_start: float = 0.0
     _drift_last_at: float = 0.0
@@ -52,6 +53,9 @@ class ProactiveStateStore:
                 'CREATE TABLE IF NOT EXISTS delivery_keys (delivery_key TEXT PRIMARY KEY, delivered_at REAL NOT NULL)'
             )
             self._db.execute(
+                'CREATE TABLE IF NOT EXISTS candidate_keys (candidate_key TEXT PRIMARY KEY, observed_at REAL NOT NULL)'
+            )
+            self._db.execute(
                 'CREATE TABLE IF NOT EXISTS hawkes_events (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp REAL NOT NULL, event_type TEXT NOT NULL, weight REAL NOT NULL)'
             )
             self._db.execute(
@@ -81,6 +85,9 @@ class ProactiveStateStore:
             key_rows = self._db.execute(
                 'SELECT delivery_key, delivered_at FROM delivery_keys'
             ).fetchall()
+            candidate_rows = self._db.execute(
+                'SELECT candidate_key, observed_at FROM candidate_keys'
+            ).fetchall()
             policy_rows = self._db.execute(
                 'SELECT chat_id, enabled, idle_threshold_seconds, topics_json '
                 'FROM proactive_policies'
@@ -91,6 +98,9 @@ class ProactiveStateStore:
         if row is not None:
             self._last_sent, self._daily_count, self._day_start, self._drift_last_at = row
         self._delivery_keys = {str(key): float(timestamp) for key, timestamp in key_rows}
+        self._candidate_keys = {
+            str(key): float(timestamp) for key, timestamp in candidate_rows
+        }
         policies: dict[str, ProactivePolicy] = {}
         for chat_id, enabled, threshold, topics_json in policy_rows:
             topics = json.loads(str(topics_json))
@@ -156,6 +166,37 @@ class ProactiveStateStore:
             return False
         timestamp = self._delivery_keys.get(delivery_key, 0.0)
         return timestamp > 0 and (time.time() - timestamp) < window
+
+    def has_candidate_baseline(self) -> bool:
+        """判断是否已经建立过主动候选基线。"""
+
+        with self._lock:
+            return bool(self._candidate_keys)
+
+    def was_candidate_observed(self, candidate_key: str) -> bool:
+        """判断候选是否在历史主动检查中被观察过。"""
+
+        if not candidate_key:
+            return False
+        with self._lock:
+            return candidate_key in self._candidate_keys
+
+    def mark_candidates_observed(self, *candidate_keys: str) -> None:
+        """持久化已完成评估或启动基线记录的候选指纹。"""
+
+        keys = tuple(dict.fromkeys(key for key in candidate_keys if key))
+        if not keys:
+            return
+        now = time.time()
+        with self._lock:
+            self._candidate_keys.update({key: now for key in keys})
+            if self._db is not None:
+                self._db.executemany(
+                    'INSERT OR REPLACE INTO candidate_keys '
+                    '(candidate_key, observed_at) VALUES (?, ?)',
+                    [(key, now) for key in keys],
+                )
+                self._db.commit()
 
     @property
     def daily_count(self) -> int:

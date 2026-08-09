@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from application.capabilities.plugins.manager import PluginManager
-from bootstrap.workspace import (
+from infra.workspace import (
     detect_workspace,
     init_workspace,
     persist_workspace_profile,
@@ -15,8 +15,6 @@ def test_workspace_init_and_detect(tmp_path: Path):
     assert layout.marker_file.exists()
     assert layout.memory_dir.is_dir()
     assert layout.memory_journal_dir.is_dir()
-    assert (layout.memory_dir / "SELF.md").exists()
-    assert (layout.memory_dir / "PENDING.md").exists()
     assert layout.drift_skills_dir.is_dir()
     assert layout.plugin_data_dir.is_dir()
     assert layout.rss_sources_dir.is_dir()

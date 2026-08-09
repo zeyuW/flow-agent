@@ -8,6 +8,7 @@ import time
 from infra.bus.message import MessageBus
 from application.delegation.app.manager import SubagentManager
 from application.delegation.app.spawn import SpawnTool
+from application.delegation.infra.store import JsonlTaskStore
 
 
 class AllowPolicy:
@@ -55,7 +56,7 @@ def test_spawn_tool_passes_telegram_context_inside_running_loop():
 
 
 def test_background_spawn_survives_submission_return(tmp_path, monkeypatch):
-    manager = SubagentManager(tasks_path=tmp_path / "tasks.jsonl", llm_client=object())
+    manager = SubagentManager(task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"), llm_client=object())
     completed = threading.Event()
 
     async def fake_run_subagent(**kwargs):
@@ -92,7 +93,7 @@ def test_background_spawn_survives_submission_return(tmp_path, monkeypatch):
 def test_background_spawn_notifies_original_telegram_chat(tmp_path):
     bus = MessageBus()
     manager = SubagentManager(
-        tasks_path=tmp_path / "tasks.jsonl",
+        task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"),
         message_bus=bus,
         llm_client=ImmediateLLM(),
     )
@@ -117,7 +118,7 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
         assert message is not None
         assert message.channel == "telegram"
         assert message.session_id == "8706327858"
-        assert message.metadata["telegram_chat_id"] == "8706327858"
+        assert message.chat_id == "8706327858"
         payload = json.loads(message.text)
         assert payload["type"] == "spawn_completion"
         assert payload["status"] == "completed"
@@ -129,7 +130,7 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
 def test_background_completion_keeps_long_result_and_chat_metadata(tmp_path):
     bus = MessageBus()
     manager = SubagentManager(
-        tasks_path=tmp_path / "tasks.jsonl",
+        task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"),
         message_bus=bus,
         llm_client=ImmediateLLM(),
     )
@@ -150,5 +151,5 @@ def test_background_completion_keeps_long_result_and_chat_metadata(tmp_path):
 
     message = bus.consume_inbound()
     assert message is not None
-    assert message.metadata["telegram_chat_id"] == "8706327858"
+    assert message.chat_id == "8706327858"
     assert json.loads(message.text)["result"] == long_result

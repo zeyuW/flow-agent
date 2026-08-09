@@ -4,8 +4,8 @@ import json
 import threading
 import time
 
-from application.conversation.app.agent import Agent
-from application.conversation.infra.context import ConversationContext
+from application.agent.app.agent import Agent
+from application.passive.infra.session_manager import ConversationContext
 from infra.bus.message import (
     MessageBus,
     InboundQueue,
@@ -14,10 +14,13 @@ from infra.bus.message import (
     BusOutboundPort,
 )
 from infra.bus.event import EventBus, Event, TurnCommitted
-from application.conversation.app.pipeline import PassiveTurnPipeline
-from application.conversation.app.agent_loop import AgentLoop, ProcessingState
-from application.conversation.app.phase import PhaseModule, TurnFlow
-from interfaces.channels.models import InboundMessage, OutboundMessage
+from application.passive.app.pipeline import PassiveTurnPipeline
+from application.agent.app.loop import AgentLoop
+from application.passive.app.passive_loop import PassiveLoop
+from application.passive.app.phase import PhaseModule, TurnFlow
+from infra.bus.types import InboundMessage
+from application.passive.domain.messages import IncomingMessage
+from infra.bus.types import OutboundMessage
 from application.capabilities.llm.client import LLMResult, LLMToolCall
 from application.capabilities.tools.base import ToolResult
 from application.capabilities.tools.registry import ToolRegistry
@@ -246,29 +249,6 @@ def test_turn_committed_event():
     assert len(event.tool_trace) == 1
 
 
-# ── ProcessingState 测试 ─────────────────────────────────
-
-def test_processing_state_tracks_sessions():
-    """测试 ProcessingState 正确追踪会话处理状态。"""
-    import asyncio
-
-    async def dummy():
-        await asyncio.sleep(0.01)
-
-    async def verify() -> None:
-        state = ProcessingState()
-        assert not state.is_processing("s1")
-        task = asyncio.create_task(dummy())
-        state.set_processing("s1", task)
-        assert state.is_processing("s1")
-        assert not state.is_processing("s2")
-        state.clear_processing("s1")
-        task.cancel()
-        await asyncio.gather(task, return_exceptions=True)
-
-    asyncio.run(verify())
-
-
 # ── TurnFlow 测试 ────────────────────────────────────────
 
 def test_turnflow_fields():
@@ -314,7 +294,7 @@ def test_pipeline_runs_six_phases():
         message_bus=bus,
         event_bus=eb,
     )
-    inbound = InboundMessage(channel="cli", session_id="s1", text="test six phases")
+    inbound = IncomingMessage(channel="cli", conversation_id="s1", text="test six phases")
     pipeline.process(inbound)
 
     # 验证事件已广播
@@ -351,7 +331,7 @@ def test_pipeline_outbound_port():
         event_bus=eb,
     )
     # 入站 + 处理
-    inbound = InboundMessage(channel="cli", session_id="s1", text="via port")
+    inbound = IncomingMessage(channel="cli", conversation_id="s1", text="via port")
     pipeline.process(inbound)
 
     # 验证出站队列有消息
@@ -378,7 +358,7 @@ def test_pipeline_errors_gracefully():
         event_bus=eb,
     )
 
-    inbound = InboundMessage(channel="cli", session_id="s1", text="crash test")
+    inbound = IncomingMessage(channel="cli", conversation_id="s1", text="crash test")
     pipeline.process(inbound)
 
     # 错误回复已投递
@@ -412,7 +392,7 @@ def test_agent_loop_run_once():
         message_bus=bus,
         event_bus=eb,
     )
-    loop = AgentLoop(message_bus=bus, pipeline=pipeline, event_bus=eb)
+    loop = PassiveLoop(consumer=bus, processor=pipeline, event_bus=eb)
 
     bus.publish_inbound(InboundMessage(channel="cli", session_id="s1", text="run once"))
     assert loop.run_once() is True
@@ -429,10 +409,13 @@ def test_agent_loop_run_once():
 def test_cli_channel_publishes_to_message_bus():
     """测试 CLI 渠道通过 MessageBus 发布入站消息。"""
     from interfaces.channels.cli import CLIChannel
+    from interfaces.channels.base import ChannelContext
+    from infra.bus.event import EventBus
+    import logging
 
     bus = MessageBus()
-    cli = CLIChannel(message_bus=bus, default_session_id="test")
-    cli.start()
+    cli = CLIChannel(default_session_id="test")
+    cli.start(ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test")))
 
     cli.handle_line("hello from cli")
 
@@ -446,10 +429,13 @@ def test_cli_channel_publishes_to_message_bus():
 def test_cli_channel_receives_outbound_via_subscription():
     """测试 CLI 渠道通过订阅回调接收出站消息。"""
     from interfaces.channels.cli import CLIChannel
+    from interfaces.channels.base import ChannelContext
+    from infra.bus.event import EventBus
+    import logging
 
     bus = MessageBus()
-    cli = CLIChannel(message_bus=bus)
-    cli.start()
+    cli = CLIChannel()
+    cli.start(ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test")))
 
     # 模拟 MessageBus 分发（通过订阅回调）
     msg = OutboundMessage(channel="cli", session_id="test", text="response text")
@@ -495,7 +481,7 @@ def test_full_message_bus_architecture_flow():
         message_bus=bus,
         event_bus=eb,
     )
-    loop = AgentLoop(message_bus=bus, pipeline=pipeline, event_bus=eb)
+    loop = PassiveLoop(consumer=bus, processor=pipeline, event_bus=eb)
 
     # 模拟渠道发布入站消息
     bus.publish_inbound(InboundMessage(channel="cli", session_id="full", text="end to end"))

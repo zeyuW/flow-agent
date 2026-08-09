@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from application.memory.markdown_store import MarkdownStore
+from application.memory.infra.markdown_store import MarkdownStore
 from application.memory.app.memorizer import Memorizer
 from application.capabilities.tools.base import Tool, ToolResult
 

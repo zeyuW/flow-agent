@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from application.memory.markdown_store import MarkdownStore
+from application.memory.ports import MemoryPromptStore, MemoryQueryService
 from application.proactive.domain.models import DataItem, GatewayResult, JudgeResult
 
 logger = logging.getLogger(__name__)
@@ -46,8 +46,8 @@ class JudgeLoop:
     def __init__(
         self,
         llm_client,
-        memory_engine=None,
-        markdown_store: MarkdownStore | None = None,
+        memory_engine: MemoryQueryService | None = None,
+        markdown_store: MemoryPromptStore | None = None,
         max_steps: int = 12,
     ) -> None:
         self._llm = llm_client

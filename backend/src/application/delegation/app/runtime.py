@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from application.delegation.app.manager import SubagentManager
+from application.delegation.infra.store import JsonlTaskStore
 
 
 @dataclass(slots=True)
@@ -22,7 +23,7 @@ def create_subagent_runtime(
 ) -> SubagentRuntime:
     task_path = Path(tasks_file) if tasks_file else (data_dir / "subagent_tasks.jsonl")
     manager = SubagentManager(
-        tasks_path=task_path,
+        task_store=JsonlTaskStore(task_path),
         message_bus=message_bus,
         llm_client=llm_client,
     )

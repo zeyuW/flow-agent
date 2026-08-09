@@ -1,5 +1,5 @@
 from application.capabilities.behavior.persona import PersonaProfile, PersonaResolver
-from application.conversation.app.delegation import DelegationPolicy
+from application.agent.domain.policies import DelegationPolicy
 from application.capabilities.llm.assembler import PromptAssembler, PromptBudget
 from application.capabilities.llm.router import LLMRouter
 

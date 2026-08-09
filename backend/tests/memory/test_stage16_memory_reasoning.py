@@ -5,6 +5,7 @@ from application.memory.app.profile_extractor import ProfileExtractor
 from application.proactive.app.judge_loop import JudgeLoop
 from application.proactive.domain.models import DataItem
 from application.delegation.app.manager import SubagentManager
+from application.delegation.infra.store import JsonlTaskStore
 
 
 def test_profile_extractor():
@@ -35,7 +36,7 @@ def test_proactive_judge_decision():
 
 
 def test_subagent_parent_child_trace_and_poll(tmp_path: Path):
-    mgr = SubagentManager(tasks_path=tmp_path / "tasks.jsonl")
+    mgr = SubagentManager(task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"))
     task = mgr.create_task("code", {"x": 1}, parent_trace_id="trace-parent-1")
     mgr.run_task(task, executor=lambda t: {"ok": True, "kind": t.kind})
     time.sleep(0.05)

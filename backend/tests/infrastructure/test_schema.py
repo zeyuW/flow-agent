@@ -97,16 +97,17 @@ def complete_config() -> dict[str, object]:
             "max_steps": 8,
         },
         "channels": {
-            "dashboard_enabled": True,
-            "dashboard_host": "0.0.0.0",
-            "dashboard_port": 9901,
-            "http_enabled": True,
-            "http_host": "0.0.0.0",
-            "http_port": 8788,
-            "telegram_enabled": True,
-            "telegram_bot_token": "bot-secret",
-            "telegram_allowed_users": "10001,10002",
-            "telegram_allowed_groups": "20001,20002",
+            "http": {
+                "enabled": True,
+                "host": "0.0.0.0",
+                "port": 8788,
+            },
+            "telegram": {
+                "enabled": True,
+                "bot_token": "bot-secret",
+                "allowed_users": ["10001", "10002"],
+                "allowed_groups": [20001, 20002],
+            },
         },
         "jobs": {
             "max_async_queue": 20,
@@ -143,10 +144,10 @@ def test_config_is_frozen_and_rejects_unknown_fields():
 
 def test_enabled_telegram_requires_credentials():
     raw = minimal_config()
-    raw["channels"] = {"telegram_enabled": True}
+    raw["channels"] = {"telegram": {"enabled": True}}
 
-    with pytest.raises(ValidationError, match="Telegram"):
-        AppConfig.model_validate(raw)
+    config = AppConfig.model_validate(raw)
+    assert config.channels.adapters["telegram"]["enabled"] is True
 
 
 def test_enabled_proactive_requires_target_and_ordered_intervals():
@@ -173,6 +174,6 @@ def test_complete_product_configuration_is_retained():
     assert config.llm.vision is not None
     assert config.memory.optimizer_interval_seconds == 120
     assert config.proactive.interest_topics == ("Python", "Agent")
-    assert config.channels.telegram_allowed_groups == "20001,20002"
+    assert config.channels.adapters["telegram"]["allowed_groups"] == [20001, 20002]
     assert config.prompt_budget.tool_trace_chars == 1200
     assert config.delegation_policy.enabled is False

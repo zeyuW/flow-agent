@@ -2,6 +2,8 @@
 
 import threading
 import time
+import asyncio
+from types import SimpleNamespace
 
 
 def test_wait_blocks_until_service_stop_event_is_set():
@@ -58,3 +60,171 @@ def test_main_calls_app_lifecycle_in_order(monkeypatch):
     entrypoint.main()
 
     assert calls == ["init", "start", "wait", "stop"]
+
+
+def test_stop_continues_cleanup_when_one_resource_fails():
+    """单个资源停止失败时，其他资源和线程仍必须继续回收。"""
+
+    from bootstrap.service_app import ServiceApp
+
+    app = ServiceApp.__new__(ServiceApp)
+    app._state = "running"
+    app._lifecycle_lock = threading.RLock()
+    app._stop_event = threading.Event()
+    app._lock_owned = False
+    app._threads = []
+    app._dispatch_loop_holder = {}
+    calls: list[str] = []
+
+    class FailingChannels:
+        def stop_all(self):
+            calls.append("channels.stop")
+            raise RuntimeError("telegram stop failed")
+
+        def join_all(self, timeout=None):
+            del timeout
+            calls.append("channels.join")
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        def stop(self):
+            calls.append(self.name)
+
+        def request_stop(self):
+            calls.append(self.name)
+
+        def stop_background(self):
+            calls.append(self.name)
+
+        def shutdown(self):
+            calls.append(self.name)
+
+        def stop_all(self):
+            calls.append(self.name)
+
+    class PluginManager:
+        async def shutdown_all(self):
+            calls.append("plugins.stop")
+
+    app._channel_service = FailingChannels()
+    app._proactive_runtime = Resource("proactive.stop")
+    app._memory_optimizer_loop = Resource("memory.stop")
+    app._passive_loop = Resource("passive.stop")
+    app._automation_runtime = Resource("automation.stop")
+    app._subagent_runtime = SimpleNamespace(manager=Resource("subagent.stop"))
+    app._plugin_manager = PluginManager()
+    app._mcp_registry = Resource("mcp.stop")
+    app._memory_runtime = SimpleNamespace(event_executor=None)
+    app._message_bus = None
+
+    app.stop()
+
+    assert app.state == "stopped"
+    assert calls == [
+        "channels.stop",
+        "proactive.stop",
+        "memory.stop",
+        "passive.stop",
+        "automation.stop",
+        "subagent.stop",
+        "plugins.stop",
+        "mcp.stop",
+        "channels.join",
+    ]
+
+
+def test_stop_dispatch_waits_for_dispatch_loop_to_be_ready():
+    """停止竞态中应等待分发事件循环就绪后再提交停止协程。"""
+
+    from bootstrap.service_app import ServiceApp
+
+    app = ServiceApp.__new__(ServiceApp)
+    app._dispatch_loop_holder = {}
+    app._dispatch_ready = threading.Event()
+    calls: list[str] = []
+    release = threading.Event()
+    loop_ready = threading.Event()
+
+    class MessageBus:
+        async def stop_dispatch_task(self):
+            calls.append("dispatch.stop")
+            asyncio.get_running_loop().call_soon(asyncio.get_running_loop().stop)
+
+    app._message_bus = MessageBus()
+
+    def dispatch_thread() -> None:
+        release.wait(timeout=1.0)
+        loop = asyncio.new_event_loop()
+        app._dispatch_loop_holder["loop"] = loop
+        app._dispatch_ready.set()
+        loop_ready.set()
+        asyncio.set_event_loop(loop)
+        loop.run_forever()
+        loop.close()
+
+    worker = threading.Thread(target=dispatch_thread, daemon=True)
+    worker.start()
+    finished = threading.Event()
+
+    def stop_dispatch() -> None:
+        app._stop_dispatch()
+        finished.set()
+
+    stopper = threading.Thread(target=stop_dispatch)
+    stopper.start()
+    time.sleep(0.02)
+    assert finished.is_set() is False
+
+    release.set()
+    assert loop_ready.wait(timeout=1.0)
+    stopper.join(timeout=1.0)
+    worker.join(timeout=1.0)
+
+    assert finished.is_set() is True
+    assert calls == ["dispatch.stop"]
+
+
+def test_stop_continues_cleanup_when_ctrl_c_interrupts_a_resource():
+    """Ctrl+C 打断一个停止动作时，其他资源仍必须继续回收。"""
+
+    from bootstrap.service_app import ServiceApp
+
+    app = ServiceApp.__new__(ServiceApp)
+    app._state = "running"
+    app._lifecycle_lock = threading.RLock()
+    app._stop_event = threading.Event()
+    app._lock_owned = False
+    app._threads = []
+    app._dispatch_loop_holder = {}
+    app._message_bus = None
+    calls: list[str] = []
+
+    class Channels:
+        def stop_all(self):
+            calls.append("channels.stop")
+            raise KeyboardInterrupt
+
+        def join_all(self, timeout=None):
+            del timeout
+            calls.append("channels.join")
+
+    class Resource:
+        def stop_all(self):
+            calls.append("mcp.stop")
+
+    app._channel_service = Channels()
+    app._proactive_runtime = None
+    app._memory_optimizer_loop = None
+    app._passive_loop = None
+    app._automation_runtime = None
+    app._subagent_runtime = None
+    app._plugin_manager = None
+    app._mcp_registry = Resource()
+    app._memory_runtime = SimpleNamespace(event_executor=None)
+
+    app.stop()
+
+    assert app.state == "stopped"
+    assert calls == ["channels.stop", "mcp.stop", "channels.join"]

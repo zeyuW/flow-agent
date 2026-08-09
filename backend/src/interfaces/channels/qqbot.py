@@ -8,13 +8,13 @@ import asyncio
 import json
 import logging
 import threading
-from dataclasses import dataclass, field
 from typing import Any
 
-from interfaces.channels.base import ChannelStatus, MessageBusChannel
-from application.conversation.domain.channel_message import InboundMessage
-from infra.bus.types import OutboundMessage
-from infra.bus.message import MessageBus
+from interfaces.channels.base import (
+    BaseChannelAdapter,
+    ChannelCapabilities,
+)
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 
 try:
     import websockets
@@ -47,28 +47,37 @@ _RECONNECT_MAX_DELAY = 60.0   # 最大重连间隔（秒）
 _RECONNECT_BACKOFF = 2.0      # 退避倍数
 
 
-@dataclass
-class QQBotChannel(MessageBusChannel):
+class QQBotChannel(BaseChannelAdapter):
     """QQ 官方机器人渠道 (spec 6a-6f)。
 
     入站：WebSocket 接收事件 → 封装 InboundMessage → publish_inbound 到 MessageBus
     出站：subscribe_outbound 注册回调 → MessageBus dispatch 调用 → HTTP POST 消息
     """
 
-    app_id: str = ""
-    token: str = ""
-    secret: str = ""
-    message_bus: MessageBus | None = None
-    allowed_users: set[int] = field(default_factory=set)
-    allowed_groups: set[int] = field(default_factory=set)
-    _running: bool = False
-    _last_error: str | None = None
-    _ws: object = None  # WebSocket 连接
-    _recv_task: asyncio.Task | None = None
+    capabilities = ChannelCapabilities(text=True)
+
+    def __init__(
+        self,
+        app_id: str = "",
+        token: str = "",
+        secret: str = "",
+        allowed_users: set[int] | None = None,
+        allowed_groups: set[int] | None = None,
+    ) -> None:
+        super().__init__()
+        self.app_id = app_id
+        self.token = token
+        self.secret = secret
+        self.allowed_users = set(allowed_users or set())
+        self.allowed_groups = set(allowed_groups or set())
+        self._ws: object = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._main_task: asyncio.Task | None = None
 
     @property
     def name(self) -> str:
-        return "qq"
+        return "qqbot"
 
     @property
     def enabled(self) -> bool:
@@ -77,45 +86,52 @@ class QQBotChannel(MessageBusChannel):
 
     # ── 生命周期 ──
 
-    def start(self) -> None:
-        """同步启动入口，包装异步 start_async。"""
-        if self._running:
-            return
-        self._last_error = None
-        self._running = True
+    def _start_platform(self) -> None:
+        """在适配器自己的事件循环线程中启动 WebSocket 连接。"""
 
-        if self.message_bus:
-            self.message_bus.subscribe_outbound(self.name, self._on_response)
-        logger.info("qqbot channel started")
-
-    def stop(self) -> None:
-        if not self._running:
-            return
-        self._running = False
-        if self.message_bus:
-            self.message_bus.unsubscribe_outbound(self.name, self._on_response)
-        logger.info("qqbot channel stopped")
-
-    def status(self) -> ChannelStatus:
-        return ChannelStatus(running=self._running, last_error=self._last_error)
-
-    async def start_async(self) -> None:
-        """异步启动：连接 WebSocket 并开始接收事件。"""
         if not self.enabled:
-            logger.warning("qqbot disabled: no credentials or missing websockets library")
+            raise RuntimeError("QQ 官方 Bot 缺少 app_id、token 或 websockets 依赖")
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="qqbot-channel",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info("QQ 官方 Bot 渠道启动")
+
+    def _stop_platform(self) -> None:
+        loop = self._loop
+        if loop is None or loop.is_closed():
             return
+        future = asyncio.run_coroutine_threadsafe(self._close_async(), loop)
+        try:
+            future.result(timeout=5.0)
+        except Exception:
+            logger.exception("QQ 官方 Bot 停止失败")
 
-        self.start()
-        if self._recv_task is None or self._recv_task.done():
-            self._recv_task = asyncio.create_task(self._connection_loop())
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout)
+        self._thread = None
 
-    async def stop_async(self) -> None:
-        self._running = False
-        if self._recv_task:
-            self._recv_task.cancel()
-            self._recv_task = None
+    def _run_loop(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        try:
+            self._main_task = loop.create_task(self._connection_loop())
+            loop.run_until_complete(self._main_task)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._main_task = None
+            self._loop = None
+            loop.close()
+
+    async def _close_async(self) -> None:
+        if self._main_task is not None and not self._main_task.done():
+            self._main_task.cancel()
         await self._close_ws()
-        self.stop()
 
     async def _close_ws(self) -> None:
         if self._ws:
@@ -273,9 +289,9 @@ class QQBotChannel(MessageBusChannel):
 
         text = self._extract_text(content)
 
-        await self._publish_inbound(str(user_id), text, {
-            "qq_user_id": user_id_int,
-            "qq_openid": author.get("id", ""),
+        await self._publish_inbound(str(user_id), str(user_id), str(user_id), text, {
+            "provider_user_id": user_id_int,
+            "provider_openid": author.get("id", ""),
             "message_id": data.get("id", ""),
         })
 
@@ -293,9 +309,9 @@ class QQBotChannel(MessageBusChannel):
         text = self._extract_text(content)
         session_id = f"qq_group_{group_id}"
 
-        await self._publish_inbound(session_id, text, {
-            "qq_user_id": int(user_id) if isinstance(user_id, str) and user_id.isdigit() else 0,
-            "qq_group_id": group_id_int,
+        await self._publish_inbound(session_id, str(group_id), str(user_id), text, {
+            "provider_user_id": int(user_id) if isinstance(user_id, str) and user_id.isdigit() else 0,
+            "provider_group_id": group_id_int,
             "message_id": data.get("id", ""),
         })
 
@@ -308,58 +324,42 @@ class QQBotChannel(MessageBusChannel):
         text = re.sub(r"<#\d+>", "", text)
         return text.strip()
 
-    async def _publish_inbound(self, session_id: str, text: str, metadata: dict) -> None:
-        """发布入站消息到 MessageBus (spec 6c)。"""
-        if not self.message_bus:
-            return
-        inbound = InboundMessage(
-            channel=self.name,
+    async def _publish_inbound(
+        self,
+        session_id: str,
+        chat_id: str,
+        sender_id: str,
+        text: str,
+        metadata: dict,
+    ) -> None:
+        """发布规范化入站消息到 MessageBus。"""
+        self.publish_inbound(
             session_id=session_id,
+            chat_id=chat_id,
+            sender_id=sender_id,
             text=text,
             metadata=metadata,
         )
-        try:
-            async_loop = asyncio.get_running_loop()
-            async_loop.call_soon_threadsafe(self.message_bus.publish_inbound, inbound)
-        except RuntimeError:
-            self.message_bus.publish_inbound(inbound)
 
     # ── 出站回复 ──
 
-    def _on_response(self, message: OutboundMessage) -> None:
-        """收到出站回复时的回调 (spec 3f)。"""
+    def _deliver_outbound(self, message: OutboundMessage) -> ChannelDeliveryResult:
+        """按通用 chat_id 发送出站消息。"""
         if not message or not message.text:
-            return
-        qq_user_id = message.metadata.get("qq_user_id", 0) if message.metadata else 0
-        if not qq_user_id:
-            logger.warning("qq outbound: no qq_user_id")
-            return
-        try:
-            self._send_text(chat_id=str(qq_user_id), text=message.text)
-        except Exception:
-            logger.exception("qq outbound send failed")
-
-    def on_outbound(self, message: OutboundMessage) -> None:
-        """兼容旧接口，转发到 _on_response。"""
-        self._on_response(message)
-
-    # ── 消息发送 (供 MessagePushTool 使用) ──
-
-    def send(self, *, chat_id: str, text: str) -> None:
-        """发送文本消息到指定会话 (spec 4d)。"""
+            return ChannelDeliveryResult(delivered=False, retryable=False, error="空出站消息")
+        chat_id = message.chat_id or message.session_id
         if chat_id.startswith("qq_group_"):
-            group_id = chat_id.replace("qq_group_", "")
-            self._send_group_text(group_id, text)
+            self._send_group_text(chat_id.removeprefix("qq_group_"), message.text)
         else:
-            self._send_text(chat_id=chat_id, text=text)
+            self._send_text(chat_id=chat_id, text=message.text)
+        return ChannelDeliveryResult(delivered=True)
 
-    def send_file(self, *, chat_id: str, path: str) -> None:
-        """发送文件到指定会话。"""
-        logger.info("qq send_file: chat=%s path=%s (API 待实现)", chat_id, path)
-
-    def send_image(self, *, chat_id: str, path: str) -> None:
-        """发送图片到指定会话。"""
-        logger.info("qq send_image: chat=%s path=%s (API 待实现)", chat_id, path)
+    def send_text(self, *, recipient_id: str, text: str) -> ChannelDeliveryResult:
+        if recipient_id.startswith("qq_group_"):
+            self._send_group_text(recipient_id.removeprefix("qq_group_"), text)
+        else:
+            self._send_text(chat_id=recipient_id, text=text)
+        return ChannelDeliveryResult(delivered=True)
 
     def _send_text(self, *, chat_id: str, text: str) -> None:
         """通过 HTTP API 发送私聊文本消息。"""

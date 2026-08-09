@@ -163,3 +163,21 @@ class MessagePushTool:
             send_file is not None,
             send_image is not None,
         )
+
+    def register_adapter(self, adapter: object) -> None:
+        """注册统一渠道适配器，不暴露具体 IM 的发送函数。"""
+
+        name = str(getattr(adapter, "name"))
+
+        def invoke(method_name: str, *, chat_id: str, **kwargs: str) -> None:
+            method = getattr(adapter, method_name)
+            result = method(recipient_id=chat_id, **kwargs)
+            if not getattr(result, "delivered", False):
+                raise RuntimeError(getattr(result, "error", "渠道投递失败"))
+
+        self.register_channel(
+            name,
+            send=lambda *, chat_id, text: invoke("send_text", chat_id=chat_id, text=text),
+            send_file=lambda *, chat_id, path: invoke("send_file", chat_id=chat_id, path=path),
+            send_image=lambda *, chat_id, path: invoke("send_image", chat_id=chat_id, path=path),
+        )

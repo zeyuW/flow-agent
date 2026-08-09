@@ -19,10 +19,11 @@ import sqlite3
 import struct
 import threading
 import time
-from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, ParamSpec, TypeVar, cast
+
+from application.memory.domain.models import MemoryItem
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
@@ -61,40 +62,6 @@ CREATE TABLE IF NOT EXISTS memory_items (
     updated_at TEXT NOT NULL
 );
 """
-
-
-@dataclass(slots=True)
-class MemoryItem:
-    """记忆条目，包含向量嵌入。"""
-
-    id: str  # UUID 格式
-    memory_type: str  # procedure / preference / event / fact
-    summary: str
-    embedding: list[float] | None
-    content_hash: str
-    reinforcement: int = 1
-    emotional_weight: int = 0
-    status: str = "active"  # active / superseded
-    source_ref: str = ""
-    happened_at: str = ""
-    extra_json: dict[str, Any] = field(default_factory=dict)
-    created_at: str = ""
-    updated_at: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "memory_type": self.memory_type,
-            "summary": self.summary,
-            "embedding": self.embedding,
-            "content_hash": self.content_hash,
-            "reinforcement": self.reinforcement,
-            "emotional_weight": self.emotional_weight,
-            "status": self.status,
-            "source_ref": self.source_ref,
-            "created_at": self.created_at,
-            "updated_at": self.updated_at,
-        }
 
 
 def _compute_content_hash(text: str, memory_type: str) -> str:

@@ -10,7 +10,8 @@ import logging
 import math
 from dataclasses import dataclass, field
 
-from application.memory.infra.vector_store import MemoryItem, MemoryStore
+from application.memory.domain.models import MemoryItem
+from application.memory.infra.vector_store import MemoryStore
 
 logger = logging.getLogger(__name__)
 

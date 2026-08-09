@@ -175,28 +175,29 @@ class DriftConfig(FrozenConfig):
 
 
 class ChannelsConfig(FrozenConfig):
-    """控制台、HTTP 和 Telegram 接入参数。"""
+    """按渠道名称保存的动态接入配置。"""
 
-    dashboard_enabled: bool = False
-    dashboard_host: str = Field(default="127.0.0.1", min_length=1)
-    dashboard_port: int = Field(default=9901, ge=1, le=65535)
-    http_enabled: bool = False
-    http_host: str = Field(default="127.0.0.1", min_length=1)
-    http_port: int = Field(default=8788, ge=1, le=65535)
-    telegram_enabled: bool = False
-    telegram_bot_token: str | None = None
-    telegram_allowed_users: str = ""
-    telegram_allowed_groups: str = ""
+    adapters: dict[str, dict[str, Any]] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def validate_telegram_credentials(self) -> ChannelsConfig:
-        if not self.telegram_enabled:
-            return self
-        if not (self.telegram_bot_token or "").strip():
-            raise ValueError("启用 Telegram 时必须配置机器人令牌")
-        if not self.telegram_allowed_users.strip():
-            raise ValueError("启用 Telegram 时必须配置允许访问的用户")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_channel_blocks(cls, value: Any) -> dict[str, Any]:
+        """将 TOML 的 `[channels.<name>]` 块收敛到 `adapters`。"""
+
+        if value is None:
+            return {"adapters": {}}
+        if not isinstance(value, dict):
+            raise TypeError("channels 配置必须是对象")
+        if "adapters" in value:
+            adapters = value["adapters"]
+            if not isinstance(adapters, dict):
+                raise TypeError("channels.adapters 配置必须是对象")
+            return {"adapters": {str(name): dict(options) for name, options in adapters.items()}}
+        if any(not isinstance(options, dict) for options in value.values()):
+            raise ValueError(
+                "channels 配置必须使用 [channels.<渠道名>] 配置块，不能继续使用旧扁平字段"
+            )
+        return {"adapters": {str(name): dict(options) for name, options in value.items()}}
 
 
 class JobsConfig(FrozenConfig):
@@ -270,7 +271,40 @@ def load_config(path: Path) -> AppConfig:
 
     with path.open("rb") as config_file:
         raw: dict[str, Any] = tomllib.load(config_file)
-    return AppConfig.model_validate(raw)
+    return resolve_config_paths(AppConfig.model_validate(raw), path.parent)
+
+
+def resolve_config_paths(config: AppConfig, root: Path) -> AppConfig:
+    """把配置中的相对运行时路径固定到项目根目录。"""
+
+    base = root.resolve()
+
+    def absolute(value: str) -> str:
+        path = Path(value)
+        return str(path if path.is_absolute() else base / path)
+
+    return config.model_copy(
+        update={
+            "storage": config.storage.model_copy(
+                update={"memory_db_path": absolute(config.storage.memory_db_path)}
+            ),
+            "observe": config.observe.model_copy(
+                update={"trace_path": absolute(config.observe.trace_path)}
+            ),
+            "proactive": config.proactive.model_copy(
+                update={
+                    "state_path": absolute(config.proactive.state_path),
+                    "trace_path": absolute(config.proactive.trace_path),
+                }
+            ),
+            "drift": config.drift.model_copy(
+                update={"data_dir": absolute(config.drift.data_dir)}
+            ),
+            "subagent": config.subagent.model_copy(
+                update={"tasks_file": absolute(config.subagent.tasks_file)}
+            ),
+        }
+    )
 
 
 @dataclass(frozen=True, slots=True)

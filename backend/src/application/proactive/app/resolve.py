@@ -69,6 +69,21 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:24]
 
 
+def candidate_key(item) -> str:
+    """为主动候选生成跨进程稳定的观察指纹。"""
+
+    source = str(getattr(item, "source_key", "") or getattr(item, "source", ""))
+    item_id = str(getattr(item, "item_id", "") or "").strip()
+    if item_id:
+        identity = f"id:{item_id}"
+    else:
+        title = " ".join(str(getattr(item, "title", "") or "").split())
+        content = " ".join(str(getattr(item, "content", "") or "").split())
+        identity = f"title:{title}|content:{content}"
+    raw = f"{source}|{identity}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+
+
 def _build_side_effects(
     cited: list[str],
     delivery_key: str,

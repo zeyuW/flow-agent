@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from application.memory.memory_engine import MemoryQueryResult
+from application.memory.app.engine import MemoryQueryResult
 from application.memory.app.recall_memory import RecallMemoryTool, RecallMemoryToolAdapter
 
 

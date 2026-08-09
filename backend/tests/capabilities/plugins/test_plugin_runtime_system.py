@@ -3,7 +3,7 @@ import json
 import os
 from pathlib import Path
 
-from application.tasks.app.runtime import InMemoryJobRegistry
+from application.automation.app.runtime import AutomationRegistry
 from infra.bus.event import Event, EventBus
 from application.capabilities.plugins.plugin_loader import PluginManager, _plugin_revision
 from application.capabilities.tools.registry import ToolRegistry
@@ -12,7 +12,7 @@ from application.capabilities.tools.registry import ToolRegistry
 def _write_plugin(path: Path, version: str) -> None:
     path.mkdir(parents=True, exist_ok=True)
     (path / "plugin.py").write_text(
-        f'''from application.tasks.domain.models import JobSpec
+        f'''from application.automation.domain.models import JobSpec
 from application.capabilities.plugins.plugin_base import Plugin
 from application.capabilities.plugins.plugin_decorators import on_after_turn, on_tool_pre, tool
 
@@ -86,7 +86,7 @@ def test_plugin_reconcile_updates_runtime_contributions_and_keeps_old_on_failure
     data_dir = tmp_path / "plugin-data"
     _write_plugin(plugin_dir, "v1")
     tools = ToolRegistry()
-    jobs = InMemoryJobRegistry()
+    jobs = AutomationRegistry()
     events = EventBus()
     manager = PluginManager(
         plugins_dir,
@@ -167,7 +167,7 @@ def test_plugin_background_job_keeps_trigger_declaration(tmp_path: Path):
     plugin_dir = tmp_path / "plugins" / "triggered"
     plugin_dir.mkdir(parents=True)
     (plugin_dir / "plugin.py").write_text(
-        '''from application.tasks.domain.models import JobSpec
+        '''from application.automation.domain.models import JobSpec
 from infra.bus.event import TurnCommitted
 from application.capabilities.plugins.plugin_base import Plugin
 
@@ -184,7 +184,7 @@ class TriggeredPlugin(Plugin):
 ''',
         encoding="utf-8",
     )
-    jobs = InMemoryJobRegistry()
+    jobs = AutomationRegistry()
     manager = PluginManager(
         tmp_path / "plugins",
         background_registry=jobs,

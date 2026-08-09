@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from application.delegation.app.models import SubagentTask
+from application.delegation.domain.models import SubagentTask
 
 
 @dataclass(slots=True)
@@ -21,4 +21,3 @@ class CompletionFlow:
         else:
             summary = f"task {task.task_id} status={task.status}"
         return CompletionSummary(task_id=task.task_id, status=task.status, summary=summary)
-

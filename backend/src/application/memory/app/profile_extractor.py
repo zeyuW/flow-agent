@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 import re
 
-from application.memory.domain.profile_models import UserProfile
+from application.memory.domain.models import UserProfile
 
 
 @dataclass(slots=True)

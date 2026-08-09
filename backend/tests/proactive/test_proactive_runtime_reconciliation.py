@@ -8,7 +8,7 @@ from application.proactive.app.lifecycle import ProactiveLifecycle
 from application.proactive.app.mcp_polling import McpPollingModule
 from application.proactive.domain.models import AgentTick
 from application.proactive.app.loop import ProactiveLoop
-from application.proactive.domain.specs import RegisteredProactiveSource, ProactiveSourceSpecImpl
+from application.capabilities.plugins.proactive import RegisteredProactiveSource, ProactiveSourceSpecImpl
 
 
 class _Pool:

@@ -40,8 +40,6 @@ async def deliver_message(
             "proactive": True,
             "cited": resolve.cited_item_ids,
         }
-        if channel == "telegram" and chat_id:
-            metadata["telegram_chat_id"] = chat_id
         if message_sender is not None:
             send_message = SendMessage(
                 channel=channel,

@@ -15,8 +15,8 @@ from application.proactive.app.lifecycle import (
     ProactiveLifecycle,
     ProactiveModuleContext,
 )
-from application.proactive.domain.models import AgentTick, JudgeResult
-from application.proactive.app.resolve import resolve_decision
+from application.proactive.domain.models import AgentTick, GatewayResult, JudgeResult
+from application.proactive.app.resolve import candidate_key, resolve_decision
 from infra.bus.types import MessageSender
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,51 @@ class ProactiveTurnPipeline:
                 len(tick.gateway_result.errors),
             )
 
+            candidate_items = tick.gateway_result.all_items
+            candidate_keys = [candidate_key(item) for item in candidate_items]
+            if candidate_items and not self._state.has_candidate_baseline():
+                self._state.mark_candidates_observed(*candidate_keys)
+                tick.judge_result = JudgeResult(
+                    decision="skip",
+                    evidence={
+                        "reason": "startup_baseline",
+                        "candidate_count": len(candidate_items),
+                    },
+                )
+                logger.info(
+                    "主动启动基线已建立: candidates=%d",
+                    len(candidate_items),
+                )
+                return await self._finish_tick(tick)
+
+            new_items = []
+            new_item_keys = []
+            current_keys: set[str] = set()
+            for item, key in zip(candidate_items, candidate_keys):
+                if key in current_keys:
+                    continue
+                current_keys.add(key)
+                if not self._state.was_candidate_observed(key):
+                    new_items.append(item)
+                    new_item_keys.append(key)
+            if candidate_items and not new_items:
+                tick.judge_result = JudgeResult(
+                    decision="skip",
+                    evidence={
+                        "reason": "no_new_candidates",
+                        "candidate_count": len(candidate_items),
+                    },
+                )
+                return await self._finish_tick(tick)
+
+            if new_items and len(new_items) != len(candidate_items):
+                tick.gateway_result = _filter_gateway_items(
+                    tick.gateway_result,
+                    set(new_item_keys),
+                )
+                candidate_items = new_items
+                candidate_keys = new_item_keys
+
             if not tick.gateway_result.all_items and tick.gateway_result.errors:
                 tick.judge_result = JudgeResult(
                     decision="skip",
@@ -148,6 +193,11 @@ class ProactiveTurnPipeline:
                 len(tick.judge_result.discarded_ids),
             )
             await self._resolve_and_deliver(tick)
+            if tick.judge_result.decision == "skip" or (
+                tick.resolve_result is not None
+                and tick.resolve_result.decision == "skip"
+            ) or tick.sent:
+                self._state.mark_candidates_observed(*candidate_keys)
             return await self._finish_tick(tick)
         finally:
             tick.finished_at = time.time()
@@ -218,6 +268,31 @@ class ProactiveTurnPipeline:
         if self._drift is not None and hasattr(self._drift, "close"):
             self._drift.close()
         self._state.close()
+
+
+def _filter_gateway_items(
+    gateway: GatewayResult,
+    selected_keys: set[str],
+) -> GatewayResult:
+    """只保留本轮尚未观察过的候选，避免历史内容再次进入 Judge。"""
+
+    used_keys: set[str] = set()
+
+    def select(items: list) -> list:
+        selected = []
+        for item in items:
+            key = candidate_key(item)
+            if key in selected_keys and key not in used_keys:
+                selected.append(item)
+                used_keys.add(key)
+        return selected
+
+    return GatewayResult(
+        alerts=select(gateway.alerts),
+        content=select(gateway.content),
+        context=select(gateway.context),
+        errors=list(gateway.errors),
+    )
 
     async def start_extensions(self) -> None:
         """在外部资源连接完成后启动主动扩展模块。"""

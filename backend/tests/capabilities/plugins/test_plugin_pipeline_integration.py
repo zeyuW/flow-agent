@@ -1,8 +1,8 @@
 import asyncio
 from types import SimpleNamespace
 
-from interfaces.channels.models import InboundMessage
-from application.conversation.app.pipeline import PassiveTurnPipeline
+from application.passive.domain.messages import IncomingMessage
+from application.passive.app.pipeline import PassiveTurnPipeline
 from application.capabilities.llm.client import LLMResult, LLMToolCall
 from application.capabilities.plugins.tool_hooks import HookOutcome, ToolHookExecutor, _PluginToolHook
 from application.capabilities.tools.base import ToolResult
@@ -87,7 +87,7 @@ def test_plugin_phase_and_tool_hook_are_used_by_passive_pipeline():
         enable_thinking=False,
     )
 
-    pipeline.process(InboundMessage(channel="cli", session_id="s1", text="测试"))
+    pipeline.process(IncomingMessage(channel="cli", conversation_id="s1", text="测试"))
 
     assert phase_calls == ["s1"]
     assert agent.committed == ("测试", "完成")

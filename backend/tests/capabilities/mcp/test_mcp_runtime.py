@@ -92,6 +92,23 @@ def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):
         registry.stop_all()
 
 
+def test_registry_stop_all_terminates_external_server_process(tmp_path: Path):
+    """MCP 注册表停止后，实际 stdio 子进程必须已经退出。"""
+
+    config = _write_external_config(tmp_path)
+    registry = McpServerRegistry(config, ToolRegistry(), startup_timeout=5, call_timeout=5)
+    registry.start()
+    client = registry._clients["demo"]
+    process = client._process
+    assert process is not None
+    assert process.poll() is None
+
+    registry.stop_all()
+
+    assert process.poll() is not None
+    assert client.is_connected is False
+
+
 def test_ai_news_uses_independent_fallback_before_google(monkeypatch):
     published_at = datetime.now(timezone.utc).isoformat()
 

@@ -7,7 +7,10 @@ from pathlib import Path
 
 from bootstrap.config import load_application_config
 from bootstrap.service_app import ServiceApp
-from infra.workspace import WorkspaceAlreadyRunningError
+from infra.workspace import (
+    WorkspaceAlreadyRunningError,
+    init_workspace,
+)
 
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -18,6 +21,7 @@ def main(project_root: Path = PROJECT_ROOT) -> None:
 
     app: ServiceApp | None = None
     try:
+        init_workspace(project_root)
         config = load_application_config(project_root)
         app = ServiceApp(config)
         app.init()

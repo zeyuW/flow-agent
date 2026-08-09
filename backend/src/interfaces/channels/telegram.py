@@ -5,14 +5,17 @@ import http.client
 import json
 import logging
 import ssl
+import threading
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from application.conversation.domain.channel_message import InboundMessage
 from infra.bus.types import ChannelDeliveryResult, OutboundMessage
-from interfaces.channels.protocol import Channel, ChannelContext, ChannelStatus
+from interfaces.channels.base import (
+    BaseChannelAdapter,
+    ChannelCapabilities,
+)
 from infra.bus.event import Event, EventSubscriber, StreamDeltaReady, ToolCallStarted, ToolCallCompleted
 
 logger = logging.getLogger(__name__)
@@ -21,8 +24,10 @@ logger = logging.getLogger(__name__)
 _TELEGRAM_API_BASE = "https://api.telegram.org"
 
 
-class TelegramChannel(Channel, EventSubscriber):
+class TelegramChannel(BaseChannelAdapter, EventSubscriber):
     """Telegram 渠道：支持私聊和群聊消息。"""
+
+    capabilities = ChannelCapabilities(text=True, image=True, streaming=True)
     
     # 流式输出配置参数
     _STREAM_MIN_INTERVAL_S = 2.5  # 最小更新间隔（秒）
@@ -36,16 +41,17 @@ class TelegramChannel(Channel, EventSubscriber):
         allowed_groups: list[int] | None = None,
         attachment_dir: Path | None = None,
     ) -> None:
+        super().__init__()
         self.bot_token = bot_token
         self.allowed_users = set(allowed_users or [])  # 支持用户名和数字ID
         self.allowed_groups = set(allowed_groups or [])
-        self._running = False
         self._offset = 0
-        self._context: ChannelContext | None = None
-        self._last_error: str | None = None
         self._pending_messages: dict[str, int] = {}  # session_id -> message_id
         self._delivery_chunk_progress: dict[str, int] = {}
         self._attachment_dir = attachment_dir
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._thread: threading.Thread | None = None
+        self._polling_task: asyncio.Task | None = None
         
         # 流式输出缓冲区
         self._stream_buffers: dict[str, dict[str, Any]] = {}  # session_id -> {"content": str, "last_sent": str, "last_time": float}
@@ -55,43 +61,59 @@ class TelegramChannel(Channel, EventSubscriber):
     def name(self) -> str:
         return "telegram"
     
-    async def start(self, ctx: ChannelContext) -> None:
-        """启动 Telegram 渠道"""
-        if self._running:
-            return
-        self._running = True
-        self._context = ctx
-        
-        # 订阅出站消息
-        ctx.bus.subscribe_outbound(self.name, self._on_response)
-        logger.info("telegram channel subscribed to outbound messages")
-        
-        # 订阅流式输出事件
-        ctx.event_bus.subscribe(self)
-        logger.info("telegram channel subscribed to event bus")
-        
-        # 启动轮询（阻塞，直到 stop 被调用）
-        self._polling_task = asyncio.create_task(self._polling_loop())
-        logger.info("telegram channel started")
-        
-        # 等待轮询任务完成（当 stop 被调用时）
-        try:
-            await self._polling_task
-        except asyncio.CancelledError:
-            logger.info("telegram polling task cancelled")
-    
-    async def stop(self) -> None:
-        """停止 Telegram 渠道"""
-        self._running = False
+    def _start_platform(self) -> None:
+        """在适配器自己的事件循环线程中启动轮询和事件订阅。"""
+        if self._context is None:
+            raise RuntimeError("Telegram 渠道缺少运行时上下文")
+        self._context.event_bus.subscribe(self)
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="telegram-channel",
+            daemon=True,
+        )
+        self._thread.start()
+        logger.info("Telegram 渠道启动")
+
+    def _stop_platform(self) -> None:
         if self._context is not None:
-            self._context.bus.unsubscribe_outbound(self.name, self._on_response)
             self._context.event_bus.unsubscribe(self)
-            self._context = None
-        logger.info("telegram channel stopped")
-    
-    def status(self) -> ChannelStatus:
-        """获取渠道状态"""
-        return ChannelStatus(running=self._running, last_error=self._last_error)
+        loop = self._loop
+        if loop is None or loop.is_closed():
+            return
+        future = asyncio.run_coroutine_threadsafe(self._close_async(), loop)
+        try:
+            future.result(timeout=5.0)
+        except KeyboardInterrupt:
+            logger.warning("Telegram 渠道停止等待被 Ctrl+C 中断，继续回收线程")
+        except Exception:
+            logger.exception("Telegram 渠道停止失败")
+
+    def join(self, timeout: float | None = None) -> None:
+        if self._thread is not None:
+            self._thread.join(timeout)
+        self._thread = None
+
+    def _run_loop(self) -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        try:
+            self._polling_task = loop.create_task(self._polling_loop())
+            loop.run_until_complete(self._polling_task)
+        except asyncio.CancelledError:
+            logger.info("Telegram 轮询任务已取消")
+        finally:
+            self._polling_task = None
+            self._loop = None
+            loop.close()
+
+    async def _close_async(self) -> None:
+        if self._polling_task is not None and not self._polling_task.done():
+            self._polling_task.cancel()
+            try:
+                await self._polling_task
+            except asyncio.CancelledError:
+                pass
     
     def on_event(self, event: Event) -> None:
         """处理事件总线事件"""
@@ -226,7 +248,9 @@ class TelegramChannel(Channel, EventSubscriber):
         """轮询 Telegram Bot API 获取消息。"""
         while self._running:
             try:
-                updates = self._get_updates()
+                # HTTP 长轮询不能直接阻塞适配器事件循环，否则 stop() 无法及时
+                # 取消任务，整个进程退出会被 Telegram 请求拖住。
+                updates = await asyncio.to_thread(self._get_updates)
                 if updates:
                     for update in updates:
                         await self._handle_update(update)
@@ -330,11 +354,10 @@ class TelegramChannel(Channel, EventSubscriber):
             text = "请描述这张图片。"
         
         sender = str(user_id) if user_id else username
-        await self._publish_inbound(session_id, text, sender, {
-            "telegram_user_id": user_id,
-            "telegram_username": username,
-            "telegram_chat_id": chat_id,
-            "telegram_chat_type": chat_type,
+        await self._publish_inbound(session_id, str(chat_id), text, sender, {
+            "provider_user_id": user_id,
+            "provider_username": username,
+            "provider_chat_type": chat_type,
             "message_id": message.get("message_id", ""),
         }, media=media)
 
@@ -395,21 +418,27 @@ class TelegramChannel(Channel, EventSubscriber):
         await asyncio.to_thread(download)
         return str(target)
 
-    async def _publish_inbound(self, session_id: str, text: str, sender: str, metadata: dict, *, media: list[str] | None = None) -> None:
+    async def _publish_inbound(
+        self,
+        session_id: str,
+        chat_id: str,
+        text: str,
+        sender: str,
+        metadata: dict,
+        *,
+        media: list[str] | None = None,
+    ) -> None:
         """发布入站消息到 MessageBus。"""
-        if not self._context:
-            return
-        inbound = InboundMessage(
-            channel=self.name,
+        self.publish_inbound(
             session_id=session_id,
+            chat_id=chat_id,
+            sender_id=sender,
             text=text,
-            sender=sender,
-            media=list(media or []),
+            media=media or (),
             metadata=metadata,
         )
-        self._context.bus.publish_inbound(inbound)
-    
-    def _on_response(self, message: OutboundMessage) -> ChannelDeliveryResult:
+
+    def _deliver_outbound(self, message: OutboundMessage) -> ChannelDeliveryResult:
         """发送出站回复，并把真实平台结果返回消息总线。"""
         if not message or not message.text:
             logger.warning("telegram outbound: empty message or text")
@@ -419,11 +448,7 @@ class TelegramChannel(Channel, EventSubscriber):
                 error="empty outbound message",
             )
 
-        chat_id = message.chat_id
-        if not chat_id and message.metadata:
-            chat_id = str(message.metadata.get("telegram_chat_id") or "")
-        if not chat_id:
-            chat_id = message.session_id
+        chat_id = message.chat_id or message.session_id
         if not chat_id:
             logger.warning(
                 "telegram outbound: no chat target delivery_id=%s",
@@ -432,7 +457,7 @@ class TelegramChannel(Channel, EventSubscriber):
             return ChannelDeliveryResult(
                 delivered=False,
                 retryable=False,
-                error="missing telegram chat target",
+                error="missing channel chat target",
             )
 
         normalized_chat_id = _normalize_telegram_chat_id(str(chat_id))
@@ -532,40 +557,59 @@ class TelegramChannel(Channel, EventSubscriber):
     
     # ── 供 MessagePushTool 使用 ──
     
-    def send(self, *, chat_id: str, text: str) -> None:
-        """发送文本消息到指定会话"""
-        normalized_chat_id = _normalize_telegram_chat_id(chat_id)
+    def send_text(self, *, recipient_id: str, text: str) -> ChannelDeliveryResult:
+        """向指定会话发送主动文本消息。"""
+        normalized_chat_id = _normalize_telegram_chat_id(recipient_id)
         if normalized_chat_id is None:
-            raise ValueError(f"无效 Telegram chat_id: {chat_id}")
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error=f"无效 Telegram chat_id: {recipient_id}",
+            )
         for chunk in _split_telegram_text(text):
             if not self._send_text(normalized_chat_id, chunk):
-                raise RuntimeError("Telegram 文本发送失败")
+                return ChannelDeliveryResult(
+                    delivered=False,
+                    retryable=True,
+                    error="Telegram 文本发送失败",
+                )
+        return ChannelDeliveryResult(delivered=True)
     
-    def send_file(self, *, chat_id: str, path: str) -> None:
+    def send_file(self, *, recipient_id: str, path: str) -> ChannelDeliveryResult:
         """发送文件到指定会话"""
-        logger.info("telegram send_file: chat=%s path=%s (API 待实现)", chat_id, path)
+        logger.info("telegram send_file: chat=%s path=%s (API 待实现)", recipient_id, path)
+        return ChannelDeliveryResult(
+            delivered=False,
+            retryable=False,
+            error="Telegram 文件发送尚未实现",
+        )
     
-    def send_image(self, *, chat_id: str, path: str) -> None:
+    def send_image(self, *, recipient_id: str, path: str) -> ChannelDeliveryResult:
         """发送本地图片或公开 HTTP(S) 图片 URL 到指定会话。"""
-        normalized_chat_id = _normalize_telegram_chat_id(chat_id)
+        normalized_chat_id = _normalize_telegram_chat_id(recipient_id)
         if normalized_chat_id is None:
-            raise ValueError(f"无效 Telegram chat_id: {chat_id}")
+            return ChannelDeliveryResult(
+                delivered=False,
+                retryable=False,
+                error=f"无效 Telegram chat_id: {recipient_id}",
+            )
         parsed = urllib.parse.urlparse(path)
         if parsed.scheme in {"http", "https"} and parsed.netloc:
             result = self._post_photo_url(normalized_chat_id, path)
             if not result.get("ok"):
-                raise RuntimeError("Telegram 图片发送失败")
-            return
+                return ChannelDeliveryResult(delivered=False, retryable=True, error="Telegram 图片发送失败")
+            return ChannelDeliveryResult(delivered=True)
         if parsed.scheme:
-            raise ValueError("图片 URL 仅支持 HTTP 或 HTTPS")
+            return ChannelDeliveryResult(delivered=False, retryable=False, error="图片 URL 仅支持 HTTP 或 HTTPS")
         image = Path(path)
         if not image.is_file():
-            raise ValueError("图片文件不存在")
+            return ChannelDeliveryResult(delivered=False, retryable=False, error="图片文件不存在")
         if image.stat().st_size > 10 * 1024 * 1024:
-            raise ValueError("Telegram 图片超过 10MB 限制")
+            return ChannelDeliveryResult(delivered=False, retryable=False, error="Telegram 图片超过 10MB 限制")
         result = self._post_photo(normalized_chat_id, image)
         if not result.get("ok"):
-            raise RuntimeError("Telegram 图片发送失败")
+            return ChannelDeliveryResult(delivered=False, retryable=True, error="Telegram 图片发送失败")
+        return ChannelDeliveryResult(delivered=True)
 
     def _post_photo_url(self, chat_id: int, url: str, caption: str = "") -> dict:
         """让 Telegram 拉取公开图片 URL，避免宿主重复下载无须保存的图片。"""

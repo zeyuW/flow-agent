@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from application.proactive.infra.mcp_pool import McpClientPool
-from application.proactive.domain.specs import RegisteredProactiveSource
+from application.capabilities.plugins.proactive import RegisteredProactiveSource
 
 if TYPE_CHECKING:
     pass

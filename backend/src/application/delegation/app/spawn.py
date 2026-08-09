@@ -5,8 +5,8 @@ import logging
 import threading
 from typing import Any
 
-from application.conversation.app.delegation import DelegationPolicy
-from application.delegation.app.models import SpawnDecision
+from application.agent.domain.policies import DelegationPolicy
+from application.delegation.domain.models import SpawnDecision
 from application.capabilities.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)

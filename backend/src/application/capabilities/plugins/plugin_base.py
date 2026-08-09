@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from application.tasks.domain.models import JobSpec
+from application.automation.domain.models import JobSpec
 from application.capabilities.mcp.config import McpServerSpec
 from application.capabilities.plugins.plugin_context import PluginConfig, PluginContext, PluginKVStore
 from application.capabilities.plugins.plugin_registry import plugin_registry

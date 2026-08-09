@@ -6,18 +6,22 @@ base_url = "https://api.example.com/v1"
 system_prompt = "You are a helpful AI assistant."
 enable_thinking = true
 
-# 接入层默认关闭，按部署需要启用。
-[channels]
-dashboard_enabled = false
-dashboard_host = "127.0.0.1"
-dashboard_port = 9901
-http_enabled = false
-http_host = "127.0.0.1"
-http_port = 8788
-telegram_enabled = false
-telegram_bot_token = "replace-me"
-telegram_allowed_users = "replace-me"
-telegram_allowed_groups = ""
+# 接入层默认关闭，按部署需要启用。每个 IM 只需增加一个渠道配置块。
+[channels.telegram]
+enabled = false
+bot_token = "replace-me"
+allowed_users = ["replace-me"]
+allowed_groups = []
+
+[channels.http]
+enabled = false
+host = "127.0.0.1"
+port = 8788
+api_key = ""
+
+[channels.cli]
+enabled = false
+default_session_id = "default"
 
 # 主动线路启用后必须填写目标用户。
 [proactive]

@@ -30,7 +30,7 @@ def test_message_bus_sends_outbound_message_to_channel_queue():
 def test_message_bus_consumer_acknowledges_inbound_message():
     """消费端确认后，消息不应继续留在待确认集合中。"""
 
-    from application.conversation.domain.channel_message import InboundMessage
+    from infra.bus.types import InboundMessage
     from infra.bus.message import MessageBus
 
     async def scenario() -> None:
@@ -59,7 +59,7 @@ def test_message_bus_consumer_acknowledges_inbound_message():
 def test_message_bus_nack_requeues_unhandled_message():
     """业务处理失败时，技术层 nack 必须把消息重新放回入站队列。"""
 
-    from application.conversation.domain.channel_message import InboundMessage
+    from infra.bus.types import InboundMessage
     from infra.bus.message import MessageBus
 
     async def scenario() -> None:

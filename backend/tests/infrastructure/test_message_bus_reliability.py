@@ -3,13 +3,10 @@
 import asyncio
 from pathlib import Path
 
-from interfaces.channels.models import (
-    ChannelDeliveryResult,
-    InboundMessage,
-    OutboundMessage,
-)
+from infra.bus.types import InboundMessage
+from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 from interfaces.channels.telegram import TelegramChannel
-from application.conversation.app.agent_loop import AgentLoop
+from application.agent.app.loop import AgentLoop
 from infra.bus.message import MessageBus, OutboundDispatch
 from infra.persistence import SQLiteOutboxStore
 from application.proactive.app.deliver import deliver_message
@@ -357,7 +354,7 @@ def test_telegram_long_reply_is_split_without_truncation(monkeypatch):
     monkeypatch.setattr(channel, "_send_text", fake_send)
     text = ("一段较长内容\n" * 900) + "结束"
 
-    delivered = channel._on_response(
+    delivered = channel.on_outbound(
         OutboundMessage(
             channel="telegram",
             session_id="12345",
@@ -396,10 +393,10 @@ def test_telegram_retry_resumes_from_failed_chunk(monkeypatch):
         text=payload_text,
     )
 
-    first_result = channel._on_response(message)
+    first_result = channel.on_outbound(message)
     assert first_result.delivered is False
     assert first_result.uncertain is True
-    assert channel._on_response(message).delivered is True
+    assert channel.on_outbound(message).delivered is True
     assert calls[0] == "甲" * 3900
     assert calls[1] == "乙" * 3900
     assert calls[2] == "乙" * 3900

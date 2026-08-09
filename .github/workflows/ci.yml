@@ -25,6 +25,8 @@ jobs:
     steps:
       - name: 获取代码
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 配置 Python
         uses: actions/setup-python@v5
@@ -35,24 +37,45 @@ jobs:
       - name: 安装项目
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e backend
-          python -m pip install black pyright
+          python -m pip install uv
+          cd backend
+          uv sync --locked
+
+      - name: 检查提交差异格式
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          zero_sha="0000000000000000000000000000000000000000"
+          empty_tree="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            git diff --check "${BASE_SHA}" "${CURRENT_SHA}"
+          elif [[ "${EVENT_NAME}" == "push" && "${BEFORE_SHA}" != "${zero_sha}" ]]; then
+            git diff --check "${BEFORE_SHA}" "${CURRENT_SHA}"
+          elif git rev-parse --verify "${CURRENT_SHA}^" >/dev/null 2>&1; then
+            git diff --check "${CURRENT_SHA}^" "${CURRENT_SHA}"
+          else
+            git diff --check "${empty_tree}" "${CURRENT_SHA}"
+          fi
 
       - name: 执行统一验证
         env:
           PYTHONPATH: backend/src
           TMPDIR: /tmp
         run: |
-          python -m compileall -q backend/src
-          git diff --check
-          python -m pytest -q backend/tests
-          python -m pyright --project backend/pyproject.toml \
-            backend/src/infra/config \
+          uv run --project backend python -m compileall -q backend/src
+          uv run --project backend python -m pytest -q backend/tests
+          uv run --project backend python -m pyright --project backend/pyproject.toml \
+            backend/src/infra/config.py \
             backend/src/bootstrap \
             backend/tests/architecture \
             backend/tests/infrastructure
-          python -m black --check --target-version py311 --fast \
-            backend/src/infra/config \
+          uv run --project backend python -m black --check --target-version py311 --fast \
+            backend/src/infra/config.py \
             backend/src/bootstrap \
             backend/tests/architecture \
             backend/tests/infrastructure

@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import hashlib
 import logging
 import re
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
 from typing import Any, Callable
 
-from application.tasks.domain.models import JobSpec
 from application.capabilities.mcp.config import McpServerSpec
+from application.automation.domain.models import JobSpec
 from application.capabilities.plugins.plugin_base import Plugin
 from application.capabilities.plugins.plugin_context import PluginContext
 from application.capabilities.plugins.plugin_registry import (
@@ -25,6 +22,21 @@ from application.capabilities.plugins.plugin_registry import (
     plugin_registry,
 )
 from application.capabilities.plugins.tool_hooks import ToolHookExecutor, _PluginToolHook
+from application.capabilities.plugins.plugin_adapters import (
+    DynamicPluginTool,
+    PluginEventSubscriber,
+    collect_background_jobs,
+    collect_phase_modules,
+    collect_proactive_modules,
+    collect_proactive_sources,
+    resolve_mcp_spec,
+)
+from application.capabilities.plugins.plugin_runtime import (
+    discard_modules as _discard_modules,
+    find_plugin_class as _find_plugin_class,
+    import_module as _import_module,
+    plugin_revision as _plugin_revision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -299,13 +311,13 @@ class PluginManager:
                 plugin_dir,
             )
             mcp_servers = [
-                _resolve_mcp_spec(name, spec, plugin_dir, data_dir or plugin_dir)
+                resolve_mcp_spec(name, spec, plugin_dir, data_dir or plugin_dir)
                 for spec in instance.mcp_servers()
             ]
-            phase_modules = _collect_phase_modules(instance)
-            proactive_modules = _collect_proactive_modules(instance)
-            proactive_sources = _collect_proactive_sources(instance, name)
-            background_jobs = _collect_background_jobs(instance, name)
+            phase_modules = collect_phase_modules(instance)
+            proactive_modules = collect_proactive_modules(instance)
+            proactive_sources = collect_proactive_sources(instance, name)
+            background_jobs = collect_background_jobs(instance, name)
             self._validate_names(name, tools, background_jobs)
             await instance.initialize()
             return _PreparedPlugin(
@@ -429,7 +441,7 @@ class PluginManager:
         for meta in candidate.handlers:
             if meta.kind != MetadataKind.LIFECYCLE:
                 continue
-            subscriber = _EventSub(
+            subscriber = PluginEventSubscriber(
                 functools.partial(meta.handler, candidate.instance),
                 meta.event_type,
             )
@@ -453,12 +465,12 @@ class PluginManager:
     def _build_tools(
         self,
         candidate: _PreparedPlugin,
-    ) -> list[tuple[_DynamicTool, str]]:
+    ) -> list[tuple[DynamicPluginTool, str]]:
         if self._tool_registry is None:
             return []
-        entries: list[tuple[_DynamicTool, str]] = []
+        entries: list[tuple[DynamicPluginTool, str]] = []
         for meta in candidate.tools:
-            tool = _DynamicTool(
+            tool = DynamicPluginTool(
                 name=meta.name,
                 description=meta.description,
                 schema=meta.schema,
@@ -507,169 +519,3 @@ class PluginManager:
             for name in active.job_names:
                 if name not in keep_jobs:
                     self._background_registry.unregister(name)
-
-
-def _plugin_revision(plugin_dir: Path, data_dir: Path | None) -> str:
-    """计算插件代码、声明和用户配置文件的稳定修订。"""
-
-    digest = hashlib.sha256()
-    paths = list(plugin_dir.rglob("*"))
-    if data_dir is not None:
-        paths.extend(
-            path
-            for name in ("plugin_config.json", "config.local.toml")
-            if (path := data_dir / name).exists()
-        )
-    for path in sorted(paths, key=lambda item: str(item)):
-        if not path.is_file() or "__pycache__" in path.parts:
-            continue
-        if path.suffix.lower() not in {".py", ".json", ".toml", ".yaml", ".yml"}:
-            continue
-        try:
-            relative = path.relative_to(plugin_dir)
-        except ValueError:
-            relative = Path("plugin-data") / path.name
-        digest.update(str(relative).encode())
-        digest.update(path.read_bytes())
-    return digest.hexdigest()
-
-
-def _import_module(filepath: Path, package_name: str, plugin_dir: Path):
-    """建立独立包并直接编译源码，支持相对导入且不复用旧字节码。"""
-
-    package = ModuleType(package_name)
-    package.__path__ = [str(plugin_dir)]
-    package.__package__ = package_name
-    sys.modules[package_name] = package
-    module_name = f"{package_name}.plugin"
-    module = ModuleType(module_name)
-    module.__file__ = str(filepath)
-    module.__package__ = package_name
-    sys.modules[module_name] = module
-    source = filepath.read_text(encoding="utf-8")
-    exec(compile(source, str(filepath), "exec"), module.__dict__)
-    return module
-
-
-def _discard_modules(package_name: str) -> None:
-    """移除一个插件代际包及其相对导入的全部子模块。"""
-
-    for name in [
-        item
-        for item in sys.modules
-        if item == package_name or item.startswith(package_name + ".")
-    ]:
-        sys.modules.pop(name, None)
-
-
-def _find_plugin_class(module) -> type[Plugin] | None:
-    for value in vars(module).values():
-        if isinstance(value, type) and issubclass(value, Plugin) and value is not Plugin:
-            return value
-    return None
-
-
-def _resolve_mcp_spec(
-    plugin_name: str,
-    spec: McpServerSpec,
-    plugin_dir: Path,
-    data_dir: Path,
-) -> McpServerSpec:
-    if not isinstance(spec, McpServerSpec):
-        raise TypeError(f"插件 {plugin_name} 返回了无效的 MCP 声明")
-    return spec.with_plugin_paths(plugin_dir, data_dir)
-
-
-def _collect_phase_modules(instance: Plugin) -> list[Any]:
-    """按被动回合顺序收集插件声明的阶段模块。"""
-
-    modules: list[Any] = []
-    for method_name in (
-        "turn_started_modules",
-        "before_turn_modules",
-        "before_reasoning_modules",
-        "prompt_render_modules",
-        "reasoner_modules",
-        "after_reasoning_modules",
-        "after_turn_modules",
-    ):
-        for module in getattr(instance, method_name)() or []:
-            if module not in modules:
-                modules.append(module)
-    return modules
-
-
-def _collect_proactive_sources(instance: Plugin, plugin_name: str) -> list[Any]:
-    sources = instance.proactive_sources() or []
-    if not sources:
-        return []
-    from application.proactive.domain.specs import RegisteredProactiveSource
-
-    return [
-        RegisteredProactiveSource(spec=spec, plugin_id=plugin_name)
-        for spec in sources
-    ]
-
-
-def _collect_proactive_modules(instance: Plugin) -> list[Any]:
-    """读取插件主动模块，具体契约在运行时构建阶段统一校验。"""
-
-    return list(instance.proactive_modules() or [])
-
-
-def _collect_background_jobs(instance: Plugin, plugin_name: str) -> list[JobSpec]:
-    jobs = instance.background_jobs() or []
-    if not all(isinstance(job, JobSpec) for job in jobs):
-        raise TypeError(f"插件 {plugin_name} 返回了无效的后台任务")
-    return list(jobs)
-
-
-class _DynamicTool:
-    """把插件方法适配为宿主工具协议。"""
-
-    def __init__(self, name: str, description: str, schema: dict | None, execute_fn) -> None:
-        self._name = name
-        self._description = description
-        self._schema = schema or {}
-        self._execute = execute_fn
-
-    @property
-    def name(self) -> str:
-        return self._name
-
-    @property
-    def description(self) -> str:
-        return self._description
-
-    @property
-    def input_schema(self) -> dict:
-        return self._schema
-
-    def run(self, tool_input: dict):
-        from application.capabilities.tools.base import ToolResult
-
-        try:
-            result = self._execute(**tool_input)
-            if asyncio.iscoroutine(result):
-                result = asyncio.run(result)
-            return ToolResult(ok=True, content=str(result))
-        except Exception as exc:
-            return ToolResult(ok=False, content=f"插件工具执行失败: {exc}")
-
-
-class _EventSub:
-    """只向匹配事件类型的插件生命周期处理器分发事件。"""
-
-    def __init__(self, handler, event_type: str) -> None:
-        self.handler = handler
-        self.event_type = event_type
-
-    def on_event(self, event) -> None:
-        if getattr(event, "event_type", "") != self.event_type:
-            return
-        try:
-            result = self.handler(ctx=event)
-            if asyncio.iscoroutine(result):
-                asyncio.run(result)
-        except Exception:
-            logger.exception("插件生命周期处理器执行失败: %s", self.event_type)

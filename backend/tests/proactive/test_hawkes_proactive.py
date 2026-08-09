@@ -2,6 +2,7 @@
 
 import json
 import asyncio
+import hashlib
 from datetime import datetime, timezone
 
 
@@ -9,7 +10,11 @@ from infra.bus.event import Event, EventBus
 from infra.telemetry import TraceRecorder
 from application.proactive.infra.gate import ProactiveStateStore
 from application.proactive.infra.data_gateway import DataGateway
-from application.proactive.infra.sources import LocalTaskSource, LocalTodoSource
+from application.proactive.infra.sources import (
+    LocalTaskSource,
+    LocalTodoSource,
+    WebSnapshotSource,
+)
 from application.proactive.app.events import ProactiveEventBridge
 from application.proactive.infra.mcp_pool import McpClientPool
 from application.proactive.domain.models import AgentTick, GateResult
@@ -40,6 +45,19 @@ def test_hawkes_user_event_increases_intensity_and_then_decays():
 
     assert immediate > baseline
     assert baseline < later < immediate
+
+
+def test_web_snapshot_fingerprint_is_stable_across_processes(tmp_path):
+    """网页快照指纹不能使用 Python 进程随机化的 hash。"""
+
+    snapshot = tmp_path / "article.txt"
+    content = "一条会在重启后再次被读取的新闻"
+    snapshot.write_text(content, encoding="utf-8")
+
+    record = WebSnapshotSource([snapshot]).fetch_records()[0]
+    expected = hashlib.sha256(content.encode("utf-8")).hexdigest()[:24]
+
+    assert record.dedup_key == f"web:article.txt:{expected}"
 
 
 def test_hawkes_event_shortens_next_interval():
