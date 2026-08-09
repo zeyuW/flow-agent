@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 SCHEDULE_ROOT = Path(__file__).parents[2] / "src" / "application" / "schedule"
 
 
@@ -28,8 +27,7 @@ def test_schedule_has_explicit_domain_and_infra_modules() -> None:
 def test_schedule_domain_does_not_depend_on_application_or_infrastructure() -> None:
     imports = _imports(SCHEDULE_ROOT / "domain" / "models.py")
     assert not any(
-        name.startswith(("application.", "infra.", "interfaces."))
-        for name in imports
+        name.startswith(("application.", "infra.", "interfaces.")) for name in imports
     )
 
 

@@ -61,7 +61,12 @@ from application.schedule.app.tools import (
     ScheduleTaskTool,
 )
 from infra.workspace import DATA_DIR, PROJECT_ROOT, WORKSPACE_LAYOUT
-from infra.runtime import RuntimeHealth, RuntimeService, RuntimeUnit, RuntimeUnitSnapshot
+from infra.runtime import (
+    RuntimeHealth,
+    RuntimeService,
+    RuntimeUnit,
+    RuntimeUnitSnapshot,
+)
 from application.delegation.app.runtime import (
     SubagentRuntime,
     create_subagent_runtime,
@@ -456,7 +461,8 @@ def create_app_runtime(config: AppConfig):
     proactive_loop = None
     if cfg.proactive.enabled:
         enabled_channels = {
-            name for name, options in cfg.channels.adapters.items()
+            name
+            for name, options in cfg.channels.adapters.items()
             if bool(options.get("enabled", False))
         }
         proactive_channel = "telegram" if "telegram" in enabled_channels else "cli"

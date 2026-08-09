@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 APPLICATION_ROOT = Path(__file__).parents[2] / "src" / "application"
 BOOTSTRAP_ROOT = Path(__file__).parents[2] / "src" / "bootstrap"
 

@@ -20,6 +20,8 @@ def test_message_bus_sends_outbound_message_to_channel_queue():
     )
 
     message = bus.outbound.consume_one()
+    assert message is not None
+    assert message is not None
     assert result.accepted is True
     assert result.message_id
     assert message.channel == "telegram"

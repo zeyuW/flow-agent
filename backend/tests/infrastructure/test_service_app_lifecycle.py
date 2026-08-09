@@ -4,6 +4,7 @@ import threading
 import time
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 
 
 def test_wait_blocks_until_service_stop_event_is_set():
@@ -75,6 +76,7 @@ def test_stop_continues_cleanup_when_one_resource_fails():
     app._threads = []
     app._dispatch_loop_holder = {}
     calls: list[str] = []
+    typed_app: Any = app
 
     class FailingChannels:
         def stop_all(self):
@@ -108,16 +110,16 @@ def test_stop_continues_cleanup_when_one_resource_fails():
         async def shutdown_all(self):
             calls.append("plugins.stop")
 
-    app._channel_service = FailingChannels()
-    app._proactive_runtime = Resource("proactive.stop")
-    app._memory_optimizer_loop = Resource("memory.stop")
-    app._passive_loop = Resource("passive.stop")
-    app._automation_runtime = Resource("automation.stop")
-    app._subagent_runtime = SimpleNamespace(manager=Resource("subagent.stop"))
-    app._plugin_manager = PluginManager()
-    app._mcp_registry = Resource("mcp.stop")
-    app._memory_runtime = SimpleNamespace(event_executor=None)
-    app._message_bus = None
+    typed_app._channel_service = FailingChannels()
+    typed_app._proactive_runtime = Resource("proactive.stop")
+    typed_app._memory_optimizer_loop = Resource("memory.stop")
+    typed_app._passive_loop = Resource("passive.stop")
+    typed_app._automation_runtime = Resource("automation.stop")
+    typed_app._subagent_runtime = SimpleNamespace(manager=Resource("subagent.stop"))
+    typed_app._plugin_manager = PluginManager()
+    typed_app._mcp_registry = Resource("mcp.stop")
+    typed_app._memory_runtime = SimpleNamespace(event_executor=None)
+    typed_app._message_bus = None
 
     app.stop()
 
@@ -146,13 +148,14 @@ def test_stop_dispatch_waits_for_dispatch_loop_to_be_ready():
     calls: list[str] = []
     release = threading.Event()
     loop_ready = threading.Event()
+    typed_app: Any = app
 
     class MessageBus:
-        async def stop_dispatch_task(self):
+        async def stop_dispatch_task(self) -> None:
             calls.append("dispatch.stop")
             asyncio.get_running_loop().call_soon(asyncio.get_running_loop().stop)
 
-    app._message_bus = MessageBus()
+    typed_app._message_bus = MessageBus()
 
     def dispatch_thread() -> None:
         release.wait(timeout=1.0)
@@ -200,6 +203,7 @@ def test_stop_continues_cleanup_when_ctrl_c_interrupts_a_resource():
     app._dispatch_loop_holder = {}
     app._message_bus = None
     calls: list[str] = []
+    typed_app: Any = app
 
     class Channels:
         def stop_all(self):
@@ -214,15 +218,15 @@ def test_stop_continues_cleanup_when_ctrl_c_interrupts_a_resource():
         def stop_all(self):
             calls.append("mcp.stop")
 
-    app._channel_service = Channels()
-    app._proactive_runtime = None
-    app._memory_optimizer_loop = None
-    app._passive_loop = None
-    app._automation_runtime = None
-    app._subagent_runtime = None
-    app._plugin_manager = None
-    app._mcp_registry = Resource()
-    app._memory_runtime = SimpleNamespace(event_executor=None)
+    typed_app._channel_service = Channels()
+    typed_app._proactive_runtime = None
+    typed_app._memory_optimizer_loop = None
+    typed_app._passive_loop = None
+    typed_app._automation_runtime = None
+    typed_app._subagent_runtime = None
+    typed_app._plugin_manager = None
+    typed_app._mcp_registry = Resource()
+    typed_app._memory_runtime = SimpleNamespace(event_executor=None)
 
     app.stop()
 

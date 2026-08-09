@@ -1,4 +1,5 @@
 import asyncio
+from typing import Any, cast
 
 from infra.bus.types import ChannelDeliveryResult
 from infra.bus.message import MessageBus, OutboundDispatch
@@ -12,9 +13,10 @@ from infra.persistence import SQLiteDatabase
 def test_proactive_delivery_uses_stable_delivery_key():
     class Port:
         def __init__(self):
-            self.dispatch = None
+            self.dispatch: Any = None
 
-        async def send_and_wait(self, dispatch, timeout=30.0):
+        async def send_and_wait(self, dispatch: Any, timeout: float = 30.0) -> Any:
+            del timeout
             self.dispatch = dispatch
             return type("Receipt", (), {"delivered": True, "error": ""})()
 
@@ -32,7 +34,9 @@ def test_proactive_delivery_uses_stable_delivery_key():
     )
 
     assert result.sent is True
-    assert port.dispatch.delivery_id == "stable-delivery"
+    dispatch = port.dispatch
+    assert dispatch is not None
+    assert dispatch.delivery_id == "stable-delivery"
 
 
 def test_outbox_skips_already_delivered_delivery_id(tmp_path):
@@ -57,8 +61,9 @@ def test_outbox_skips_already_delivered_delivery_id(tmp_path):
         )
     )
 
-    assert handle.receipt() is not None
-    assert handle.receipt().delivered is True
+    receipt = handle.receipt()
+    assert receipt is not None
+    assert receipt.delivered is True
     assert bus.outbound.consume_one() is None
 
 
@@ -81,7 +86,7 @@ def test_subagent_completion_is_idempotent(tmp_path):
     )
 
     async def scenario():
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "job_id": "job-1",
             "label": "任务",
             "task": "执行",
@@ -109,11 +114,11 @@ def test_agent_loop_stop_cancels_hanging_task():
         pass
 
     class Pipeline:
-        def process(self, inbound):
+        async def process(self, inbound: Any) -> None:
             del inbound
-            asyncio.sleep(3600)
+            await asyncio.sleep(3600)
 
-    loop = AgentLoop(Bus(), Pipeline())
+    loop = AgentLoop(cast(Any, Bus()), cast(Any, Pipeline()))
 
     async def scenario():
         task = asyncio.create_task(asyncio.sleep(3600))

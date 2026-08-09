@@ -9,6 +9,9 @@ from pathlib import Path
 
 from application.capabilities.tools.message_push import MessagePushTool
 from application.capabilities.mcp.server_registry import McpServerRegistry
+from application.capabilities.plugins.plugin_loader import PluginManager
+from application.delegation.app.runtime import SubagentRuntime
+from application.memory.app.memory_runtime import MemoryRuntime
 from application.passive.app.passive_loop import PassiveLoop
 from application.memory.app.optimizer import MemoryOptimizerLoop
 from application.proactive.app.loop import ProactiveLoop
@@ -48,14 +51,14 @@ class ServiceApp:
 
         self._proactive_runtime: ProactiveLoop | None = None
         self._automation_runtime: AutomationRuntime | None = None
-        self._subagent_runtime = None
+        self._subagent_runtime: SubagentRuntime | None = None
         self._message_bus: MessageBus | None = None
         self._event_bus: EventBus | None = None
         self._passive_loop: PassiveLoop | None = None
-        self._memory_runtime = None
+        self._memory_runtime: MemoryRuntime | None = None
         self._memory_optimizer_loop: MemoryOptimizerLoop | None = None
         self._mcp_registry: McpServerRegistry | None = None
-        self._plugin_manager = None
+        self._plugin_manager: PluginManager | None = None
 
     @property
     def state(self) -> str:
@@ -135,7 +138,7 @@ class ServiceApp:
             self._state = "stopping"
             self._stop_event.set()
 
-        failures: list[tuple[str, Exception]] = []
+        failures: list[tuple[str, BaseException]] = []
 
         def attempt(name: str, action) -> None:
             try:
@@ -158,9 +161,10 @@ class ServiceApp:
             attempt("subagent", self._subagent_runtime.manager.shutdown)
 
         if self._plugin_manager is not None:
+            plugin_manager = self._plugin_manager
             attempt(
                 "plugins",
-                lambda: asyncio.run(self._plugin_manager.shutdown_all()),
+                lambda: asyncio.run(plugin_manager.shutdown_all()),
             )
         if self._mcp_registry is not None:
             attempt("mcp", self._mcp_registry.stop_all)
@@ -185,7 +189,8 @@ class ServiceApp:
         cfg = self.config
         configure_logging(cfg.logging.level, WORKSPACE_LAYOUT.app_log_file)
         enabled_channels = {
-            name for name, options in cfg.channels.adapters.items()
+            name
+            for name, options in cfg.channels.adapters.items()
             if bool(options.get("enabled", False))
         }
         print(
@@ -227,14 +232,15 @@ class ServiceApp:
         print("Services starting...")
 
     def _start_proactive(self) -> None:
-        if self._proactive_runtime is None:
+        proactive_runtime = self._proactive_runtime
+        if proactive_runtime is None:
             return
 
         def run_proactive() -> None:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
-                loop.run_until_complete(self._proactive_runtime.run())
+                loop.run_until_complete(proactive_runtime.run())
             finally:
                 loop.close()
 
@@ -248,7 +254,8 @@ class ServiceApp:
         print("proactive loop started")
 
     def _start_dispatch(self) -> None:
-        if self._message_bus is None:
+        message_bus = self._message_bus
+        if message_bus is None:
             return
         self._dispatch_ready.clear()
 
@@ -258,7 +265,7 @@ class ServiceApp:
             self._dispatch_loop_holder["loop"] = loop
             self._dispatch_ready.set()
             try:
-                loop.run_until_complete(self._message_bus.start_dispatch_task())
+                loop.run_until_complete(message_bus.start_dispatch_task())
             finally:
                 self._dispatch_loop_holder.pop("loop", None)
                 self._dispatch_ready.clear()
@@ -295,9 +302,9 @@ class ServiceApp:
 
     def _shutdown_memory_events(self) -> None:
         runtime = self._memory_runtime
-        executor = getattr(runtime, "event_executor", None)
-        if executor is None:
+        if runtime is None or runtime.event_executor is None:
             return
+        executor = runtime.event_executor
         try:
             executor.shutdown(wait=True, cancel_futures=True)
         except TypeError:

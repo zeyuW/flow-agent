@@ -36,6 +36,8 @@ line-length = 88
 [tool.pyright]
 extraPaths = ["src", "tests"]
 pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
 
 [dependency-groups]
 dev = [

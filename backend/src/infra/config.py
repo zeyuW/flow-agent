@@ -192,12 +192,18 @@ class ChannelsConfig(FrozenConfig):
             adapters = value["adapters"]
             if not isinstance(adapters, dict):
                 raise TypeError("channels.adapters 配置必须是对象")
-            return {"adapters": {str(name): dict(options) for name, options in adapters.items()}}
+            return {
+                "adapters": {
+                    str(name): dict(options) for name, options in adapters.items()
+                }
+            }
         if any(not isinstance(options, dict) for options in value.values()):
             raise ValueError(
                 "channels 配置必须使用 [channels.<渠道名>] 配置块，不能继续使用旧扁平字段"
             )
-        return {"adapters": {str(name): dict(options) for name, options in value.items()}}
+        return {
+            "adapters": {str(name): dict(options) for name, options in value.items()}
+        }
 
 
 class JobsConfig(FrozenConfig):

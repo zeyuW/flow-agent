@@ -60,22 +60,22 @@ class ConversationContext:
         self.session_key = key
         self._session = self._manager.get_or_create(key)
 
-    def get_history(self, session_id: str = "") -> list[dict]:
+    def get_history(self, conversation_id: str = "") -> list[dict]:
         """读取当前会话的可用历史消息。"""
-        sid = session_id or self.session_key
+        sid = conversation_id or self.session_key
         session = self._session if sid == self.session_key else self._manager.get_or_create(sid)
         start_idx = session.last_consolidated if session.last_consolidated > 0 else None
         return get_history(session, max_messages=500, start_index=start_idx)
 
-    def get_full_history(self, session_id: str = "") -> list[dict]:
+    def get_full_history(self, conversation_id: str = "") -> list[dict]:
         """读取当前会话的完整历史消息。"""
-        sid = session_id or self.session_key
+        sid = conversation_id or self.session_key
         session = self._session if sid == self.session_key else self._manager.get_or_create(sid)
         return get_history(session, max_messages=500, start_index=None)
 
     def append_turn(
         self,
-        session_id: str,
+        conversation_id: str,
         user_content: str,
         assistant_content: str,
         *,
@@ -83,18 +83,18 @@ class ConversationContext:
     ) -> None:
         """原子保存完整回合，保证恢复时不会出现半个回合。"""
         self._manager.append_turn(
-            session_id or self.session_key,
+            conversation_id or self.session_key,
             user_content,
             assistant_content,
             assistant_tool_chain=assistant_tool_chain,
         )
 
-    def append_user_message(self, session_id: str, content: str) -> None:
-        self._manager.append_message(session_id or self.session_key, "user", content)
+    def append_user_message(self, conversation_id: str, content: str) -> None:
+        self._manager.append_message(conversation_id or self.session_key, "user", content)
 
-    def append_assistant_message(self, session_id: str, content: str) -> None:
+    def append_assistant_message(self, conversation_id: str, content: str) -> None:
         self._manager.append_message(
-            session_id or self.session_key,
+            conversation_id or self.session_key,
             "assistant",
             content,
         )

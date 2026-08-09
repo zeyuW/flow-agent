@@ -7,12 +7,12 @@ def test_typed_event_bus_emit_is_ordered_and_replaceable():
     bus = EventBus()
     seen = []
 
-    def first(event):
+    def first(event: Event) -> Event:
         seen.append(("first", event.payload["value"]))
         event.payload["value"] += 1
         return event
 
-    async def second(event):
+    async def second(event: Event) -> None:
         await asyncio.sleep(0)
         seen.append(("second", event.payload["value"]))
 
@@ -38,7 +38,7 @@ def test_typed_event_bus_fanout_isolates_failures():
         del event
         raise RuntimeError("boom")
 
-    async def healthy(event):
+    async def healthy(event: Event) -> None:
         await asyncio.sleep(0)
         seen.append(event.event_type)
 
@@ -52,8 +52,13 @@ def test_typed_event_bus_fanout_isolates_failures():
 
 def test_typed_event_bus_on_any_receives_event():
     bus = EventBus()
-    seen = []
-    bus.on_any(lambda event: seen.append(event.event_type))
+    seen: list[str] = []
+
+    def on_any(event: object) -> None:
+        assert isinstance(event, Event)
+        seen.append(event.event_type)
+
+    bus.on_any(on_any)
 
     asyncio.run(bus.observe(Event("any")))
 

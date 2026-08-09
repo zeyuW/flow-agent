@@ -3,6 +3,7 @@
 import json
 import threading
 import time
+from typing import Any, Callable
 
 from application.agent.app.agent import Agent
 from application.passive.infra.session_manager import ConversationContext
@@ -25,14 +26,18 @@ from application.capabilities.llm.client import LLMResult, LLMToolCall
 from application.capabilities.tools.base import ToolResult
 from application.capabilities.tools.registry import ToolRegistry
 
-
 # ── 测试用 LLM 客户端 ──────────────────────────────────────
+
 
 class ScriptedLLMClient:
     def __init__(self) -> None:
         self.calls = 0
 
-    def generate(self, messages, tools=None):
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResult:
         self.calls += 1
         if self.calls == 1 and tools:
             return LLMResult(
@@ -47,6 +52,15 @@ class ScriptedLLMClient:
                 ],
             )
         return LLMResult(content="pipeline final answer")
+
+    def generate_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResult:
+        del on_delta
+        return self.generate(messages, tools)
 
 
 class FakeTool:
@@ -76,6 +90,7 @@ def _build_system_prompt() -> str:
 
 # ── InboundQueue 测试 ─────────────────────────────────────
 
+
 def test_inbound_queue_publish_and_consume():
     q = InboundQueue()
     msg = InboundMessage(channel="test", session_id="s1", text="hello")
@@ -98,6 +113,7 @@ def test_inbound_queue_consume_all():
 
 
 # ── OutboundQueue 测试（新 subscribe 接口） ────────────────────
+
 
 class _FakeSubscriber:
     def __init__(self):
@@ -154,6 +170,7 @@ def test_outbound_queue_has_subscribers():
 
 # ── BusOutboundPort 测试 ──────────────────────────────────
 
+
 def test_bus_outbound_port_send():
     """测试 BusOutboundPort.send 将 OutboundDispatch 发布到队列。"""
     q = OutboundQueue()
@@ -167,6 +184,7 @@ def test_bus_outbound_port_send():
 
 
 # ── MessageBus 集成测试 ───────────────────────────────────
+
 
 def test_message_bus_inbound_flow():
     bus = MessageBus()
@@ -187,7 +205,9 @@ def test_message_bus_outbound_subscribe_publish():
     # publish 只入队，不触发分发
     assert bus.outbound.consume_one() is not None
     # dispatch 触发分发
-    bus.outbound.dispatch(OutboundMessage(channel="cli", session_id="s1", text="reply2"))
+    bus.outbound.dispatch(
+        OutboundMessage(channel="cli", session_id="s1", text="reply2")
+    )
     assert len(sub.received) == 1
     assert sub.received[0].text == "reply2"
 
@@ -217,6 +237,7 @@ def test_message_bus_outbound_port():
 
 
 # ── EventBus 测试 ────────────────────────────────────────
+
 
 class _FakeEventSub:
     def __init__(self) -> None:
@@ -251,6 +272,7 @@ def test_turn_committed_event():
 
 # ── TurnFlow 测试 ────────────────────────────────────────
 
+
 def test_turnflow_fields():
     flow = TurnFlow(
         user_input="hello",
@@ -268,6 +290,7 @@ def test_turnflow_fields():
 
 
 # ── Pipeline 测试 ────────────────────────────────────────
+
 
 def test_pipeline_runs_six_phases():
     """测试 PassiveTurnPipeline 执行完整的六阶段管道。
@@ -294,12 +317,16 @@ def test_pipeline_runs_six_phases():
         message_bus=bus,
         event_bus=eb,
     )
-    inbound = IncomingMessage(channel="cli", conversation_id="s1", text="test six phases")
+    inbound = IncomingMessage(
+        channel="cli", conversation_id="s1", text="test six phases"
+    )
     pipeline.process(inbound)
 
     # 验证事件已广播
     assert len(ev_sub.events) >= 1
-    turn_committed_events = [e for e in ev_sub.events if e.event_type == "turn_committed"]
+    turn_committed_events = [
+        e for e in ev_sub.events if e.event_type == "turn_committed"
+    ]
     assert len(turn_committed_events) == 1
     assert turn_committed_events[0].payload["user_input"] == "test six phases"
     assert ev_sub.events[0].payload["user_input"] == "test six phases"
@@ -368,11 +395,26 @@ def test_pipeline_errors_gracefully():
 
 
 class _AlwaysFailLLM:
-    def generate(self, messages, tools=None):
+    def generate(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> LLMResult:
+        del messages, tools
+        raise RuntimeError("simulated LLM failure")
+
+    def generate_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> LLMResult:
+        del messages, tools, on_delta
         raise RuntimeError("simulated LLM failure")
 
 
 # ── AgentLoop 测试 ───────────────────────────────────────
+
 
 def test_agent_loop_run_once():
     """测试 AgentLoop.run_once 处理一条消息。"""
@@ -406,6 +448,7 @@ def test_agent_loop_run_once():
 
 # ── 渠道 MessageBus 集成测试（新 subscribe 接口）────────────
 
+
 def test_cli_channel_publishes_to_message_bus():
     """测试 CLI 渠道通过 MessageBus 发布入站消息。"""
     from interfaces.channels.cli import CLIChannel
@@ -415,7 +458,9 @@ def test_cli_channel_publishes_to_message_bus():
 
     bus = MessageBus()
     cli = CLIChannel(default_session_id="test")
-    cli.start(ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test")))
+    cli.start(
+        ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test"))
+    )
 
     cli.handle_line("hello from cli")
 
@@ -435,7 +480,9 @@ def test_cli_channel_receives_outbound_via_subscription():
 
     bus = MessageBus()
     cli = CLIChannel()
-    cli.start(ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test")))
+    cli.start(
+        ChannelContext(bus=bus, event_bus=EventBus(), log=logging.getLogger("test"))
+    )
 
     # 模拟 MessageBus 分发（通过订阅回调）
     msg = OutboundMessage(channel="cli", session_id="test", text="response text")
@@ -445,6 +492,7 @@ def test_cli_channel_receives_outbound_via_subscription():
 
 
 # ── 完整集成流程测试 ─────────────────────────────────────
+
 
 def test_full_message_bus_architecture_flow():
     """端到端测试：渠道 → MessageBus → AgentLoop → Pipeline → 回复。
@@ -484,7 +532,9 @@ def test_full_message_bus_architecture_flow():
     loop = PassiveLoop(consumer=bus, processor=pipeline, event_bus=eb)
 
     # 模拟渠道发布入站消息
-    bus.publish_inbound(InboundMessage(channel="cli", session_id="full", text="end to end"))
+    bus.publish_inbound(
+        InboundMessage(channel="cli", session_id="full", text="end to end")
+    )
 
     # AgentLoop 处理
     assert loop.run_once() is True
@@ -503,7 +553,9 @@ def test_full_message_bus_architecture_flow():
 
     # 验证事件（先于出站投递）
     assert len(ev_sub.events) >= 1
-    turn_committed_events = [e for e in ev_sub.events if e.event_type == "turn_committed"]
+    turn_committed_events = [
+        e for e in ev_sub.events if e.event_type == "turn_committed"
+    ]
     assert len(turn_committed_events) == 1
     assert turn_committed_events[0].payload["user_input"] == "end to end"
     assert ev_sub.events[0].payload["user_input"] == "end to end"

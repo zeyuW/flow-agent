@@ -14,7 +14,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 from uuid import uuid4
 
 from infra.bus.types import (
@@ -26,7 +26,7 @@ from infra.bus.types import (
 )
 from infra.bus.types import ChannelDeliveryResult, OutboundMessage
 from infra.persistence import SQLiteOutboxStore
-from infra.bus.queues import InboundQueue, OutboundQueue
+from infra.bus.queues import InboundQueue, OutboundCallback, OutboundQueue
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +336,8 @@ class MessageBus(MessageSender, MessageConsumer):
         """读取一条入站消息，并保留待确认的消息记录。"""
 
         inbound = await self.consume_inbound_async(poll_interval_ms)
+        if inbound is None:
+            raise RuntimeError("inbound message disappeared while receiving")
         message_id = uuid4().hex
         self._inbound_pending[message_id] = inbound
         return ReceivedMessage(
@@ -363,7 +365,7 @@ class MessageBus(MessageSender, MessageConsumer):
             self.inbound.publish(message)
 
     def subscribe_outbound(
-        self, channel: str, callback: Callable[[OutboundMessage], None]
+        self, channel: str, callback: OutboundCallback
     ) -> None:
         """渠道适配器调用：注册出站订阅回调。
 
@@ -373,7 +375,7 @@ class MessageBus(MessageSender, MessageConsumer):
         self.outbound.subscribe(channel, callback)
 
     def unsubscribe_outbound(
-        self, channel: str, callback: Callable[[OutboundMessage], None]
+        self, channel: str, callback: OutboundCallback
     ) -> None:
         """渠道适配器调用：取消出站订阅。"""
         self.outbound.unsubscribe(channel, callback)
@@ -498,7 +500,7 @@ class MessageBus(MessageSender, MessageConsumer):
                 self._schedule_runtime_retry(message)
 
     async def _dispatch_with_retry(
-        self, message: OutboundMessage, callback: Callable[[OutboundMessage], None]
+        self, message: OutboundMessage, callback: OutboundCallback
     ) -> DeliveryReceipt:
         """带容错重试的出站分发。
 
@@ -559,17 +561,18 @@ class MessageBus(MessageSender, MessageConsumer):
     def _schedule_runtime_retry(self, message: OutboundMessage) -> None:
         """为运行期间的明确可重试失败安排一次退避重试。"""
 
-        if self.outbox_store is None or not self._running:
+        outbox_store = self.outbox_store
+        if outbox_store is None or not self._running:
             return
         delivery_id = message.delivery_id
         if delivery_id in self._runtime_retrying_ids:
             return
-        record = self.outbox_store.get(delivery_id)
+        record = outbox_store.get(delivery_id)
         if record is None or record.status != "failed":
             return
         age = max(0.0, time.time() - record.created_at)
         if age >= self._runtime_retry_max_age_s:
-            self.outbox_store.mark_expired(delivery_id)
+            outbox_store.mark_expired(delivery_id)
             logger.warning("出站消息已超过运行期重试时限，标记为过期: %s", delivery_id)
             return
 
@@ -586,11 +589,11 @@ class MessageBus(MessageSender, MessageConsumer):
                 await asyncio.sleep(max(0.0, delay))
                 if not self._running:
                     return
-                current = self.outbox_store.get(delivery_id)
+                current = outbox_store.get(delivery_id)
                 if current is None or current.status != "failed":
                     return
                 if time.time() - current.created_at >= self._runtime_retry_max_age_s:
-                    self.outbox_store.mark_expired(delivery_id)
+                    outbox_store.mark_expired(delivery_id)
                     logger.warning("出站消息重试已过期: %s", delivery_id)
                     return
                 self.outbound.publish(message)
@@ -603,7 +606,9 @@ class MessageBus(MessageSender, MessageConsumer):
                 raise
             finally:
                 self._runtime_retrying_ids.discard(delivery_id)
-                self._runtime_retry_tasks.discard(asyncio.current_task())
+                current_task = asyncio.current_task()
+                if current_task is not None:
+                    self._runtime_retry_tasks.discard(current_task)
 
         task = asyncio.create_task(retry_later())
         self._runtime_retry_tasks.add(task)
@@ -642,7 +647,7 @@ class MessageBus(MessageSender, MessageConsumer):
                 self.outbox_store.mark_failed(message.delivery_id, error)
         self.outbound_port.complete(receipt)
 
-    def _get_subscribers(self, channel: str) -> list[Callable[[OutboundMessage], None]]:
+    def _get_subscribers(self, channel: str) -> list[OutboundCallback]:
         with self.outbound._lock:
             return list(self.outbound._subscribers.get(channel, []))
 

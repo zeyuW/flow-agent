@@ -2,6 +2,7 @@
 
 import asyncio
 from pathlib import Path
+from typing import Any, cast
 
 from infra.bus.types import InboundMessage
 from infra.bus.types import ChannelDeliveryResult, OutboundMessage
@@ -158,7 +159,9 @@ def test_non_retryable_failure_is_not_retried(tmp_path: Path):
             await asyncio.sleep(0.05)
             assert receipt.delivered is False
             assert len(calls) == 1
-            assert store.get(calls[0]).status == "failed"
+            record = store.get(calls[0])
+            assert record is not None
+            assert record.status == "failed"
         finally:
             await bus.stop_dispatch_task()
             await runner
@@ -215,6 +218,7 @@ def test_stale_outbox_is_expired_instead_of_replayed(tmp_path: Path):
     bus = MessageBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=60)
 
     assert bus.outbound.consume_one() is None
+    assert bus.outbox_store is not None
     record = bus.outbox_store.get("stale-1")
     assert record is not None
     assert record.status == "expired"
@@ -234,7 +238,9 @@ def test_fresh_outbox_is_recovered_with_original_event_time(tmp_path: Path):
         metadata={"kind": "proactive"},
     )
 
-    bus = MessageBus(outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=86400)
+    bus = MessageBus(
+        outbox_store=SQLiteOutboxStore(path), outbox_recovery_window_s=86400
+    )
     restored = bus.outbound.consume_one()
 
     assert restored is not None
@@ -310,7 +316,7 @@ def test_same_session_messages_are_processed_in_fifo_order():
             def process(self, inbound):
                 del inbound
 
-        loop = AgentLoop(bus, Pipeline(), poll_interval_ms=1)
+        loop: Any = AgentLoop(cast(Any, bus), cast(Any, Pipeline()), poll_interval_ms=1)
 
         async def fake_process(inbound):
             processed.append(f"start:{inbound.text}")
@@ -320,8 +326,12 @@ def test_same_session_messages_are_processed_in_fifo_order():
 
         loop._process_async = fake_process
         runner = asyncio.create_task(loop.run_forever())
-        bus.publish_inbound(InboundMessage(channel="telegram", session_id="s1", text="first"))
-        bus.publish_inbound(InboundMessage(channel="telegram", session_id="s1", text="second"))
+        bus.publish_inbound(
+            InboundMessage(channel="telegram", session_id="s1", text="first")
+        )
+        bus.publish_inbound(
+            InboundMessage(channel="telegram", session_id="s1", text="second")
+        )
         await asyncio.sleep(0.03)
 
         assert processed == ["start:first"]
@@ -443,17 +453,21 @@ def test_spawn_tool_preserves_group_session_and_chat_target():
             return "created"
 
     manager = Manager()
-    tool = SpawnTool(manager=manager, policy=Policy())
-    result = tool.run({
-        "task": "群聊后台任务",
-        "__channel": "telegram",
-        "__chat_id": "-100123",
-        "__session_id": "telegram_group_-100123",
-    })
+    tool = SpawnTool(manager=manager, policy=cast(Any, Policy()))
+    result = tool.run(
+        {
+            "task": "群聊后台任务",
+            "__channel": "telegram",
+            "__chat_id": "-100123",
+            "__session_id": "telegram_group_-100123",
+        }
+    )
 
     assert result.ok is True
     assert manager.arguments["origin_chat_id"] == "-100123"
     assert manager.arguments["origin_session_id"] == "telegram_group_-100123"
+
+
 def test_agent_loop_cancellation_cancels_hanging_passive_turn():
     """运行时取消主循环时，必须取消尚未结束的被动回合。"""
 
@@ -464,7 +478,7 @@ def test_agent_loop_cancellation_cancels_hanging_passive_turn():
             def process(self, inbound):
                 del inbound
 
-        loop = AgentLoop(bus, Pipeline(), poll_interval_ms=1)
+        loop: Any = AgentLoop(cast(Any, bus), cast(Any, Pipeline()), poll_interval_ms=1)
         started = asyncio.Event()
         cancelled = asyncio.Event()
 

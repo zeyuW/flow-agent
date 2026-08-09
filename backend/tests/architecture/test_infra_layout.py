@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-
 BACKEND_ROOT = Path(__file__).parents[2]
 INFRA_ROOT = BACKEND_ROOT / "src" / "infra"
 
@@ -20,9 +19,7 @@ def test_shared_infrastructure_is_grouped_by_cohesive_capability():
         "runtime.py",
         "workspace.py",
     }
-    assert expected_modules <= {
-        path.name for path in INFRA_ROOT.glob("*.py")
-    }
+    assert expected_modules <= {path.name for path in INFRA_ROOT.glob("*.py")}
 
     removed_directories = {
         "config",
