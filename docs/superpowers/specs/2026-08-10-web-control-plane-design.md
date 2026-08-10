@@ -53,6 +53,24 @@ frontend/src/
 
 现有 `RuntimeServiceSnapshot`、`RuntimeHealth`、`ChannelStatus`、`EventStore` 和 SQLite outbox 是首版 API 的主要数据来源。响应应提供分页、时间范围、渠道、状态和 `trace_id` 筛选，返回稳定的 DTO，而不是直接暴露领域对象。
 
+### 前端与管理 API 对照
+
+P0 统一使用 `/api/v1/admin`。此前 `frontend-tracing-api.md` 中的 `/api/traces`、`/api/events` 是并行开发草案，不作为本次实现的路由；其中追踪页需求并入下表的 `events` 与 `traces` 资源。所有列表统一返回 `{ "items": [...], "next_cursor": string | null }`，时间均为 UTC ISO 8601，浏览器请求携带管理员 API Key，但不得将 Key 写入源码、LocalStorage 或日志。
+
+| 前端路由 / 功能 | 初始 REST 数据 | 实时增量 | 页面消费的安全 DTO | 后端数据归属 |
+| --- | --- | --- | --- | --- |
+| `/` 概览 | `GET /overview` | `GET /stream` 的 `overview` 事件 | `OverviewDto`：服务健康、活跃会话数、队列积压、今日计数、失败投递数 | `RuntimeServiceSnapshot`、运行时健康、事件与 outbox 聚合 |
+| `/channels` 渠道 | `GET /channels` | `channel_changed` | `ChannelDto`：名称、状态、更新时间、脱敏错误摘要 | `ChannelStatus` 与渠道适配器运行状态 |
+| `/events` 事件与回合 | `GET /events?cursor&channel&status&trace_id&from&to` | `event_created` | `EventDto`：`trace_id`、阶段、状态、时间、安全摘要、错误摘要 | `EventStore` |
+| 右侧 Trace 抽屉 | `GET /traces/{trace_id}` | 无；抽屉打开时刷新 | `TraceDto`：回合状态、阶段时间线、工具安全摘要、关联投递摘要 | 按 `trace_id` 查询的 EventStore 与 outbox |
+| `/deliveries` 投递 | `GET /deliveries?cursor&status&channel&trace_id&from&to` | `delivery_changed` | `DeliveryDto`：脱敏会话标识、状态、尝试数、时间、错误摘要、`trace_id` | SQLite outbox 的安全投影 |
+| `/automation` 自动化与主动策略 | `GET /jobs` | `job_changed` | `JobDto`：名称、类型、状态、下次运行、最近结果、关联 `trace_id` | 调度器与主动运行时快照 |
+| 全局数据新鲜度 | 无独立请求 | SSE 连接状态 | `StreamState`：`is_live`、`last_updated_at`、`is_stale` | 浏览器 SSE 客户端；断线后 REST 轮询 |
+
+`GET /stream` 使用 `text/event-stream`，事件 `data` 的格式为 `{ "resource": "overview|channels|events|deliveries|jobs", "payload": <对应 DTO 或 DTO 数组>, "occurred_at": "..." }`。前端按 `resource` 更新 TanStack Query 缓存；连接失败时保留最后成功快照、显示“数据可能已过期”，并以 30 秒间隔轮询当前页面的 REST 查询。SSE 仅推送已脱敏的 DTO，不推送配置、消息正文、原始 metadata、原始工具参数或密钥。
+
+前端 `src/lib/api/` 对每个 DTO 提供 Zod schema、TypeScript 推导类型及请求函数；`src/features/<resource>/` 只调用对应 query hook，不知晓 URL、认证头或 SSE 细节。接口不可用、返回无法通过 schema 校验或返回 401/403 时，分别映射为“暂时不可用”、“数据格式异常”和“无权访问”状态，且不显示服务器原始响应。
+
 ## 错误处理与验收
 
 页面将空状态、无权限、暂时不可用和加载失败分别呈现；SSE 断线时显示“数据可能已过期”，自动退避重连，并保留最后成功快照。危险操作失败后保留表单和服务器返回的可读错误。

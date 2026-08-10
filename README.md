@@ -2,6 +2,34 @@
 
 Flow Agent 是一个可扩展的多渠道智能体服务，提供对话、工具调用、长期记忆、后台任务和主动消息能力，并支持通过 MCP、插件和技能扩展运行时能力。
 
+## 效果演示
+  <table>
+    <tr>
+      <td align="center">
+        <img src="assets/memory.jpg" alt="用户画像" width="240">
+        <br>
+        用户画像
+      </td>
+      <td align="center">
+        <img src="assets/passive.jpg" alt="被动回复" width="240">
+        <br>
+        被动回复
+      </td>
+    </tr>
+    <tr>
+      <td align="center">
+        <img src="assets/proactive.jpg" alt="主动回复" width="240">
+        <br>
+        主动回复
+      </td>
+      <td align="center">
+        <img src="assets/vision.jpg" alt="视觉识别" width="240">
+        <br>
+        视觉识别
+      </td>
+    </tr>
+  </table>
+
 ## 快速开始
 
 ### 1. 拉取仓库
