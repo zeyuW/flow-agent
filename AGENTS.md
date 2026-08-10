@@ -30,6 +30,10 @@ cd backend && uv run pyright                # 执行静态类型检查
 
 使用 Python 3.11+、4 个空格缩进和 Black（行宽 88）。模块、函数和变量使用 `snake_case`，类使用 `PascalCase`，常量使用 `UPPER_SNAKE_CASE`。公共包、适配器和关键职责文件应保留简短中文注释；导入方向必须保持单向且清晰。
 
+## Documentation Language
+
+所有文档默认使用中文。仅在无法准确翻译或会降低可读性时保留英文专业术语、代码标识、配置字段、目录路径和命令；首次出现的英文术语应尽量附带中文说明。
+
 ## Testing Guidelines
 
 测试框架为 pytest，测试文件命名为 `test_*.py`，测试函数命名为 `test_<behavior>`。修改业务行为、生命周期或依赖边界时同步补充测试；项目当前未配置覆盖率门槛，但新代码应覆盖正常路径和失败路径。架构约束测试位于 `backend/tests/architecture/`。

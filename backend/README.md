@@ -117,12 +117,6 @@ cd backend && uv run black src tests
 cd backend && uv run pyright
 ```
 
-若工作站自动加载了项目外的 pytest 插件，使用项目测试配置对应的隔离命令：
-
-```bash
-cd backend && PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run python -m pytest -q
-```
-
 文档改动不改变代码测试范围；真实模型、渠道和外部服务仍需要凭据、网络和对应服务端进行验证。
 
 ## 继续阅读

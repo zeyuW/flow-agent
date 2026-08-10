@@ -26,6 +26,7 @@ def test_ci_and_pre_commit_check_committed_changes_with_locked_environment():
     assert "uv sync --locked" in workflow
     assert 'git diff --check "${BEFORE_SHA}" "${CURRENT_SHA}"' in workflow
     assert "backend/src/infra/config.py" in workflow
-    assert "git diff --cached --check" in hook
-    assert "export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1" in hook
+    assert "git diff --cached --check" not in hook
     assert "uv run --project backend" in hook
+    assert "UV_CACHE_DIR" in hook
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" in hook

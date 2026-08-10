@@ -6,8 +6,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT_DIR}"
 
 export PYTHONPATH="${ROOT_DIR}/backend/src${PYTHONPATH:+:${PYTHONPATH}}"
-export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+# 某些受管执行环境的用户缓存目录只读；提交钩子使用可写的临时缓存。
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/tmp/flow-agent-uv-cache}"
+mkdir -p "${UV_CACHE_DIR}"
+export PYTEST_DISABLE_PLUGIN_AUTOLOAD="${PYTEST_DISABLE_PLUGIN_AUTOLOAD:-1}"
 
-git diff --cached --check
 uv run --project backend python -m compileall -q backend/src
 uv run --project backend python -m pytest -q backend/tests

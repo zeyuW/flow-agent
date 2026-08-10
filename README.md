@@ -55,8 +55,38 @@ base_url = "https://api.deepseek.com/v1"
 
 ### 5. Docker（可选）
 
+Docker 同样读取仓库根目录的 `config.toml`，先完成配置并启用需要的渠道：
+
 ```bash
-docker compose up --build
+cp config.example.toml config.toml
+```
+
+当前 Docker 默认运行 Telegram 主链路；HTTP、CLI 和 dashboard 不会由 Compose 自动开启。
+
+```bash
+./scripts/docker-deploy.sh
+```
+
+Docker 需要 Compose v2（`docker compose`）。请始终使用上面的部署脚本，不要直接执行 `docker compose up`，否则脚本不会处理代理地址和容器重建。无代理时不需要配置任何环境变量；如果宿主机需要代理，可选设置标准变量：
+
+```bash
+export http_proxy=http://127.0.0.1:7892
+export https_proxy=http://127.0.0.1:7892
+export no_proxy=localhost,127.0.0.1,host.docker.internal
+```
+
+在 Linux/WSL2 中，脚本会自动识别 Windows 宿主机地址，把本地代理地址中的 `127.0.0.1` 转换为容器可访问的地址，并将代理同时传入镜像构建和容器运行阶段。Windows VPN/代理必须允许来自 WSL/Docker 的局域网连接；如果软件只监听 Windows 的 `127.0.0.1`，容器仍然无法连接。项目镜像包含 Node.js/npm，可运行 `.flow/mcp.json` 中使用 `npx` 声明的外部 MCP。
+
+脚本会复用已有的 `.flow/`，不会清空本地记忆、数据库或日志；启动后按 `Ctrl+C` 只会退出日志查看，容器仍在后台运行。若不需要跟踪日志，可执行：
+
+```bash
+./scripts/docker-deploy.sh --no-logs
+```
+
+停止容器：
+
+```bash
+docker compose down
 ```
 
 ## 继续阅读
