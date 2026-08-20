@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  capabilitySnapshotSchema,
   scheduleSummarySchema,
   sessionDetailSchema,
   sessionSummarySchema,
@@ -106,6 +107,10 @@ export function getSession(
 
 export function getSchedules(): Promise<ScheduleSummary[]> {
   return getJson("/api/schedules", z.array(scheduleSummarySchema));
+}
+
+export function getCapabilities() {
+  return getJson("/api/capabilities", capabilitySnapshotSchema);
 }
 
 export async function cancelSchedule(taskId: string): Promise<void> {

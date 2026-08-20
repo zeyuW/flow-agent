@@ -22,7 +22,7 @@ class UndoTool:
     """
 
     session_manager = None  # Set during bootstrap
-    memory_store = None     # Optional: MemoryStore for memory cleanup (spec 5e)
+    memory_store = None  # Optional: MemoryStore for memory cleanup (spec 5e)
 
     @property
     def name(self) -> str:
@@ -62,7 +62,9 @@ class UndoTool:
             dry_run = tool_input.get("dry_run", False) in (True, "true", "True")
 
             if self.session_manager is None:
-                return ToolResult(ok=False, content="undo tool not configured (no session manager)")
+                return ToolResult(
+                    ok=False, content="undo tool not configured (no session manager)"
+                )
 
             session = self.session_manager.get_or_create(session_key)
             result = self.session_manager.find_last_passive_turn(session)
@@ -75,19 +77,21 @@ class UndoTool:
             if dry_run:
                 return ToolResult(
                     ok=True,
-                    content=json.dumps({
-                        "dry_run": True,
-                        "messages_to_delete": len(ids_to_delete),
-                        "ids": ids_to_delete,
-                        "start_index": start_idx,
-                        "end_index": end_idx,
-                    }, ensure_ascii=False, indent=2),
+                    content=json.dumps(
+                        {
+                            "dry_run": True,
+                            "messages_to_delete": len(ids_to_delete),
+                            "ids": ids_to_delete,
+                            "start_index": start_idx,
+                            "end_index": end_idx,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
                 )
 
             # Execute undo
-            deleted = asyncio.run(
-                self.session_manager.undo_last_turn(session)
-            )
+            deleted = asyncio.run(self.session_manager.undo_last_turn(session))
 
             # spec 5e: Mark related memories as superseded
             memory_cleanup = 0
@@ -106,11 +110,15 @@ class UndoTool:
 
             return ToolResult(
                 ok=True,
-                content=json.dumps({
-                    "deleted_messages": deleted,
-                    "cursor_rolled_back": session.last_consolidated,
-                    "memories_superseded": memory_cleanup,
-                }, ensure_ascii=False, indent=2),
+                content=json.dumps(
+                    {
+                        "deleted_messages": deleted,
+                        "cursor_rolled_back": session.last_consolidated,
+                        "memories_superseded": memory_cleanup,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
             )
         except Exception as exc:
             logger.exception("undo failed")

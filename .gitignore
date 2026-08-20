@@ -1,11 +1,2 @@
-# 根目录运行时数据
-.flow/
-
 # 配置文件
 config.toml
-
-# 前端本地依赖、构建产物与私有配置
-frontend/node_modules/
-frontend/.next/
-frontend/.env.local
-frontend/tsconfig.tsbuildinfo

@@ -25,7 +25,8 @@ class WorkspaceLayout:
     memory_dir: Path
     memory_journal_dir: Path
     memory_consolidation_db: Path
-    skills_dir: Path
+    project_skills_dir: Path
+    installed_skills_dir: Path
     drift_dir: Path
     drift_skills_dir: Path
     plugins_dir: Path
@@ -58,11 +59,11 @@ class WorkspaceLayout:
     marker_file: Path
 
 
-def build_layout(root: Path) -> WorkspaceLayout:
+def build_layout(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLayout:
     """根据项目根目录构建完整运行时路径，不产生文件系统副作用。"""
 
     root = root.resolve()
-    flow = root / FLOW_DIR
+    flow = (runtime_dir or Path.home() / FLOW_DIR).expanduser().resolve()
     data = flow / "data"
     memory = flow / "memory"
     drift = flow / "drift"
@@ -77,7 +78,8 @@ def build_layout(root: Path) -> WorkspaceLayout:
         memory_dir=memory,
         memory_journal_dir=memory / "journal",
         memory_consolidation_db=memory / "consolidation_writes.db",
-        skills_dir=flow / "skills",
+        project_skills_dir=root / "skills",
+        installed_skills_dir=flow / "skills",
         drift_dir=drift,
         drift_skills_dir=drift / "skills",
         plugins_dir=flow / "plugins",
@@ -111,10 +113,10 @@ def build_layout(root: Path) -> WorkspaceLayout:
     )
 
 
-def init_workspace(root: Path) -> WorkspaceLayout:
+def init_workspace(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLayout:
     """初始化不包含业务副作用的运行时工作区。"""
 
-    layout = build_layout(root)
+    layout = build_layout(root, runtime_dir=runtime_dir)
     for folder in _workspace_directories(layout):
         folder.mkdir(parents=True, exist_ok=True)
 
@@ -133,7 +135,8 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
         layout.data_dir,
         layout.memory_dir,
         layout.memory_journal_dir,
-        layout.skills_dir,
+        layout.project_skills_dir,
+        layout.installed_skills_dir,
         layout.drift_skills_dir,
         layout.plugins_dir,
         layout.plugin_data_dir,
@@ -164,8 +167,12 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
             "# 一行一个任务，空行和井号开头的行会被忽略\n",
         ),
         (
-            layout.skills_dir / "README.md",
-            "# 普通技能\n\n每个技能目录建议同时包含 skill.json 和 SKILL.md，可选 scripts、references、assets。\n",
+            layout.project_skills_dir / "README.md",
+            "# 项目技能\n\n每个技能目录包含 SKILL.md，可选 scripts、references、assets。本目录应提交到 Git。\n",
+        ),
+        (
+            layout.installed_skills_dir / "README.md",
+            "# 已安装技能\n\n每个技能目录包含 SKILL.md，可选 scripts、references、assets。本目录是本机运行时数据，不应提交到 Git。\n",
         ),
         (
             layout.drift_skills_dir / "README.md",
@@ -193,12 +200,13 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
     )
 
 
-def detect_workspace(start: Path | None = None) -> WorkspaceLayout | None:
+def detect_workspace(
+    start: Path | None = None, *, runtime_dir: Path | None = None
+) -> WorkspaceLayout | None:
     current = (start or Path.cwd()).resolve()
     for path in (current, *current.parents):
-        new_marker = path / FLOW_DIR / WORKSPACE_MARKER
-        if new_marker.exists():
-            return build_layout(path)
+        if (path / "skills").is_dir():
+            return build_layout(path, runtime_dir=runtime_dir)
     return None
 
 
@@ -214,7 +222,7 @@ def apply_workspace_env(layout: WorkspaceLayout) -> None:
 
     os.environ.setdefault("FLOW_AGENT_MEMORY_DB_PATH", str(layout.memory_db))
     os.environ.setdefault("FLOW_AGENT_TRACE_PATH", str(layout.trace_file))
-    os.environ.setdefault("FLOW_AGENT_SKILLS_DIR", str(layout.skills_dir))
+    os.environ.setdefault("FLOW_AGENT_SKILLS_DIR", str(layout.installed_skills_dir))
     os.environ.setdefault(
         "FLOW_AGENT_PROACTIVE_SOURCE_FILE", str(layout.proactive_source_file)
     )

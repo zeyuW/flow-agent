@@ -8,6 +8,7 @@ import threading
 from pathlib import Path
 
 from application.capabilities.tools.message_push import MessagePushTool
+from application.capabilities.app.capability_query import CapabilityQueryService
 from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
 from application.delegation.app.runtime import SubagentRuntime
@@ -67,6 +68,7 @@ class ServiceApp:
         self._admin_timeline: TraceTimeline | None = None
         self._session_query: SessionQueryService | None = None
         self._scheduler: SchedulerService | None = None
+        self._capability_query: CapabilityQueryService | None = None
         self._admin_server: AdminServer | None = None
 
     @property
@@ -231,9 +233,14 @@ class ServiceApp:
             self._plugin_manager,
             self._session_query,
             self._scheduler,
+            self._capability_query,
         ) = create_app_runtime(cfg)
         if cfg.admin_api.enabled:
-            if self._session_query is None or self._scheduler is None:
+            if (
+                self._session_query is None
+                or self._scheduler is None
+                or self._capability_query is None
+            ):
                 raise RuntimeError("管理查询服务未初始化")
             self._admin_timeline = TraceTimeline()
             self._event_bus.subscribe(self._admin_timeline)
@@ -242,6 +249,7 @@ class ServiceApp:
                     self._admin_timeline,
                     self._session_query,
                     self._scheduler,
+                    self._capability_query,
                 ),
                 host=cfg.admin_api.host,
                 port=cfg.admin_api.port,

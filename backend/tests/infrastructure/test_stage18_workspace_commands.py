@@ -7,12 +7,15 @@ from infra.workspace import (
     init_workspace,
     persist_workspace_profile,
 )
-from application.capabilities.skills.manager import SkillManager
 
 
 def test_workspace_init_and_detect(tmp_path: Path):
-    layout = init_workspace(tmp_path)
+    runtime_dir = tmp_path / "user" / ".flow"
+    layout = init_workspace(tmp_path, runtime_dir=runtime_dir)
     assert layout.marker_file.exists()
+    assert layout.project_skills_dir == tmp_path / "skills"
+    assert layout.installed_skills_dir == runtime_dir / "skills"
+    assert (layout.project_skills_dir / "README.md").is_file()
     assert layout.memory_dir.is_dir()
     assert layout.memory_journal_dir.is_dir()
     assert layout.drift_skills_dir.is_dir()
@@ -23,38 +26,13 @@ def test_workspace_init_and_detect(tmp_path: Path):
     assert layout.outbound_attachments_dir.is_dir()
     assert layout.proactive_trace_file.exists()
     assert layout.mcp_config_file.exists()
-    detected = detect_workspace(tmp_path / "skills")
+    detected = detect_workspace(tmp_path / "skills", runtime_dir=runtime_dir)
     assert detected is not None
     assert detected.root == tmp_path.resolve()
 
 
-def test_skill_manager_install_enable_disable(tmp_path: Path):
-    layout = init_workspace(tmp_path)
-    source = tmp_path / "src_skill"
-    source.mkdir()
-    (source / "skill.json").write_text(
-        json.dumps(
-            {
-                "name": "weather",
-                "description": "weather skill",
-                "version": "1.0.0",
-                "compatibility": ">=1.0.0",
-                "metadata": {"author": "tester"},
-            }
-        ),
-        encoding="utf-8",
-    )
-    manager = SkillManager(layout.skills_dir)
-    manifest = manager.install(source)
-    assert manifest.name == "weather"
-    manager.disable("weather")
-    assert manager.scan()[0].enabled is False
-    manager.enable("weather")
-    assert manager.scan()[0].enabled is True
-
-
 def test_plugin_manager_install_enable_disable_uninstall(tmp_path: Path):
-    layout = init_workspace(tmp_path)
+    layout = init_workspace(tmp_path, runtime_dir=tmp_path / "user" / ".flow")
     source = tmp_path / "src_plugin"
     source.mkdir()
     (source / "plugin.json").write_text(
@@ -81,7 +59,7 @@ def test_plugin_manager_install_enable_disable_uninstall(tmp_path: Path):
 
 
 def test_persist_workspace_profile_is_noop(tmp_path: Path):
-    layout = init_workspace(tmp_path)
+    layout = init_workspace(tmp_path, runtime_dir=tmp_path / "user" / ".flow")
     marker_before = layout.marker_file.read_text(encoding="utf-8")
     persist_workspace_profile(layout, "prod")
     assert layout.marker_file.read_text(encoding="utf-8") == marker_before

@@ -74,3 +74,23 @@ export const scheduleSummarySchema = z.object({
   last_error: z.string().nullable()
 });
 export type ScheduleSummary = z.infer<typeof scheduleSummarySchema>;
+
+export const skillCapabilitySchema = z.object({
+  name: z.string(),
+  description: z.string(),
+  source: z.enum(["project", "installed"]),
+  status: z.enum(["available", "conflict"]),
+  reason: z.string().nullable()
+});
+
+export const connectorCapabilitySchema = z.object({
+  name: z.string(),
+  connected: z.boolean(),
+  tools: z.array(z.string())
+});
+
+export const capabilitySnapshotSchema = z.object({
+  skills: z.array(skillCapabilitySchema),
+  connectors: z.array(connectorCapabilitySchema)
+});
+export type CapabilitySnapshot = z.infer<typeof capabilitySnapshotSchema>;

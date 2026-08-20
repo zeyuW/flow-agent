@@ -171,6 +171,11 @@ class ToolRegistry:
             tool_tokens = _tokenize(text)
             overlap = len(query_tokens & tool_tokens)
             score = overlap / max(1, len(query_tokens))
+            if any(
+                keyword in normalized_input
+                for keyword in _CORE_TOOL_KEYWORDS.get(tool_name, ())
+            ):
+                score += 1.0
             # 匹配度相同时略微优先内置工具，避免外部工具无条件抢占。
             if not tool_name.startswith("mcp__"):
                 score += 0.05
@@ -190,6 +195,12 @@ class ToolRegistry:
 
 
 _TOKEN_RE = re.compile(r"[\w\u4e00-\u9fff]+", re.UNICODE)
+_CORE_TOOL_KEYWORDS = {
+    "read": ("读取", "查看", "阅读", "打开", "文件内容"),
+    "write": ("写入", "创建", "新建", "保存", "覆盖"),
+    "edit": ("编辑", "修改", "替换", "更改", "改成"),
+    "bash": ("执行", "运行", "命令", "终端", "git ", "npm ", "uv "),
+}
 
 
 def _tokenize(text: str) -> set[str]:

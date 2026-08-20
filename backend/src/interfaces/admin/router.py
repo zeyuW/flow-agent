@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 
 from application.agent.app.tracing import TraceTimeline
+from application.capabilities.app.capability_query import CapabilityQueryService
 from application.passive.app.session_query import SessionQueryService
 from application.schedule.app.runtime import SchedulerService
 from interfaces.admin.schemas import (
     CreateSchedule,
+    CapabilitySnapshot,
     EventSummary,
     SessionDetail,
     SessionSummary,
@@ -26,11 +28,18 @@ def create_admin_app(
     timeline: TraceTimeline,
     session_query: SessionQueryService,
     scheduler: SchedulerService,
+    capability_query: CapabilityQueryService | None = None,
 ) -> FastAPI:
     """创建本机管理 API。"""
 
     app = FastAPI(title="Flow Agent Admin API", docs_url=None, redoc_url=None)
     router = APIRouter(prefix="/api")
+
+    @router.get("/capabilities", response_model=CapabilitySnapshot)
+    def get_capabilities() -> dict[str, list[dict[str, Any]]]:
+        if capability_query is None:
+            return {"skills": [], "connectors": []}
+        return capability_query.get_capabilities()
 
     @router.get("/traces", response_model=list[TraceSummary])
     def list_traces(

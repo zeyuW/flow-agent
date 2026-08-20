@@ -1,0 +1,9 @@
+# 依赖与构建产物
+node_modules/
+.next/
+out/
+
+# 本地环境配置与 TypeScript 构建缓存
+.env.local
+.env.*.local
+tsconfig.tsbuildinfo

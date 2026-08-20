@@ -295,14 +295,21 @@ def load_config(path: Path) -> AppConfig:
     return resolve_config_paths(AppConfig.model_validate(raw), path.parent)
 
 
-def resolve_config_paths(config: AppConfig, root: Path) -> AppConfig:
-    """把配置中的相对运行时路径固定到项目根目录。"""
+def resolve_config_paths(
+    config: AppConfig, root: Path, *, runtime_dir: Path | None = None
+) -> AppConfig:
+    """解析配置路径；`.flow/` 运行时路径固定到用户目录。"""
 
     base = root.resolve()
+    runtime = (runtime_dir or Path.home() / ".flow").expanduser().resolve()
 
     def absolute(value: str) -> str:
-        path = Path(value)
-        return str(path if path.is_absolute() else base / path)
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return str(path)
+        if path.parts and path.parts[0] == ".flow":
+            return str(runtime.joinpath(*path.parts[1:]))
+        return str(base / path)
 
     return config.model_copy(
         update={

@@ -12,6 +12,7 @@ import {
 import {
   cancelSchedule,
   createSchedule,
+  getCapabilities,
   getSchedules,
   getSession,
   getSessions,
@@ -401,6 +402,20 @@ function SchedulesPage() {
 }
 
 function CapabilitiesPage() {
+  const capabilitiesQuery = useQuery({
+    queryKey: ["capabilities"],
+    queryFn: getCapabilities
+  });
+  const capabilities = capabilitiesQuery.data;
+
+  if (capabilitiesQuery.isPending) {
+    return <p className="empty-state">正在读取技能与连接器…</p>;
+  }
+
+  if (capabilitiesQuery.isError || !capabilities) {
+    return <p className="empty-state">无法读取技能与连接器。</p>;
+  }
+
   return (
     <>
       <section className="capability-section">
@@ -409,19 +424,23 @@ function CapabilitiesPage() {
             <p className="eyebrow">Custom skills</p>
             <h2>自定义 Skills</h2>
           </div>
-          <span>2 个已加载</span>
+          <span>{capabilities.skills.length} 个 Skill</span>
         </div>
         <div className="compact-card-grid">
-          <article className="feature-card">
-            <h3>项目周报</h3>
-            <p>收集进展、阻塞事项并输出结构化周报。</p>
-            <small>本地 Skill</small>
-          </article>
-          <article className="feature-card">
-            <h3>资料研究</h3>
-            <p>检索、阅读和归纳多来源资料。</p>
-            <small>本地 Skill</small>
-          </article>
+          {capabilities.skills.length === 0 ? (
+            <p className="empty-state">尚未添加项目或已安装 Skill。</p>
+          ) : (
+            capabilities.skills.map((skill) => (
+              <article className="feature-card" key={`${skill.source}-${skill.name}`}>
+                <h3>{skill.name}</h3>
+                <p>{skill.description}</p>
+                <small>
+                  {skill.source === "project" ? "项目 Skill" : "已安装 Skill"}
+                  {skill.status === "conflict" ? ` · ${skill.reason}` : ""}
+                </small>
+              </article>
+            ))
+          )}
         </div>
       </section>
       <section className="capability-section">
@@ -430,19 +449,22 @@ function CapabilitiesPage() {
             <p className="eyebrow">MCP connectors</p>
             <h2>连接器</h2>
           </div>
-          <span>2 个已连接</span>
+          <span>{capabilities.connectors.length} 个连接器</span>
         </div>
         <div className="compact-card-grid">
-          <article className="feature-card">
-            <h3>日程</h3>
-            <p>读取日历事件并创建提醒。</p>
-            <small>已连接</small>
-          </article>
-          <article className="feature-card">
-            <h3>网页研究</h3>
-            <p>为 Agent 提供受控的信息检索能力。</p>
-            <small>已连接</small>
-          </article>
+          {capabilities.connectors.length === 0 ? (
+            <p className="empty-state">尚未连接 MCP 连接器。</p>
+          ) : (
+            capabilities.connectors.map((connector) => (
+              <article className="feature-card" key={connector.name}>
+                <h3>{connector.name}</h3>
+                <p>{connector.tools.join("、") || "暂未发现工具"}</p>
+                <small>
+                  {connector.connected ? "已连接" : "未连接"} · {connector.tools.length} 个工具
+                </small>
+              </article>
+            ))
+          )}
         </div>
       </section>
     </>

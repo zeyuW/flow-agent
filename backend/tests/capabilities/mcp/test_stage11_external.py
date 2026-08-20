@@ -2,6 +2,7 @@ from pathlib import Path
 
 from application.capabilities.mcp.client import MCPClient
 from application.capabilities.mcp.registry import MCPRegistry, MCPServerConfig
+
 # SourceGateway/ContentStore removed in new architecture
 # LocalFileSource removed in new architecture
 from application.proactive.domain.types import SourceRecord
@@ -23,6 +24,7 @@ def test_source_gateway_isolates_source_failure(tmp_path: Path):
     from application.proactive.infra.data_gateway import DataGateway
     from application.proactive.infra.mcp_pool import McpClientPool
     import asyncio
+
     pool = McpClientPool()
     gateway = DataGateway(pool)
     result = asyncio.run(gateway.run())
@@ -37,6 +39,7 @@ def test_content_store_deduplicates_records():
     from application.proactive.app.resolve import resolve_decision
     from application.proactive.domain.models import JudgeResult
     import hashlib
+
     store = ProactiveStateStore()
     # Mark with the actual delivery key that _build_delivery_key will produce
     cited = ["dedup_key"]
@@ -49,8 +52,12 @@ def test_content_store_deduplicates_records():
 
 def test_mcp_registry_mount_discover_and_call():
     registry = MCPRegistry()
-    client = MCPClient(server_name="ext", tool_handlers={"ping": lambda payload: f"ok:{payload}"})
-    registry.register_server(MCPServerConfig(name="ext", enabled=True, tools=["ping"]), client)
+    client = MCPClient(
+        server_name="ext", tool_handlers={"ping": lambda payload: f"ok:{payload}"}
+    )
+    registry.register_server(
+        MCPServerConfig(name="ext", enabled=True, tools=["ping"]), client
+    )
     registry.mount("ext")
     tools = registry.discover_tools()
     assert tools == [("ext", "ping", "Tool from MCP server ext")]
@@ -65,7 +72,7 @@ def test_skill_loader_and_registry_select(tmp_path: Path):
             [
                 "name: notify",
                 "description: send notify skill",
-                "requires_tools: read_file",
+                "requires_tools: read",
                 "requires_sources: file_feed",
                 "requires_mcp: ext",
             ]
@@ -74,10 +81,9 @@ def test_skill_loader_and_registry_select(tmp_path: Path):
     )
     specs = SkillLoader(tmp_path / "skills").load()
     selected = SkillRegistry(specs).select(
-        available_tools={"read_file"},
+        available_tools={"read"},
         available_sources={"file_feed"},
         available_mcp={"ext"},
     )
     assert selected is not None
     assert selected.name == "notify"
-

@@ -24,13 +24,17 @@ class ToolGuard:
         if (
             self.whitelist is not None
             and tool_name not in self.whitelist
-            and not any(tool_name.startswith(prefix) for prefix in self.whitelist_prefixes)
+            and not any(
+                tool_name.startswith(prefix) for prefix in self.whitelist_prefixes
+            )
         ):
             return GuardDecision(False, "tool_not_whitelisted")
         return GuardDecision(True, "ok")
 
-    def check_tool_input(self, tool_name: str, tool_input: dict[str, str]) -> GuardDecision:
-        if tool_name != "read_file":
+    def check_tool_input(
+        self, tool_name: str, tool_input: dict[str, str]
+    ) -> GuardDecision:
+        if tool_name != "read":
             return GuardDecision(True, "ok")
         path = (tool_input.get("path") or "").strip().lower()
         if any(keyword in path for keyword in self.blocked_path_keywords):
@@ -69,7 +73,10 @@ class BackgroundReentryGuard:
     def acquire(self) -> GuardDecision:
         now = time.time()
         with self._lock:
-            if self._running_since is not None and (now - self._running_since) < self.timeout_seconds:
+            if (
+                self._running_since is not None
+                and (now - self._running_since) < self.timeout_seconds
+            ):
                 return GuardDecision(False, "background_reentry_blocked")
             self._running_since = now
         return GuardDecision(True, "ok")
@@ -100,7 +107,10 @@ class ProactiveFrequencyGuard:
         if self.min_interval_seconds <= 0:
             return GuardDecision(True, "ok")
         now = time.time()
-        if self._last_ok_at is not None and (now - self._last_ok_at) < self.min_interval_seconds:
+        if (
+            self._last_ok_at is not None
+            and (now - self._last_ok_at) < self.min_interval_seconds
+        ):
             return GuardDecision(False, "proactive_rate_limited")
         self._last_ok_at = now
         return GuardDecision(True, "ok")

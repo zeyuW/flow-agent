@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   cancelSchedule,
   createSchedule,
+  getCapabilities,
   getSchedules,
   getSession,
   getSessions,
@@ -15,6 +16,7 @@ import OverviewPage from "./page";
 vi.mock("@/lib/api/client", () => ({
   cancelSchedule: vi.fn(),
   createSchedule: vi.fn(),
+  getCapabilities: vi.fn(),
   getSchedules: vi.fn(),
   getSession: vi.fn(),
   getSessions: vi.fn(),
@@ -34,6 +36,7 @@ function renderPage() {
 
 describe("OverviewPage", () => {
   beforeEach(() => {
+    vi.mocked(getCapabilities).mockResolvedValue({ skills: [], connectors: [] });
     vi.mocked(getSchedules).mockResolvedValue([]);
     vi.mocked(cancelSchedule).mockResolvedValue(undefined);
     vi.mocked(createSchedule).mockResolvedValue({
@@ -299,5 +302,35 @@ describe("OverviewPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "重新启用" }));
 
     await waitFor(() => expect(resumeSchedule).toHaveBeenCalledWith("daily-news"));
+  });
+
+  it("展示项目和已安装 Skill 及连接器状态", async () => {
+    vi.mocked(getCapabilities).mockResolvedValueOnce({
+      skills: [
+        {
+          name: "weekly-report",
+          description: "项目周报",
+          source: "project",
+          status: "available",
+          reason: null
+        },
+        {
+          name: "personal-notes",
+          description: "个人笔记",
+          source: "installed",
+          status: "available",
+          reason: null
+        }
+      ],
+      connectors: [{ name: "ai-news", connected: true, tools: ["news_search"] }]
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "技能与连接器" }));
+
+    expect(await screen.findByText("weekly-report")).toBeInTheDocument();
+    expect(screen.getByText("项目 Skill")).toBeInTheDocument();
+    expect(screen.getByText("已安装 Skill")).toBeInTheDocument();
+    expect(screen.getByText("已连接 · 1 个工具")).toBeInTheDocument();
   });
 });

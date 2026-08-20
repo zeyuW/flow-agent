@@ -1,5 +1,8 @@
 from application.agent.app.agent import Agent
+from application.capabilities.tools.registry import ToolRegistry
 from application.passive.infra.session_manager import ConversationContext
+from application.passive.app.phase import TurnFlow
+from application.passive.app.prompt import PromptRenderer
 from application.capabilities.llm.client import FakeLLMClient, OpenAILLMClient
 from application.capabilities.llm.prompts import build_messages
 from infra.config import ModelEndpointConfig
@@ -66,6 +69,49 @@ def test_agent_run():
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "echo: hello"},
     ]
+
+
+def test_prompt_renderer_requires_selected_core_tool_use():
+    context = ConversationContext()
+    agent = Agent(
+        system_prompt="You are helpful.",
+        llm_client=FakeLLMClient(),
+        context=context,
+    )
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    renderer = PromptRenderer(agent=agent, tool_registry=registry)
+
+    flow = renderer.render(
+        TurnFlow(
+            user_input="请写入一个文件",
+            session_id="session",
+            channel="telegram",
+            trace_id="trace",
+        )
+    )
+
+    assert [item["function"]["name"] for item in flow.tools] == ["write"]
+    system_content = "\n".join(
+        str(message["content"])
+        for message in flow.messages
+        if message["role"] == "system"
+    )
+    assert "不得声称没有该能力" in system_content
+
+
+class EchoTool:
+    @property
+    def name(self) -> str:
+        return "write"
+
+    @property
+    def description(self) -> str:
+        return "写入文件"
+
+    @property
+    def input_schema(self) -> dict[str, object]:
+        return {"type": "object", "properties": {}}
 
 
 def test_context_uses_session_storage(tmp_path):

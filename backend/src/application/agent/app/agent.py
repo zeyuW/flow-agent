@@ -68,6 +68,8 @@ class Agent:
                 messages.append({"role": "system", "content": memory_block})
             if retrieval_block:
                 messages.append({"role": "system", "content": retrieval_block})
+            if tool_instructions:
+                messages.append({"role": "system", "content": tool_instructions})
             messages.append(_user_message_with_media(user_input, media or []))
             return messages
         messages = self.prompt_assembler.assemble(

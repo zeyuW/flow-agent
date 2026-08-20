@@ -80,3 +80,26 @@ def test_registry_always_selects_explicitly_named_tool():
 
     names = {item["function"]["name"] for item in selected}
     assert "runtime_probe" in names
+
+
+def test_registry_selects_core_tools_for_chinese_intents():
+    class CoreTool(EchoTool):
+        def __init__(self, tool_name: str) -> None:
+            self._tool_name = tool_name
+
+        @property
+        def name(self) -> str:
+            return self._tool_name
+
+    registry = ToolRegistry()
+    for index in range(12):
+        registry.register(CoreTool(f"generic_{index}"))
+    for name in ("read", "write", "edit", "bash"):
+        registry.register(CoreTool(name))
+
+    selected = registry.select_openai_tools(
+        "写入并编辑文件后执行 git status", max_tools=3
+    )
+
+    names = {item["function"]["name"] for item in selected}
+    assert {"write", "edit", "bash"} == names

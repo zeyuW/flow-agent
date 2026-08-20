@@ -10,7 +10,7 @@ from bootstrap.container import (
     create_app_runtime,
     create_core_components,
 )
-from infra.config import AppConfig
+from infra.config import AppConfig, resolve_config_paths
 
 
 def test_bootstrap_loads_only_backend_config(tmp_path: Path):
@@ -36,7 +36,7 @@ def test_bootstrap_does_not_search_parent_directories(tmp_path: Path):
         load_application_config(backend_root)
 
 
-def test_bootstrap_anchors_runtime_paths_to_project_root(tmp_path: Path):
+def test_bootstrap_anchors_custom_paths_to_project_root(tmp_path: Path):
     (tmp_path / "config.toml").write_text(
         """
 [llm.main]
@@ -44,10 +44,10 @@ model = "main-model"
 api_key = "secret"
 
 [storage]
-memory_db_path = ".flow/data/custom-memory.db"
+memory_db_path = "data/custom-memory.db"
 
 [proactive]
-state_path = ".flow/data/custom-proactive.db"
+state_path = "data/custom-proactive.db"
 """,
         encoding="utf-8",
     )
@@ -55,10 +55,24 @@ state_path = ".flow/data/custom-proactive.db"
     config = load_application_config(tmp_path)
 
     assert config.storage.memory_db_path == str(
-        tmp_path / ".flow/data/custom-memory.db"
+        tmp_path / "data/custom-memory.db"
     )
     assert config.proactive.state_path == str(
-        tmp_path / ".flow/data/custom-proactive.db"
+        tmp_path / "data/custom-proactive.db"
+    )
+
+
+def test_resolve_config_paths_maps_dot_flow_to_runtime_directory(tmp_path: Path):
+    config = app_config()
+
+    resolved = resolve_config_paths(
+        config,
+        tmp_path / "project",
+        runtime_dir=tmp_path / "user" / ".flow",
+    )
+
+    assert resolved.storage.memory_db_path == str(
+        tmp_path / "user" / ".flow/data/memory.db"
     )
 
 

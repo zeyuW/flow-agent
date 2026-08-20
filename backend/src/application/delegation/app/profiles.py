@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from application.delegation.app.models import SubagentSpec
-from application.capabilities.tools.filesystem import ReadFileTool
+from application.capabilities.tools.read import ReadTool
+from infra.workspace import WORKSPACE_LAYOUT
 
 PROFILE_RESEARCH = "research"
 PROFILE_SCRIPTING = "scripting"
@@ -29,12 +30,13 @@ def build_spawn_spec(
 def _build_research_spec(prompt: str, max_iter: int) -> SubagentSpec:
     """Research profile: read-only tools — search, read files, no exec (spec 6b)."""
     tools = [
-        ReadFileTool(),
+        ReadTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir),
     ]
     return SubagentSpec(
         tools=tools,
         tool_schemas=[_tool_schema(t) for t in tools],
-        system_prompt=prompt or "You are a research assistant. You can read files and search. Do not modify files or execute commands.",
+        system_prompt=prompt
+        or "You are a research assistant. You can read files and search. Do not modify files or execute commands.",
         max_iterations=max_iter,
     )
 
@@ -42,12 +44,13 @@ def _build_research_spec(prompt: str, max_iter: int) -> SubagentSpec:
 def _build_scripting_spec(prompt: str, max_iter: int) -> SubagentSpec:
     """Scripting profile: file read/write, shell (no network) (spec 6c)."""
     tools = [
-        ReadFileTool(),
+        ReadTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir),
     ]
     return SubagentSpec(
         tools=tools,
         tool_schemas=[_tool_schema(t) for t in tools],
-        system_prompt=prompt or "You are a coding assistant. You can read and write files and run shell commands.",
+        system_prompt=prompt
+        or "You are a coding assistant. You can read and write files and run shell commands.",
         max_iterations=max_iter,
     )
 
@@ -55,7 +58,7 @@ def _build_scripting_spec(prompt: str, max_iter: int) -> SubagentSpec:
 def _build_general_spec(prompt: str, max_iter: int) -> SubagentSpec:
     """General profile: full access (spec 6d fallback)."""
     tools = [
-        ReadFileTool(),
+        ReadTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir),
     ]
     return SubagentSpec(
         tools=tools,
@@ -67,9 +70,9 @@ def _build_general_spec(prompt: str, max_iter: int) -> SubagentSpec:
 
 def _tool_schema(tool) -> dict:
     """Extract OpenAI function schema from a tool."""
-    name = getattr(tool, 'name', 'unknown')
-    desc = getattr(tool, 'description', '')
-    schema = getattr(tool, 'input_schema', {})
+    name = getattr(tool, "name", "unknown")
+    desc = getattr(tool, "description", "")
+    schema = getattr(tool, "input_schema", {})
     return {
         "type": "function",
         "function": {

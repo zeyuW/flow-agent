@@ -82,3 +82,22 @@ class CreateSchedule(BaseModel):
     when: str
     task_type: Literal["reminder", "agent"]
     message: str
+
+
+class SkillCapability(BaseModel):
+    name: str
+    description: str
+    source: Literal["project", "installed"]
+    status: Literal["available", "conflict"]
+    reason: str | None = None
+
+
+class ConnectorCapability(BaseModel):
+    name: str
+    connected: bool
+    tools: list[str]
+
+
+class CapabilitySnapshot(BaseModel):
+    skills: list[SkillCapability]
+    connectors: list[ConnectorCapability]

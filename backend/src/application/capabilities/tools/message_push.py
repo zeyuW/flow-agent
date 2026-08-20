@@ -19,11 +19,23 @@ _MESSAGE_PUSH_SCHEMA = {
         "parameters": {
             "type": "object",
             "properties": {
-                "channel": {"type": "string", "description": "目标通道名；被动回复时由运行时绑定当前通道"},
-                "chat_id": {"type": "string", "description": "目标会话 ID；被动回复时由运行时绑定当前会话"},
+                "channel": {
+                    "type": "string",
+                    "description": "目标通道名；被动回复时由运行时绑定当前通道",
+                },
+                "chat_id": {
+                    "type": "string",
+                    "description": "目标会话 ID；被动回复时由运行时绑定当前会话",
+                },
                 "text": {"type": "string", "description": "消息文本"},
-                "file_path": {"type": "string", "description": "可选：要发送的文件路径"},
-                "image_path": {"type": "string", "description": "可选：要发送的本地图片路径或 HTTP(S) URL"},
+                "file_path": {
+                    "type": "string",
+                    "description": "可选：要发送的文件路径",
+                },
+                "image_path": {
+                    "type": "string",
+                    "description": "可选：要发送的本地图片路径或 HTTP(S) URL",
+                },
             },
             "anyOf": [
                 {"required": ["text"]},
@@ -177,7 +189,13 @@ class MessagePushTool:
 
         self.register_channel(
             name,
-            send=lambda *, chat_id, text: invoke("send_text", chat_id=chat_id, text=text),
-            send_file=lambda *, chat_id, path: invoke("send_file", chat_id=chat_id, path=path),
-            send_image=lambda *, chat_id, path: invoke("send_image", chat_id=chat_id, path=path),
+            send=lambda *, chat_id, text: invoke(
+                "send_text", chat_id=chat_id, text=text
+            ),
+            send_file=lambda *, chat_id, path: invoke(
+                "send_file", chat_id=chat_id, path=path
+            ),
+            send_image=lambda *, chat_id, path: invoke(
+                "send_image", chat_id=chat_id, path=path
+            ),
         )

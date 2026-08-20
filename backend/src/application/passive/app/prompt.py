@@ -64,6 +64,8 @@ class PromptRenderer:
             f"当前系统时间: {datetime.now().astimezone().isoformat()}",
             f"可用工具: {chr(10).join(names) if names else '无'}",
             "当需要获取外部信息时，请使用工具函数调用。",
+            "用户要求读取文件、写入文件、编辑文本或执行命令时，必须分别调用 read、write、edit、bash；"
+            "只要可用工具中列出对应名称，就不得声称没有该能力。",
         ]
         if scheduled_execution:
             instructions.append(

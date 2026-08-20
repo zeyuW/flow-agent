@@ -2,6 +2,7 @@ import * as client from "./client";
 import {
   cancelSchedule,
   createSchedule,
+  getCapabilities,
   getEvents,
   getSession,
   getSchedules,
@@ -127,6 +128,19 @@ describe("管理 API 客户端", () => {
     );
   });
 
+  it("读取技能与连接器", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ skills: [], connectors: [] })
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getCapabilities()).resolves.toEqual({ skills: [], connectors: [] });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/capabilities", expect.any(Object));
+  });
+
   it("创建并重新启用定时任务", async () => {
     const task = {
       id: "new-task",
@@ -184,6 +198,7 @@ describe("管理 API 客户端", () => {
       "AdminApiError",
       "cancelSchedule",
       "createSchedule",
+      "getCapabilities",
       "getEvents",
       "getSchedules",
       "getSession",

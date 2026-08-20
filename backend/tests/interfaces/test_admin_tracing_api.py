@@ -136,10 +136,48 @@ class _Scheduler:
         return task_id == "daily-news"
 
 
+class _CapabilityQuery:
+    def get_capabilities(self):
+        return {
+            "skills": [
+                {
+                    "name": "weekly-report",
+                    "description": "项目周报",
+                    "source": "project",
+                    "status": "available",
+                    "reason": None,
+                }
+            ],
+            "connectors": [
+                {
+                    "name": "ai-news",
+                    "connected": True,
+                    "tools": ["news_search"],
+                }
+            ],
+        }
+
+
 def _routes_with_schedules():
     scheduler = _Scheduler()
     app = create_admin_app(TraceTimeline(), _SessionQuery(), scheduler)
     return {route.path: route.endpoint for route in app.routes}, scheduler
+
+
+def test_capabilities_route_returns_safe_skill_and_connector_data():
+    app = create_admin_app(
+        TraceTimeline(),
+        _SessionQuery(),
+        _Scheduler(),
+        _CapabilityQuery(),
+    )
+
+    response = TestClient(app).get("/api/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["skills"][0]["source"] == "project"
+    assert "path" not in response.text
+    assert "command" not in response.text
 
 
 def test_traces_filters_and_excludes_sensitive_data():

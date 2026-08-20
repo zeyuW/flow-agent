@@ -84,9 +84,12 @@ from application.proactive.app.tools import (
     GetProactiveStatusTool,
 )
 from application.capabilities.tools.guard import ProactiveFrequencyGuard, ToolGuard
-from application.capabilities.skills.loader import SkillLoader
-from application.capabilities.skills.registry import SkillRegistry
-from application.capabilities.tools.filesystem import ReadFileTool
+from application.capabilities.app.capability_query import CapabilityQueryService
+from application.capabilities.skills.catalog import SkillCatalog
+from application.capabilities.tools.bash import BashTool
+from application.capabilities.tools.edit import EditTool
+from application.capabilities.tools.read import ReadTool
+from application.capabilities.tools.write import WriteTool
 from application.delegation.app.spawn import SpawnTool
 from application.capabilities.tools.registry import ToolRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
@@ -163,7 +166,17 @@ def create_core_components(config: AppConfig):
     )
 
     if cfg.tooling.enabled:
-        tool_registry.register(ReadFileTool())
+        tool_registry.register_with_meta(
+            ReadTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir),
+            risk="read-only",
+        )
+        tool_registry.register_with_meta(BashTool(WORKSPACE_LAYOUT.root), risk="write")
+        tool_registry.register_with_meta(
+            EditTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir), risk="write"
+        )
+        tool_registry.register_with_meta(
+            WriteTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir), risk="write"
+        )
         spawn_tool = SpawnTool()
         tool_registry.register(spawn_tool)
         undo_tool = UndoTool()
@@ -291,6 +304,18 @@ def create_app_runtime(config: AppConfig):
     llm_client = components["llm_client"]
     spawn_tool = components["spawn_tool"]
     mcp_registry = components["mcp_registry"]
+    capability_query = CapabilityQueryService(
+        SkillCatalog(
+            Path(__file__).resolve().parents[1]
+            / "application"
+            / "capabilities"
+            / "skills"
+            / "builtin",
+            WORKSPACE_LAYOUT.project_skills_dir,
+            WORKSPACE_LAYOUT.installed_skills_dir,
+        ),
+        mcp_registry,
+    )
 
     # 创建总线
     message_bus = create_message_bus(cfg.storage)
@@ -582,6 +607,7 @@ def create_app_runtime(config: AppConfig):
         plugin_manager,
         session_query,
         scheduler,
+        capability_query,
     )
 
 

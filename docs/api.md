@@ -30,7 +30,7 @@
 
 - 扩展必须有稳定名称和版本，名称用于注册、日志、配置和问题定位。
 - 扩展不得绕过统一的工具注册、事件总线和权限检查；需要外部副作用时，先确认调用边界。
-- 用户配置和运行状态写入 `.flow/` 下的数据目录，不把密钥、数据库、日志或个人数据提交到仓库。
+- 用户配置和运行状态写入 `~/.flow/`，不把密钥、数据库、日志或个人数据提交到仓库。
 - 初始化失败应可定位、可重试，并且不能破坏已经运行的旧版本。
 - 扩展只依赖公开协议和上下文对象，不依赖 Agent 内部实现细节。
 
@@ -44,16 +44,16 @@ Plugin 是最完整的扩展方式。它可以订阅 Agent 生命周期，在模
 
 ### 1.1 插件目录
 
-工作区插件位于 `.flow/plugins/<name>/`。一个可安装、可管理的插件至少应包含 `plugin.py` 和 `plugin.json`：
+工作区插件位于 `~/.flow/plugins/<name>/`。一个可安装、可管理的插件至少应包含 `plugin.py` 和 `plugin.json`：
 
 ```text
-.flow/plugins/hello_plugin/
+~/.flow/plugins/hello_plugin/
 ├── plugin.json          # 插件身份、版本和启用状态
 ├── plugin.py            # Plugin 子类及扩展实现
 ├── _conf_schema.json    # 可选：配置默认值
 └── README.md            # 可选：给维护者的说明
 
-.flow/plugin-data/hello_plugin/
+~/.flow/plugin-data/hello_plugin/
 ├── plugin_config.json   # 运行时配置
 └── .kv.json             # PluginKVStore 状态，不应提交
 ```
@@ -401,54 +401,40 @@ Skill 是给 Agent 使用的“方法包”，核心是可读的 `SKILL.md`，�
 
 ### 3.1 Skill 目录
 
-普通工作区 Skill 放在 `.flow/skills/<name>/`：
+普通 Skill 有两个来源：项目共享 Skill 放在 `skills/<name>/`，用户安装的本机 Skill 放在 `~/.flow/skills/<name>/`。两者都只使用 `SKILL.md` 描述，目录可包含脚本、参考资料和资产。
 
 ```text
-.flow/skills/release_note/
-├── skill.json             # 管理元数据
+skills/release_note/       # 项目共享，提交到 Git
 ├── SKILL.md               # 使用说明和匹配元数据
 ├── scripts/               # 可选：由支持该 Skill 的运行时受控调用
 ├── references/            # 可选：规范、模板和背景资料
 └── assets/                # 可选：图片、样例或其他资源
 ```
 
-`skill.json` 示例：
-
-```json
-{
-  "name": "release_note",
-  "description": "根据变更记录生成简洁的发布说明",
-  "version": "1.0.0",
-  "compatibility": ">=1.0.0",
-  "enabled": true,
-  "metadata": {
-    "category": "writing"
-  }
-}
-```
-
-`SKILL.md` 开头可提供运行时用于筛选的元数据：
+`SKILL.md` 开头使用 YAML frontmatter 提供运行时用于筛选的元数据：
 
 ```markdown
+---
 name: release_note
 description: 根据变更记录生成简洁的发布说明
-requires_tools: git_log, read_file
-requires_sources: workspace
-requires_mcp:
+requires_tools: [git_log, read_file]
+requires_sources: [workspace]
+requires_mcp: []
 requires_vision_model: false
 requires_image_output: false
+---
 
 # 发布说明生成
 
 先读取变更记录，再按用户指定的受众组织内容……
 ```
 
-两份元数据承担不同职责：`skill.json` 用于发现、安装、启用、禁用和版本管理；`SKILL.md` 用于描述具体方法，并声明选择该 Skill 所需要的工具、来源或 MCP 服务。名称和版本应保持一致，发生冲突时先修复元数据，不要依赖目录名猜测身份。
+`SKILL.md` 是普通 Skill 的唯一描述来源。项目与本机安装目录中出现同名 Skill 时，系统不会静默覆盖，而会标记冲突并拒绝将其作为可用项。内置 Skill 随程序发布，不在控制台中展示。
 
 ### 3.2 Skill 如何被选择
 
 ```text
-扫描 SKILL.md / skill.json
+扫描项目与本机目录中的 SKILL.md
           |
           v
 SkillLoader 解析名称、描述和依赖
@@ -495,7 +481,7 @@ Skill 中的脚本不是权限边界。脚本需要读写文件、访问网络�
 
 ### 3.4 自定义 Skill 的接入步骤
 
-1. 创建唯一目录名，并同时写入 `skill.json` 和 `SKILL.md`。
+1. 在 `skills/` 或 `~/.flow/skills/` 下创建唯一目录和 `SKILL.md`。
 2. 在 `SKILL.md` 中声明真实依赖，不要为了提高命中率省略 `requires_*` 字段。
 3. 将参考资料和资产放入对应子目录，避免在正文中写机器相关的绝对路径。
 4. 若需要工具，先确认工具来自现有 Plugin 或 MCP，再编写调用步骤。
