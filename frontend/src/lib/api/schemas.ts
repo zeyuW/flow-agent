@@ -55,3 +55,22 @@ export const sessionDetailSchema = sessionSummarySchema.extend({
   messages: z.array(sessionMessageSchema)
 });
 export type SessionDetail = z.infer<typeof sessionDetailSchema>;
+
+export const scheduleSummarySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  trigger: z.string(),
+  task_type: z.string(),
+  message: z.string(),
+  channel: z.string(),
+  session_id: z.string(),
+  timezone: z.string(),
+  next_run_at: z.string(),
+  interval_seconds: z.number().int().nullable(),
+  daily_time: z.string().nullable(),
+  enabled: z.boolean(),
+  run_count: z.number().int().nonnegative(),
+  created_at: z.string().nullable(),
+  last_error: z.string().nullable()
+});
+export type ScheduleSummary = z.infer<typeof scheduleSummarySchema>;

@@ -131,7 +131,7 @@ class SessionStore:
     def list_session_summaries(
         self, start_at: str, end_at: str, limit: int
     ) -> list[dict[str, Any]]:
-        """按更新时间读取有限数量的会话摘要。"""
+        """按指定日期内的消息读取有限数量的会话摘要。"""
 
         with self._connect() as conn:
             rows = conn.execute(
@@ -139,49 +139,61 @@ class SessionStore:
                 SELECT
                     sessions.key,
                     sessions.created_at,
-                    sessions.updated_at,
+                    MAX(messages_v2.ts) AS updated_at,
                     COUNT(messages_v2.id) AS message_count,
                     (
                         SELECT content
                         FROM messages_v2 AS latest_message
                         WHERE latest_message.session_key = sessions.key
+                          AND datetime(latest_message.ts) >= datetime(?)
+                          AND datetime(latest_message.ts) < datetime(?)
                         ORDER BY latest_message.seq DESC
                         LIMIT 1
                     ) AS preview
                 FROM sessions
-                LEFT JOIN messages_v2 ON messages_v2.session_key = sessions.key
-                WHERE datetime(sessions.updated_at) >= datetime(?)
-                  AND datetime(sessions.updated_at) < datetime(?)
+                JOIN messages_v2 ON messages_v2.session_key = sessions.key
+                WHERE datetime(messages_v2.ts) >= datetime(?)
+                  AND datetime(messages_v2.ts) < datetime(?)
                 GROUP BY sessions.key
-                ORDER BY datetime(sessions.updated_at) DESC
+                ORDER BY datetime(updated_at) DESC
                 LIMIT ?
                 """,
-                (start_at, end_at, limit),
+                (start_at, end_at, start_at, end_at, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
     # ── 消息 ──
 
-    def fetch_session_messages(self, key: str) -> list[dict[str, Any]]:
+    def fetch_session_messages(
+        self, key: str, start_at: str | None = None, end_at: str | None = None
+    ) -> list[dict[str, Any]]:
         """按 seq 顺序读取会话的全部消息（规范 1b）。"""
+
+        query = (
+            "SELECT id, seq, role, content, tool_chain, extra, ts "
+            "FROM messages_v2 WHERE session_key = ?"
+        )
+        params: list[object] = [key]
+        if start_at is not None and end_at is not None:
+            query += " AND datetime(ts) >= datetime(?) AND datetime(ts) < datetime(?)"
+            params.extend([start_at, end_at])
+        query += " ORDER BY seq ASC"
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT id, seq, role, content, tool_chain, extra, ts "
-                "FROM messages_v2 WHERE session_key = ? ORDER BY seq ASC",
-                (key,),
-            ).fetchall()
+            rows = conn.execute(query, params).fetchall()
         messages: list[dict[str, Any]] = []
         for row in rows:
-            messages.append({
-                "id": row["id"],
-                "seq": row["seq"],
-                "role": row["role"],
-                "content": row["content"],
-                "tool_chain": json.loads(row["tool_chain"]),
-                "extra": json.loads(row["extra"]),
-                "timestamp": row["ts"],
-                "session_key": key,
-            })
+            messages.append(
+                {
+                    "id": row["id"],
+                    "seq": row["seq"],
+                    "role": row["role"],
+                    "content": row["content"],
+                    "tool_chain": json.loads(row["tool_chain"]),
+                    "extra": json.loads(row["extra"]),
+                    "timestamp": row["ts"],
+                    "session_key": key,
+                }
+            )
         return messages
 
     def insert_message(
@@ -211,7 +223,6 @@ class SessionStore:
                 (msg_id, session_key, seq, role, content, tc_json, ex_json, ts_val),
             )
         return msg_id
-
 
     def insert_turn(
         self,
@@ -304,6 +315,7 @@ class SessionStore:
     def get_next_seq(self, key: str) -> int:
         """读取并递增会话的 next_seq 计数器。"""
         import threading
+
         if self._lock is None:
             self._lock = threading.Lock()
         with self._lock:

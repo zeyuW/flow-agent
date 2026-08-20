@@ -1,13 +1,24 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import { getSession, getSessions } from "@/lib/api/client";
+import {
+  cancelSchedule,
+  createSchedule,
+  getSchedules,
+  getSession,
+  getSessions,
+  resumeSchedule
+} from "@/lib/api/client";
 
 import OverviewPage from "./page";
 
 vi.mock("@/lib/api/client", () => ({
+  cancelSchedule: vi.fn(),
+  createSchedule: vi.fn(),
+  getSchedules: vi.fn(),
   getSession: vi.fn(),
-  getSessions: vi.fn()
+  getSessions: vi.fn(),
+  resumeSchedule: vi.fn()
 }));
 
 function renderPage() {
@@ -23,6 +34,26 @@ function renderPage() {
 
 describe("OverviewPage", () => {
   beforeEach(() => {
+    vi.mocked(getSchedules).mockResolvedValue([]);
+    vi.mocked(cancelSchedule).mockResolvedValue(undefined);
+    vi.mocked(createSchedule).mockResolvedValue({
+      id: "new-task",
+      name: "午间提醒",
+      trigger: "daily",
+      task_type: "reminder",
+      message: "记得午休",
+      channel: "telegram",
+      session_id: "telegram:1",
+      timezone: "Asia/Shanghai",
+      next_run_at: "2026-08-22T04:30:00Z",
+      interval_seconds: null,
+      daily_time: "12:30",
+      enabled: true,
+      run_count: 0,
+      created_at: "2026-08-21T00:00:00Z",
+      last_error: null
+    });
+    vi.mocked(resumeSchedule).mockResolvedValue(undefined);
     vi.mocked(getSessions).mockResolvedValue([]);
     vi.mocked(getSession).mockResolvedValue({
       id: "telegram:1",
@@ -36,14 +67,20 @@ describe("OverviewPage", () => {
     });
   });
 
-  it("不在内容区重复显示当前导航页的标题和说明", () => {
+  it("只保留日期选择器，不显示快捷日期筛选", async () => {
     renderPage();
 
-    expect(screen.queryByRole("heading", { name: "会话" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Agent conversations")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("查看用户与 Agent 的历史对话。当前为界面示例数据。")
-    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("选择日期")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "今天" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "昨天" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "近 7 天" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("选择日期"), {
+      target: { value: "2026-08-21" }
+    });
+    await waitFor(() =>
+      expect(getSessions).toHaveBeenCalledWith("2026-08-21", "2026-08-21")
+    );
   });
 
   it("选中真实会话后显示 Agent 消息与工具链", async () => {
@@ -126,5 +163,141 @@ describe("OverviewPage", () => {
       "https://example.com"
     );
     expect(screen.getByText(/用户/)).toBeInTheDocument();
+  });
+
+  it("展示真实定时任务并允许停止", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "daily-news",
+        name: "晨间简报",
+        trigger: "daily",
+        task_type: "agent",
+        message: "汇总今天的重要资讯",
+        channel: "telegram",
+        session_id: "telegram:1",
+        timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:30:00Z",
+        interval_seconds: null,
+        daily_time: "08:30",
+        enabled: true,
+        run_count: 3,
+        created_at: "2026-08-21T00:00:00Z",
+        last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+
+    expect(await screen.findByText("晨间简报")).toBeInTheDocument();
+    expect(screen.getByText("汇总今天的重要资讯")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "停止任务" }));
+    await waitFor(() =>
+      expect(cancelSchedule).toHaveBeenCalledWith("daily-news")
+    );
+  });
+
+  it("可从定时任务页创建任务", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "daily-news",
+        name: "每日新闻",
+        trigger: "daily",
+        task_type: "agent",
+        message: "推送新闻",
+        channel: "telegram",
+        session_id: "telegram:1",
+        timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z",
+        interval_seconds: null,
+        daily_time: "08:00",
+        enabled: true,
+        run_count: 0,
+        created_at: "2026-08-21T00:00:00Z",
+        last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建任务" }));
+    fireEvent.change(screen.getByLabelText("任务名称"), {
+      target: { value: "午间提醒" }
+    });
+    fireEvent.change(screen.getByLabelText("任务内容"), {
+      target: { value: "记得午休" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "创建任务" }));
+
+    await waitFor(() =>
+      expect(createSchedule).toHaveBeenCalledWith({
+        target_task_id: "daily-news",
+        name: "午间提醒",
+        trigger: "after",
+        when: "10m",
+        task_type: "reminder",
+        message: "记得午休"
+      })
+    );
+  });
+
+  it("每天任务使用合法的时间选择器", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "daily-news",
+        name: "每日新闻",
+        trigger: "daily",
+        task_type: "agent",
+        message: "推送新闻",
+        channel: "telegram",
+        session_id: "telegram:1",
+        timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z",
+        interval_seconds: null,
+        daily_time: "08:00",
+        enabled: true,
+        run_count: 0,
+        created_at: "2026-08-21T00:00:00Z",
+        last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建任务" }));
+    fireEvent.change(screen.getByLabelText("执行方式"), {
+      target: { value: "daily" }
+    });
+
+    expect(screen.getByLabelText("每天时间")).toHaveAttribute("type", "time");
+  });
+
+  it("可重新启用已停止的周期任务", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "daily-news",
+        name: "每日新闻",
+        trigger: "daily",
+        task_type: "agent",
+        message: "推送新闻",
+        channel: "telegram",
+        session_id: "telegram:1",
+        timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z",
+        interval_seconds: null,
+        daily_time: "08:00",
+        enabled: false,
+        run_count: 2,
+        created_at: "2026-08-21T00:00:00Z",
+        last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "重新启用" }));
+
+    await waitFor(() => expect(resumeSchedule).toHaveBeenCalledWith("daily-news"));
   });
 });

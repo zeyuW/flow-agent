@@ -275,7 +275,7 @@ def create_app_runtime(config: AppConfig):
         (proactive_loop, automation_runtime, subagent_runtime,
          runtime_service, message_bus, event_bus, passive_loop, pipeline,
          tool_registry, memory_runtime, memory_optimizer_loop,
-         mcp_registry, plugin_manager)
+         mcp_registry, plugin_manager, scheduler)
     """
     cfg = resolve_config_paths(config, PROJECT_ROOT)
 
@@ -581,6 +581,7 @@ def create_app_runtime(config: AppConfig):
         mcp_registry,
         plugin_manager,
         session_query,
+        scheduler,
     )
 
 

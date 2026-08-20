@@ -3,9 +3,12 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from application.passive.domain.session_key import split_session_key
 from application.passive.infra.session_store import SessionStore
+
+SESSION_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,12 +55,22 @@ class SessionQueryService:
         )
         return [self._summary_from_row(row) for row in rows]
 
-    def get_session(self, session_id: str) -> SessionDetail | None:
+    def get_session(
+        self,
+        session_id: str,
+        *,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ) -> SessionDetail | None:
         """读取一个会话的用户和 Agent 消息。"""
 
         meta = self._store.get_session_meta(session_id)
         if meta is None:
             return None
+        start_at = end_at = None
+        if start_date is not None and end_date is not None:
+            start_at = self._day_start(start_date).isoformat()
+            end_at = self._day_start(end_date + timedelta(days=1)).isoformat()
         channel, external_conversation_id = split_session_key(session_id)
         messages = [
             SessionMessage(
@@ -66,7 +79,9 @@ class SessionQueryService:
                 timestamp=message["timestamp"],
                 tool_chain=list(message["tool_chain"]),
             )
-            for message in self._store.fetch_session_messages(session_id)
+            for message in self._store.fetch_session_messages(
+                session_id, start_at, end_at
+            )
             if message["role"] in {"user", "assistant"}
         ]
         return SessionDetail(
@@ -74,7 +89,9 @@ class SessionQueryService:
             channel=channel,
             external_conversation_id=external_conversation_id,
             created_at=meta.created_at.isoformat(),
-            updated_at=meta.updated_at.isoformat(),
+            updated_at=(
+                messages[-1].timestamp if messages else meta.updated_at.isoformat()
+            ),
             message_count=len(messages),
             preview=messages[-1].content if messages else None,
             messages=messages,
@@ -82,7 +99,7 @@ class SessionQueryService:
 
     @staticmethod
     def _day_start(day: date) -> datetime:
-        local_time = datetime.combine(day, time.min).astimezone()
+        local_time = datetime.combine(day, time.min, tzinfo=SESSION_TIMEZONE)
         return local_time.astimezone(timezone.utc)
 
     @staticmethod

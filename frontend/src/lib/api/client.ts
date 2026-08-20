@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import {
+  scheduleSummarySchema,
   sessionDetailSchema,
   sessionSummarySchema,
   traceDetailSchema,
@@ -8,6 +9,7 @@ import {
   traceSummarySchema,
   type SessionDetail,
   type SessionSummary,
+  type ScheduleSummary,
   type TraceDetail,
   type TraceEvent,
   type TraceSummary
@@ -21,11 +23,25 @@ export class AdminApiError extends Error {
 }
 
 async function getJson<T>(path: string, schema: z.ZodType<T>): Promise<T> {
+  return requestJson(path, schema);
+}
+
+async function requestJson<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  method = "GET",
+  body?: string
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {
-      headers: { Accept: "application/json" },
-      cache: "no-store"
+      headers: {
+        Accept: "application/json",
+        ...(body ? { "Content-Type": "application/json" } : {})
+      },
+      cache: "no-store",
+      method,
+      body
     });
   } catch {
     throw new AdminApiError("无法连接管理 API");
@@ -73,9 +89,57 @@ export function getSessions(
   return getJson(`/api/sessions?${params}`, z.array(sessionSummarySchema));
 }
 
-export function getSession(sessionId: string): Promise<SessionDetail> {
+export function getSession(
+  sessionId: string,
+  startDate: string,
+  endDate: string
+): Promise<SessionDetail> {
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate
+  });
   return getJson(
-    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    `/api/sessions/${encodeURIComponent(sessionId)}?${params}`,
     sessionDetailSchema
+  );
+}
+
+export function getSchedules(): Promise<ScheduleSummary[]> {
+  return getJson("/api/schedules", z.array(scheduleSummarySchema));
+}
+
+export async function cancelSchedule(taskId: string): Promise<void> {
+  await requestJson(
+    `/api/schedules/${encodeURIComponent(taskId)}/cancel`,
+    z.object({ cancelled: z.literal(true) }),
+    "POST"
+  );
+}
+
+export type CreateScheduleInput = {
+  target_task_id: string;
+  name: string;
+  trigger: "after" | "at" | "daily" | "every";
+  when: string;
+  task_type: "reminder" | "agent";
+  message: string;
+};
+
+export function createSchedule(
+  input: CreateScheduleInput
+): Promise<ScheduleSummary> {
+  return requestJson(
+    "/api/schedules",
+    scheduleSummarySchema,
+    "POST",
+    JSON.stringify(input)
+  );
+}
+
+export async function resumeSchedule(taskId: string): Promise<void> {
+  await requestJson(
+    `/api/schedules/${encodeURIComponent(taskId)}/resume`,
+    z.object({ resumed: z.literal(true) }),
+    "POST"
   );
 }

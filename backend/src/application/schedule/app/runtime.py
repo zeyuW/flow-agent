@@ -114,11 +114,43 @@ class SchedulerService:
     def list_tasks(self, session_id: str) -> list[ScheduledTask]:
         return self.store.list_for_session(session_id)
 
+    def list_all_tasks(self) -> list[ScheduledTask]:
+        """读取全部任务，供本机管理控制台展示。"""
+
+        return self.store.list_all()
+
+    def get_task_by_id(self, task_id: str) -> ScheduledTask | None:
+        """读取任务的投递目标，供本机管理控制台创建同会话任务。"""
+
+        return self.store.get_by_id(task_id)
+
     def cancel_task(self, task_id: str, session_id: str) -> bool:
         cancelled = self.store.cancel(task_id, session_id)
         if cancelled:
             self._wake.set()
         return cancelled
+
+    def cancel_task_by_id(self, task_id: str) -> bool:
+        """停止指定任务，供本机管理控制台调用。"""
+
+        cancelled = self.store.cancel_by_id(task_id)
+        if cancelled:
+            self._wake.set()
+        return cancelled
+
+    def resume_task_by_id(self, task_id: str) -> bool:
+        """恢复每天或固定间隔的任务，并重新计算下一次执行时间。"""
+
+        task = self.store.get_by_id(task_id)
+        if task is None or task.enabled or task.trigger not in {"daily", "every"}:
+            return False
+        next_run = self._next_run(task, self._aware_now(), failed=False)
+        if next_run is None:
+            return False
+        resumed = self.store.resume(task_id, next_run)
+        if resumed:
+            self._wake.set()
+        return resumed
 
     def start(self) -> None:
         """启动唯一的后台调度线程。"""

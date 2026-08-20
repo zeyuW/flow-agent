@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -9,36 +9,20 @@ import {
   type ConsolePage,
   WorkbenchShell
 } from "@/components/workbench-shell";
-import { getSession, getSessions } from "@/lib/api/client";
-
-const dateFilters = [
-  { id: "today", label: "今天" },
-  { id: "yesterday", label: "昨天" },
-  { id: "recent", label: "近 7 天" }
-] as const;
-
-type DateFilter = (typeof dateFilters)[number]["id"];
+import {
+  cancelSchedule,
+  createSchedule,
+  getSchedules,
+  getSession,
+  getSessions,
+  resumeSchedule
+} from "@/lib/api/client";
+import type { CreateScheduleInput } from "@/lib/api/client";
 
 function formatDate(date: Date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${date.getFullYear()}-${month}-${day}`;
-}
-
-function getDateRange(dateFilter: DateFilter, selectedDate: string) {
-  if (selectedDate) {
-    return { startDate: selectedDate, endDate: selectedDate };
-  }
-  const end = new Date();
-  const start = new Date(end);
-  if (dateFilter === "yesterday") {
-    start.setDate(start.getDate() - 1);
-    end.setDate(end.getDate() - 1);
-  }
-  if (dateFilter === "recent") {
-    start.setDate(start.getDate() - 6);
-  }
-  return { startDate: formatDate(start), endDate: formatDate(end) };
 }
 
 function formatTime(timestamp: string) {
@@ -52,45 +36,38 @@ function formatTime(timestamp: string) {
   }).format(date);
 }
 
+function formatDateTime(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function SessionsPage() {
-  const [dateFilter, setDateFilter] = useState<DateFilter>("recent");
-  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => formatDate(new Date()));
   const [selectedId, setSelectedId] = useState<string>();
-  const dateRange = useMemo(
-    () => getDateRange(dateFilter, selectedDate),
-    [dateFilter, selectedDate]
-  );
   const sessionsQuery = useQuery({
-    queryKey: ["sessions", dateRange.startDate, dateRange.endDate],
-    queryFn: () => getSessions(dateRange.startDate, dateRange.endDate)
+    queryKey: ["sessions", selectedDate],
+    queryFn: () => getSessions(selectedDate, selectedDate)
   });
   const sessions = sessionsQuery.data ?? [];
   const selectedSession =
     sessions.find((session) => session.id === selectedId) ?? sessions[0];
   const sessionQuery = useQuery({
-    queryKey: ["session", selectedSession?.id],
-    queryFn: () => getSession(selectedSession!.id),
+    queryKey: ["session", selectedSession?.id, selectedDate],
+    queryFn: () => getSession(selectedSession!.id, selectedDate, selectedDate),
     enabled: Boolean(selectedSession)
   });
 
   return (
     <>
       <section aria-label="会话日期筛选" className="session-toolbar">
-        <div className="date-filter-list">
-          {dateFilters.map((filter) => (
-            <button
-              aria-pressed={!selectedDate && dateFilter === filter.id}
-              key={filter.id}
-              onClick={() => {
-                setDateFilter(filter.id);
-                setSelectedDate("");
-              }}
-              type="button"
-            >
-              {filter.label}
-            </button>
-          ))}
-        </div>
         <label className="date-picker">
           <span>选择日期</span>
           <input
@@ -182,32 +159,243 @@ function SessionsPage() {
 }
 
 function SchedulesPage() {
+  const queryClient = useQueryClient();
+  const [isCreating, setIsCreating] = useState(false);
+  const [targetTaskId, setTargetTaskId] = useState("");
+  const [draft, setDraft] = useState({
+    name: "",
+    trigger: "after" as "after" | "at" | "daily" | "every",
+    when: "10m",
+    taskType: "reminder" as "reminder" | "agent",
+    message: ""
+  });
+  const schedulesQuery = useQuery({
+    queryKey: ["schedules"],
+    queryFn: getSchedules
+  });
+  const cancelMutation = useMutation({
+    mutationFn: (taskId: string) => cancelSchedule(taskId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["schedules"] })
+  });
+  const createMutation = useMutation<unknown, Error, CreateScheduleInput>({
+    mutationFn: (input) => createSchedule(input),
+    onSuccess: () => {
+      setIsCreating(false);
+      queryClient.invalidateQueries({ queryKey: ["schedules"] });
+    }
+  });
+  const resumeMutation = useMutation({
+    mutationFn: (taskId: string) => resumeSchedule(taskId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["schedules"] })
+  });
+  const schedules = schedulesQuery.data ?? [];
+  const targets = schedules.filter(
+    (task, index) =>
+      schedules.findIndex(
+        (candidate) =>
+          candidate.channel === task.channel &&
+          candidate.session_id === task.session_id
+      ) === index
+  );
+  const activeTargetTaskId = targetTaskId || targets[0]?.id || "";
+
+  function openCreateDialog() {
+    setTargetTaskId(targets[0]?.id ?? "");
+    setIsCreating(true);
+  }
+
+  function selectTrigger(trigger: "after" | "at" | "daily" | "every") {
+    const when =
+      trigger === "daily" ? "09:00" :
+      trigger === "at" ? "" :
+      trigger === "every" ? "1h" :
+      "10m";
+    setDraft((current) => ({ ...current, trigger, when }));
+  }
+
+  function createTask(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activeTargetTaskId) return;
+    createMutation.mutate({
+      target_task_id: activeTargetTaskId,
+      name: draft.name,
+      trigger: draft.trigger,
+      when: draft.when,
+      task_type: draft.taskType,
+      message: draft.message
+    });
+  }
+
+  const whenLabel =
+    draft.trigger === "daily" ? "每天时间" :
+    draft.trigger === "at" ? "执行时间" :
+    draft.trigger === "every" ? "执行间隔" :
+    "等待时长";
+
   return (
     <>
+      <div className="page-actions">
+        <button onClick={openCreateDialog} type="button">
+          新建任务
+        </button>
+      </div>
       <section className="compact-card-grid">
-        <article className="feature-card">
-          <div>
-            <p className="eyebrow">已启用</p>
-            <h2>晨间简报</h2>
-          </div>
-          <p>工作日上午 08:30 汇总日程、待办与关注事项。</p>
-          <footer>
-            <span>下次执行：明天 08:30</span>
-            <button type="button">查看任务</button>
-          </footer>
-        </article>
-        <article className="feature-card">
-          <div>
-            <p className="eyebrow">已启用</p>
-            <h2>会议准备提醒</h2>
-          </div>
-          <p>在会议开始前 30 分钟提醒准备所需材料。</p>
-          <footer>
-            <span>下次执行：今天 14:30</span>
-            <button type="button">查看任务</button>
-          </footer>
-        </article>
+        {schedulesQuery.isPending ? (
+        <p className="empty-state">正在读取定时任务…</p>
+        ) : schedulesQuery.isError ? (
+        <p className="empty-state">无法读取定时任务。</p>
+        ) : schedules.length === 0 ? (
+        <p className="empty-state">还没有定时任务。</p>
+        ) : (
+        schedules.map((task) => (
+          <article className="feature-card" key={task.id}>
+            <div>
+              <p className="eyebrow">
+                {task.enabled ? "已启用" : "已停止"} · {task.channel}
+              </p>
+              <h2>{task.name}</h2>
+            </div>
+            <p>{task.message}</p>
+            <footer>
+              <span>
+                {task.enabled
+                  ? `下次执行：${formatDateTime(task.next_run_at)}`
+                  : "任务已停止"}
+              </span>
+              {task.enabled ? (
+                <button
+                  disabled={cancelMutation.isPending}
+                  onClick={() => cancelMutation.mutate(task.id)}
+                  type="button"
+                >
+                  停止任务
+                </button>
+              ) : task.trigger === "daily" || task.trigger === "every" ? (
+                <button
+                  disabled={resumeMutation.isPending}
+                  onClick={() => resumeMutation.mutate(task.id)}
+                  type="button"
+                >
+                  重新启用
+                </button>
+              ) : null}
+            </footer>
+          </article>
+        ))
+        )}
       </section>
+      {isCreating ? (
+        <div className="dialog-backdrop">
+          <form className="schedule-dialog" onSubmit={createTask}>
+            <header>
+              <h2>新建定时任务</h2>
+              <button
+                aria-label="关闭新建任务"
+                onClick={() => setIsCreating(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            {targets.length === 0 ? (
+              <p className="empty-state">暂无可用投递目标。</p>
+            ) : (
+              <>
+                <label>
+                  <span>发送到</span>
+                  <select
+                    onChange={(event) => setTargetTaskId(event.target.value)}
+                    value={activeTargetTaskId}
+                  >
+                    {targets.map((task) => (
+                      <option key={task.id} value={task.id}>
+                        {task.channel} · {task.session_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>任务名称</span>
+                  <input
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, name: event.target.value }))
+                    }
+                    value={draft.name}
+                  />
+                </label>
+                <label>
+                  <span>任务类型</span>
+                  <select
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        taskType: event.target.value as "reminder" | "agent"
+                      }))
+                    }
+                    value={draft.taskType}
+                  >
+                    <option value="reminder">直接提醒</option>
+                    <option value="agent">Agent 执行</option>
+                  </select>
+                </label>
+                <label>
+                  <span>执行方式</span>
+                  <select
+                    onChange={(event) =>
+                      selectTrigger(
+                        event.target.value as "after" | "at" | "daily" | "every"
+                      )
+                    }
+                    value={draft.trigger}
+                  >
+                    <option value="after">延迟一次</option>
+                    <option value="at">指定时间一次</option>
+                    <option value="daily">每天</option>
+                    <option value="every">固定间隔</option>
+                  </select>
+                </label>
+                <label>
+                  <span>{whenLabel}</span>
+                  <input
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, when: event.target.value }))
+                    }
+                    placeholder={draft.trigger === "daily" ? "09:00" : "例如 10m、1h"}
+                    required
+                    type={
+                      draft.trigger === "at" ? "datetime-local" :
+                      draft.trigger === "daily" ? "time" :
+                      "text"
+                    }
+                    value={draft.when}
+                  />
+                </label>
+                <label>
+                  <span>任务内容</span>
+                  <textarea
+                    onChange={(event) =>
+                      setDraft((current) => ({ ...current, message: event.target.value }))
+                    }
+                    required
+                    value={draft.message}
+                  />
+                </label>
+              </>
+            )}
+            <footer>
+              <button onClick={() => setIsCreating(false)} type="button">
+                取消
+              </button>
+              <button
+                disabled={!activeTargetTaskId || createMutation.isPending}
+                type="submit"
+              >
+                创建任务
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }

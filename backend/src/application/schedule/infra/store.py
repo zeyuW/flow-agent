@@ -92,6 +92,15 @@ class ScheduledTaskStore:
             rows = connection.execute(query, params).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def list_all(self) -> list[ScheduledTask]:
+        """读取全部任务，供本机管理控制台使用。"""
+
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM scheduled_tasks ORDER BY next_run_at"
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
+
     def due(self, now: datetime) -> list[ScheduledTask]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -115,6 +124,32 @@ class ScheduledTaskStore:
                 "UPDATE scheduled_tasks SET enabled = 0 "
                 "WHERE id = ? AND session_id = ? AND enabled = 1",
                 (task_id, session_id),
+            )
+        return cursor.rowcount > 0
+
+    def cancel_by_id(self, task_id: str) -> bool:
+        """停止指定任务，供已受本机访问限制的管理接口调用。"""
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE scheduled_tasks SET enabled = 0 WHERE id = ? AND enabled = 1",
+                (task_id,),
+            )
+        return cursor.rowcount > 0
+
+    def get_by_id(self, task_id: str) -> ScheduledTask | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM scheduled_tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+        return self._from_row(row) if row is not None else None
+
+    def resume(self, task_id: str, next_run_at: datetime) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE scheduled_tasks SET enabled = 1, next_run_at = ?, last_error = NULL "
+                "WHERE id = ? AND enabled = 0",
+                (next_run_at.astimezone(timezone.utc).isoformat(), task_id),
             )
         return cursor.rowcount > 0
 

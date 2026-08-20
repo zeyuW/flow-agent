@@ -9,10 +9,13 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 
 from application.agent.app.tracing import TraceTimeline
 from application.passive.app.session_query import SessionQueryService
+from application.schedule.app.runtime import SchedulerService
 from interfaces.admin.schemas import (
+    CreateSchedule,
     EventSummary,
     SessionDetail,
     SessionSummary,
+    ScheduleSummary,
     TraceDetail,
     TraceStatus,
     TraceSummary,
@@ -20,9 +23,11 @@ from interfaces.admin.schemas import (
 
 
 def create_admin_app(
-    timeline: TraceTimeline, session_query: SessionQueryService
+    timeline: TraceTimeline,
+    session_query: SessionQueryService,
+    scheduler: SchedulerService,
 ) -> FastAPI:
-    """创建不含写操作的本机管理 API。"""
+    """创建本机管理 API。"""
 
     app = FastAPI(title="Flow Agent Admin API", docs_url=None, redoc_url=None)
     router = APIRouter(prefix="/api")
@@ -73,11 +78,55 @@ def create_admin_app(
         return session_query.list_sessions(start_date, end_date, limit)
 
     @router.get("/sessions/{session_id}", response_model=SessionDetail)
-    def get_session(session_id: str):
-        session = session_query.get_session(session_id)
+    def get_session(
+        session_id: str,
+        start_date: date | None = None,
+        end_date: date | None = None,
+    ):
+        if (start_date is None) != (end_date is None):
+            raise HTTPException(422, detail="开始日期和结束日期必须同时提供")
+        session = session_query.get_session(
+            session_id, start_date=start_date, end_date=end_date
+        )
         if session is None:
             raise HTTPException(404, detail=f"未找到会话: {session_id}")
         return session
+
+    @router.get("/schedules", response_model=list[ScheduleSummary])
+    def list_schedules():
+        return scheduler.list_all_tasks()
+
+    @router.post("/schedules", response_model=ScheduleSummary)
+    def create_schedule(payload: CreateSchedule):
+        target = scheduler.get_task_by_id(payload.target_task_id)
+        if target is None:
+            raise HTTPException(404, detail="未找到投递目标")
+        try:
+            return scheduler.create_task(
+                trigger=payload.trigger,
+                when=payload.when,
+                task_type=payload.task_type,
+                message=payload.message,
+                name=payload.name,
+                channel=target.channel,
+                session_id=target.session_id,
+                chat_id=target.chat_id,
+                timezone_name=target.timezone,
+            )
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+
+    @router.post("/schedules/{task_id}/cancel")
+    def cancel_schedule(task_id: str) -> dict[str, bool]:
+        if not scheduler.cancel_task_by_id(task_id):
+            raise HTTPException(404, detail=f"未找到定时任务: {task_id}")
+        return {"cancelled": True}
+
+    @router.post("/schedules/{task_id}/resume")
+    def resume_schedule(task_id: str) -> dict[str, bool]:
+        if not scheduler.resume_task_by_id(task_id):
+            raise HTTPException(404, detail=f"未找到可恢复的周期任务: {task_id}")
+        return {"resumed": True}
 
     app.include_router(router)
     return app

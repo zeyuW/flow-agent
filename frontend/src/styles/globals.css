@@ -29,6 +29,7 @@ html, body { background: var(--canvas); }
 body { color: var(--ink); font-family: Arial, "PingFang SC", "Microsoft YaHei", sans-serif; margin: 0; }
 button, input { font: inherit; }
 button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
 
 .workbench { display: grid; grid-template: auto 1fr / 13rem minmax(0, 1fr); grid-template-areas: "sidebar topbar" "sidebar main"; min-height: 100vh; }
 .sidebar { border-right: 1px solid var(--border); display: flex; flex-direction: column; grid-area: sidebar; padding: 1.5rem 1rem; }
@@ -86,6 +87,8 @@ h3 { font-size: 1rem; margin-bottom: .5rem; }
 .turn-summary small, .feature-card small { border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .72rem; padding: .22rem .45rem; }
 
 .compact-card-grid { align-items: start; display: grid; gap: .8rem; grid-template-columns: repeat(auto-fill, minmax(14rem, 17rem)); justify-content: start; }
+.page-actions { display: flex; justify-content: flex-end; margin-bottom: 1rem; }
+.page-actions button, .schedule-dialog footer button:last-child { background: var(--accent); border: 1px solid var(--accent); border-radius: .4rem; color: white; padding: .48rem .8rem; }
 .feature-card { background: var(--panel); border: 1px solid var(--border); border-radius: .65rem; display: flex; flex-direction: column; gap: .7rem; min-height: 9rem; padding: 1rem; }
 .feature-card h2 { font-size: .98rem; }
 .feature-card p { margin: 0; }
@@ -98,6 +101,13 @@ h3 { font-size: 1rem; margin-bottom: .5rem; }
 .capability-section .feature-card p { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; font-size: .82rem; line-height: 1.4; overflow: hidden; }
 .capability-section .feature-card small { align-self: flex-start; }
 .empty-state { color: var(--muted); padding: 1rem; }
+.dialog-backdrop { align-items: center; background: color-mix(in srgb, #000 35%, transparent); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 10; }
+.schedule-dialog { background: var(--panel); border: 1px solid var(--border); border-radius: .7rem; display: grid; gap: .8rem; max-width: 27rem; padding: 1rem; width: 100%; }
+.schedule-dialog header, .schedule-dialog footer { align-items: center; display: flex; justify-content: space-between; }
+.schedule-dialog header button, .schedule-dialog footer button:first-child { background: transparent; border: 0; color: var(--muted); padding: .35rem .5rem; }
+.schedule-dialog label { color: var(--muted); display: grid; font-size: .82rem; gap: .35rem; }
+.schedule-dialog input, .schedule-dialog select, .schedule-dialog textarea { background: var(--canvas); border: 1px solid var(--border); border-radius: .4rem; color: var(--ink); padding: .5rem; }
+.schedule-dialog textarea { min-height: 4.5rem; resize: vertical; }
 
 @media (max-width: 760px) {
   .workbench { display: block; }

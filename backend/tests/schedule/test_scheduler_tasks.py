@@ -118,20 +118,71 @@ def test_schedule_tools_scope_tasks_to_current_session(tmp_path):
     listed = ListScheduledTasksTool(service)
     cancel = CancelScheduledTaskTool(service)
 
-    created = schedule.run({
-        "trigger": "after",
-        "when": "10m",
-        "task_type": "reminder",
-        "message": "测试提醒",
-        "__channel": "telegram",
-        "__session_id": "session-1",
-        "__chat_id": "chat-1",
-    })
+    created = schedule.run(
+        {
+            "trigger": "after",
+            "when": "10m",
+            "task_type": "reminder",
+            "message": "测试提醒",
+            "__channel": "telegram",
+            "__session_id": "session-1",
+            "__chat_id": "chat-1",
+        }
+    )
     assert created.ok is True
     task_id = service.list_tasks("session-1")[0].id
     assert "测试提醒" in listed.run({"__session_id": "session-1"}).content
     assert cancel.run({"task_id": task_id, "__session_id": "session-2"}).ok is False
     assert cancel.run({"task_id": task_id, "__session_id": "session-1"}).ok is True
+
+
+def test_admin_can_list_and_cancel_tasks_from_all_sessions(tmp_path):
+    service = SchedulerService(store_path=tmp_path / "scheduled.db")
+    first = service.create_task(
+        trigger="after",
+        when="10m",
+        task_type="reminder",
+        message="第一条提醒",
+        channel="telegram",
+        session_id="telegram:1",
+        chat_id="1",
+    )
+    second = service.create_task(
+        trigger="after",
+        when="20m",
+        task_type="agent",
+        message="第二条任务",
+        channel="qq",
+        session_id="qq:2",
+        chat_id="2",
+    )
+
+    assert [task.id for task in service.list_all_tasks()] == [first.id, second.id]
+    assert service.cancel_task_by_id(first.id) is True
+    assert service.list_all_tasks()[0].enabled is False
+
+
+def test_admin_can_resume_a_recurring_task(tmp_path):
+    clock = MutableClock(datetime(2026, 7, 19, 8, 0, tzinfo=timezone.utc))
+    service = SchedulerService(store_path=tmp_path / "scheduled.db", now_fn=clock)
+    task = service.create_task(
+        trigger="daily",
+        when="08:30",
+        task_type="reminder",
+        message="早间提醒",
+        channel="telegram",
+        session_id="telegram:1",
+        chat_id="1",
+    )
+
+    assert service.cancel_task_by_id(task.id) is True
+    clock.value = datetime(2026, 7, 20, 9, 0, tzinfo=timezone.utc)
+
+    assert service.resume_task_by_id(task.id) is True
+    resumed = service.get_task_by_id(task.id)
+    assert resumed is not None
+    assert resumed.enabled is True
+    assert resumed.next_run_at > clock.value
 
 
 def test_schedule_tool_is_selected_for_chinese_reminder_request(tmp_path):

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
@@ -54,3 +55,30 @@ class SessionMessage(BaseModel):
 
 class SessionDetail(SessionSummary):
     messages: list[SessionMessage]
+
+
+class ScheduleSummary(BaseModel):
+    id: str
+    name: str
+    trigger: str
+    task_type: str
+    message: str
+    channel: str
+    session_id: str
+    timezone: str
+    next_run_at: datetime
+    interval_seconds: int | None = None
+    daily_time: str | None = None
+    enabled: bool
+    run_count: int
+    created_at: datetime | None = None
+    last_error: str | None = None
+
+
+class CreateSchedule(BaseModel):
+    target_task_id: str
+    name: str = ""
+    trigger: Literal["after", "at", "daily", "every"]
+    when: str
+    task_type: Literal["reminder", "agent"]
+    message: str
