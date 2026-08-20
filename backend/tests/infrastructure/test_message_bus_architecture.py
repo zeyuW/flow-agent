@@ -561,6 +561,6 @@ def test_full_message_bus_architecture_flow():
     assert ev_sub.events[0].payload["user_input"] == "end to end"
 
     # 验证历史
-    history = agent.context.get_history("full")
+    history = agent.context.get_history("cli:full")
     assert history[0]["content"] == "end to end"
     assert history[1]["content"] == "pipeline final answer"

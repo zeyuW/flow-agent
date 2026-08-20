@@ -89,7 +89,7 @@ def test_plugin_phase_and_tool_hook_are_used_by_passive_pipeline():
 
     pipeline.process(IncomingMessage(channel="cli", conversation_id="s1", text="测试"))
 
-    assert phase_calls == ["s1"]
+    assert phase_calls == ["cli:s1"]
     assert agent.committed == ("测试", "完成")
 
 

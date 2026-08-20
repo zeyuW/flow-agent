@@ -19,6 +19,7 @@ from infra.bus.message import MessageBus
 from infra.persistence import SQLiteOutboxStore
 from infra.bus.event import EventBus
 from application.passive.app.pipeline import PassiveTurnPipeline
+from application.passive.app.session_query import SessionQueryService
 from application.passive.app.passive_loop import PassiveLoop
 from infra.bus.types import MessageConsumer, MessageSender
 from application.capabilities.mcp.server_registry import McpServerRegistry
@@ -115,6 +116,7 @@ def create_core_components(config: AppConfig):
     # 会话上下文
     session_store = SessionStore(Path(cfg.storage.memory_db_path))
     session_manager = SessionManager(session_store)
+    session_query = SessionQueryService(session_store)
     context = ConversationContext(session_manager=session_manager)
 
     # 事件记录器
@@ -194,6 +196,7 @@ def create_core_components(config: AppConfig):
         "tool_registry": tool_registry,
         "recorder": recorder,
         "session_manager": session_manager,
+        "session_query": session_query,
         "llm_client": llm_client,
         "spawn_tool": spawn_tool,
         "mcp_registry": mcp_registry,
@@ -284,6 +287,7 @@ def create_app_runtime(config: AppConfig):
     tool_registry = components["tool_registry"]
     recorder = components["recorder"]
     session_manager = components["session_manager"]
+    session_query = components["session_query"]
     llm_client = components["llm_client"]
     spawn_tool = components["spawn_tool"]
     mcp_registry = components["mcp_registry"]
@@ -576,6 +580,7 @@ def create_app_runtime(config: AppConfig):
         memory_optimizer_loop,
         mcp_registry,
         plugin_manager,
+        session_query,
     )
 
 

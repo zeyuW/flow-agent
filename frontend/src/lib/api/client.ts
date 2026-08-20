@@ -1,9 +1,13 @@
 import { z } from "zod";
 
 import {
+  sessionDetailSchema,
+  sessionSummarySchema,
   traceDetailSchema,
   traceEventSchema,
   traceSummarySchema,
+  type SessionDetail,
+  type SessionSummary,
   type TraceDetail,
   type TraceEvent,
   type TraceSummary
@@ -55,4 +59,23 @@ export function getTraces(): Promise<TraceSummary[]> {
 
 export function getTrace(traceId: string): Promise<TraceDetail> {
   return getJson(`/api/traces/${encodeURIComponent(traceId)}`, traceDetailSchema);
+}
+
+export function getSessions(
+  startDate: string,
+  endDate: string
+): Promise<SessionSummary[]> {
+  const params = new URLSearchParams({
+    start_date: startDate,
+    end_date: endDate,
+    limit: "50"
+  });
+  return getJson(`/api/sessions?${params}`, z.array(sessionSummarySchema));
+}
+
+export function getSession(sessionId: string): Promise<SessionDetail> {
+  return getJson(
+    `/api/sessions/${encodeURIComponent(sessionId)}`,
+    sessionDetailSchema
+  );
 }

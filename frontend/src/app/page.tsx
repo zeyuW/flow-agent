@@ -1,94 +1,15 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
+import { MessageContent } from "@/components/message-content";
 import {
   type ConsolePage,
   WorkbenchShell
 } from "@/components/workbench-shell";
-
-type Conversation = {
-  channel: string;
-  date: string;
-  dateLabel: string;
-  id: string;
-  messages: Array<{
-    content: string;
-    meta?: string;
-    role: "agent" | "user";
-    time: string;
-    tools?: string[];
-  }>;
-  preview: string;
-  title: string;
-};
-
-const conversations: Conversation[] = [
-  {
-    channel: "Telegram",
-    date: "2026-08-21",
-    dateLabel: "今天",
-    id: "morning-brief",
-    preview: "帮我整理今天需要关注的内容",
-    title: "晨间规划",
-    messages: [
-      { content: "帮我整理今天需要关注的内容。", role: "user", time: "10:24" },
-      {
-        content:
-          "我已按优先级整理出今天的待办：先完成项目联调，再查看下午的日程安排。",
-        meta: "本轮处理完成 · 1.2 秒",
-        role: "agent",
-        time: "10:24",
-        tools: ["日程连接器", "长期记忆"]
-      },
-      { content: "下午三点提醒我准备会议材料。", role: "user", time: "10:26" },
-      {
-        content: "已创建提醒。我会在下午 2:30 提前通知你准备材料。",
-        meta: "已创建定时任务",
-        role: "agent",
-        time: "10:26",
-        tools: ["定时任务"]
-      }
-    ]
-  },
-  {
-    channel: "HTTP",
-    date: "2026-08-21",
-    dateLabel: "今天",
-    id: "research",
-    preview: "总结这份资料的核心结论",
-    title: "资料研究",
-    messages: [
-      { content: "总结这份资料的核心结论。", role: "user", time: "09:48" },
-      {
-        content: "内容主要围绕 Agent 的长期记忆、工具调用边界和可观测性展开。",
-        meta: "本轮处理完成 · 2.1 秒",
-        role: "agent",
-        time: "09:48",
-        tools: ["文档连接器"]
-      }
-    ]
-  },
-  {
-    channel: "CLI",
-    date: "2026-08-20",
-    dateLabel: "昨天",
-    id: "weekly-review",
-    preview: "帮我回顾本周完成的事项",
-    title: "本周回顾",
-    messages: [
-      { content: "帮我回顾本周完成的事项。", role: "user", time: "21:12" },
-      {
-        content: "本周你完成了控制台联调、Trace 追踪验证和运行脚本的整理。",
-        meta: "本轮处理完成 · 1.7 秒",
-        role: "agent",
-        time: "21:12",
-        tools: ["长期记忆"]
-      }
-    ]
-  }
-];
+import { getSession, getSessions } from "@/lib/api/client";
 
 const dateFilters = [
   { id: "today", label: "今天" },
@@ -98,25 +19,59 @@ const dateFilters = [
 
 type DateFilter = (typeof dateFilters)[number]["id"];
 
+function formatDate(date: Date) {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+function getDateRange(dateFilter: DateFilter, selectedDate: string) {
+  if (selectedDate) {
+    return { startDate: selectedDate, endDate: selectedDate };
+  }
+  const end = new Date();
+  const start = new Date(end);
+  if (dateFilter === "yesterday") {
+    start.setDate(start.getDate() - 1);
+    end.setDate(end.getDate() - 1);
+  }
+  if (dateFilter === "recent") {
+    start.setDate(start.getDate() - 6);
+  }
+  return { startDate: formatDate(start), endDate: formatDate(end) };
+}
+
+function formatTime(timestamp: string) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return new Intl.DateTimeFormat("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function SessionsPage() {
   const [dateFilter, setDateFilter] = useState<DateFilter>("recent");
   const [selectedDate, setSelectedDate] = useState("");
-  const [selectedId, setSelectedId] = useState(conversations[0].id);
-  const visibleConversations = useMemo(() => {
-    if (selectedDate) {
-      return conversations.filter((conversation) => conversation.date === selectedDate);
-    }
-    if (dateFilter === "today") {
-      return conversations.filter((conversation) => conversation.dateLabel === "今天");
-    }
-    if (dateFilter === "yesterday") {
-      return conversations.filter((conversation) => conversation.dateLabel === "昨天");
-    }
-    return conversations;
-  }, [dateFilter, selectedDate]);
-  const selectedConversation =
-    visibleConversations.find((conversation) => conversation.id === selectedId) ??
-    visibleConversations[0];
+  const [selectedId, setSelectedId] = useState<string>();
+  const dateRange = useMemo(
+    () => getDateRange(dateFilter, selectedDate),
+    [dateFilter, selectedDate]
+  );
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions", dateRange.startDate, dateRange.endDate],
+    queryFn: () => getSessions(dateRange.startDate, dateRange.endDate)
+  });
+  const sessions = sessionsQuery.data ?? [];
+  const selectedSession =
+    sessions.find((session) => session.id === selectedId) ?? sessions[0];
+  const sessionQuery = useQuery({
+    queryKey: ["session", selectedSession?.id],
+    queryFn: () => getSession(selectedSession!.id),
+    enabled: Boolean(selectedSession)
+  });
 
   return (
     <>
@@ -148,67 +103,74 @@ function SessionsPage() {
       </section>
       <section className="conversation-workspace">
         <aside aria-label="会话列表" className="conversation-list">
-          {visibleConversations.length === 0 ? (
+          {sessionsQuery.isPending ? (
+            <p className="empty-state">正在读取会话…</p>
+          ) : sessionsQuery.isError ? (
+            <p className="empty-state">无法读取会话记录。</p>
+          ) : sessions.length === 0 ? (
             <p className="empty-state">这个日期没有会话记录。</p>
           ) : (
-            visibleConversations.map((conversation) => (
+            sessions.map((session) => (
               <button
                 className={
-                  conversation.id === selectedConversation?.id
+                  session.id === selectedSession?.id
                     ? "conversation-item conversation-item-selected"
                     : "conversation-item"
                 }
-                key={conversation.id}
-                onClick={() => setSelectedId(conversation.id)}
+                key={session.id}
+                onClick={() => setSelectedId(session.id)}
                 type="button"
               >
                 <span className="conversation-item-title">
-                  <strong>{conversation.title}</strong>
-                  <small>{conversation.channel}</small>
+                  <strong>{session.external_conversation_id}</strong>
+                  <small>{session.channel}</small>
                 </span>
-                <span>{conversation.preview}</span>
-                <time>
-                  {conversation.dateLabel} · {conversation.messages.at(-1)?.time}
-                </time>
+                <span>{session.preview ?? "暂无消息"}</span>
+                <time>{formatTime(session.updated_at)}</time>
               </button>
             ))
           )}
         </aside>
         <section aria-label="对话内容" className="chat-panel">
-          {selectedConversation ? (
+          {selectedSession ? (
             <>
               <header className="chat-header">
                 <div>
-                  <h2>{selectedConversation.title}</h2>
+                  <h2>{selectedSession.external_conversation_id}</h2>
                   <p>
-                    {selectedConversation.channel} · {selectedConversation.date}
+                    {selectedSession.channel} · {selectedSession.updated_at.slice(0, 10)}
                   </p>
                 </div>
                 <span>历史会话</span>
               </header>
-              <div className="message-list">
-                {selectedConversation.messages.map((message, index) => (
+              {sessionQuery.isPending ? (
+                <p className="empty-state">正在读取对话…</p>
+              ) : sessionQuery.isError ? (
+                <p className="empty-state">无法读取该会话。</p>
+              ) : (
+                <div className="message-list">
+                  {sessionQuery.data?.messages.map((message, index) => (
                   <article
-                    className={`message message-${message.role}`}
-                    key={`${message.time}-${index}`}
+                    className={`message message-${message.role === "assistant" ? "agent" : "user"}`}
+                    key={`${message.timestamp}-${index}`}
                   >
                     <p className="message-label">
-                      {message.role === "user" ? "用户" : "Agent"} · {message.time}
+                      {message.role === "user" ? "用户" : "Agent"} · {formatTime(message.timestamp)}
                     </p>
-                    <p>{message.content}</p>
-                    {message.tools ? (
+                    <MessageContent content={message.content} />
+                    {message.tool_chain.length > 0 ? (
                       <div className="turn-summary">
-                        <span>{message.meta}</span>
                         <div>
-                          {message.tools.map((tool) => (
+                          {message.tool_chain.map((tool) => (
                             <small key={tool}>{tool}</small>
                           ))}
                         </div>
                       </div>
                     ) : null}
                   </article>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <p className="empty-state">选择一条会话查看对话内容。</p>

@@ -17,6 +17,7 @@ from application.passive.app.phase import PhaseModule, TurnFlow
 from application.passive.app.prompt import PromptRenderer
 from application.passive.app.reasoning import PassiveReasoner
 from application.passive.domain.messages import IncomingMessage
+from application.passive.domain.session_key import make_session_key
 from infra.bus.event import Event, EventBus
 from infra.bus.message import MessageBus, OutboundPort
 from infra.bus.types import MessageSender
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 def _conversation_id_of(inbound: IncomingMessage) -> str:
     """读取统一被动消息协议中的会话标识。"""
 
-    return inbound.conversation_id
+    return make_session_key(inbound.channel, inbound.conversation_id)
 
 
 class PassiveTurnPipeline:
@@ -169,7 +170,7 @@ class PassiveTurnPipeline:
             session_id=_conversation_id_of(inbound),
             channel=inbound.channel,
             inbound_metadata=dict(inbound.metadata),
-            chat_id=inbound.chat_id or _conversation_id_of(inbound),
+            chat_id=inbound.chat_id or inbound.conversation_id,
             trace_id=uuid4().hex[:12],
         )
         flow.inbound_metadata["media"] = list(inbound.media)

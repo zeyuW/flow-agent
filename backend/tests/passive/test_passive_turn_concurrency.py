@@ -187,8 +187,8 @@ def test_passive_pipeline_allows_other_session_while_async_model_waits():
         await asyncio.wait_for(first, timeout=0.2)
 
         assert committed == [
-            ("session-2", "second", "reply:second"),
-            ("session-1", "first", "reply:first"),
+            ("cli:session-2", "second", "reply:second"),
+            ("cli:session-1", "first", "reply:first"),
         ]
 
     asyncio.run(scenario())

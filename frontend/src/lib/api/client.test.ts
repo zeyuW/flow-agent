@@ -1,5 +1,5 @@
 import * as client from "./client";
-import { getEvents, getTraces } from "./client";
+import { getEvents, getSessions, getTraces } from "./client";
 
 describe("管理 API 客户端", () => {
   afterEach(() => {
@@ -47,10 +47,28 @@ describe("管理 API 客户端", () => {
     expect(requestUrl.pathname).toBe("/api/events");
   });
 
-  it("只暴露已实现的 Trace REST 客户端", () => {
+  it("按日期范围请求会话摘要", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue([])
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getSessions("2026-08-20", "2026-08-21");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sessions?start_date=2026-08-20&end_date=2026-08-21&limit=50",
+      expect.any(Object)
+    );
+  });
+
+  it("只暴露已实现的管理 API 客户端", () => {
     expect(Object.keys(client).sort()).toEqual([
       "AdminApiError",
       "getEvents",
+      "getSession",
+      "getSessions",
       "getTrace",
       "getTraces"
     ]);

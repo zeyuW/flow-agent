@@ -128,6 +128,38 @@ class SessionStore:
                 (last_consolidated, now, key),
             )
 
+    def list_session_summaries(
+        self, start_at: str, end_at: str, limit: int
+    ) -> list[dict[str, Any]]:
+        """按更新时间读取有限数量的会话摘要。"""
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    sessions.key,
+                    sessions.created_at,
+                    sessions.updated_at,
+                    COUNT(messages_v2.id) AS message_count,
+                    (
+                        SELECT content
+                        FROM messages_v2 AS latest_message
+                        WHERE latest_message.session_key = sessions.key
+                        ORDER BY latest_message.seq DESC
+                        LIMIT 1
+                    ) AS preview
+                FROM sessions
+                LEFT JOIN messages_v2 ON messages_v2.session_key = sessions.key
+                WHERE datetime(sessions.updated_at) >= datetime(?)
+                  AND datetime(sessions.updated_at) < datetime(?)
+                GROUP BY sessions.key
+                ORDER BY datetime(sessions.updated_at) DESC
+                LIMIT ?
+                """,
+                (start_at, end_at, limit),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     # ── 消息 ──
 
     def fetch_session_messages(self, key: str) -> list[dict[str, Any]]:

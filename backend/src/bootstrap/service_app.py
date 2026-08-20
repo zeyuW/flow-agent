@@ -13,6 +13,7 @@ from application.capabilities.plugins.plugin_loader import PluginManager
 from application.delegation.app.runtime import SubagentRuntime
 from application.memory.app.memory_runtime import MemoryRuntime
 from application.passive.app.passive_loop import PassiveLoop
+from application.passive.app.session_query import SessionQueryService
 from application.memory.app.optimizer import MemoryOptimizerLoop
 from application.proactive.app.loop import ProactiveLoop
 from application.automation.app.runtime import AutomationRuntime
@@ -63,6 +64,7 @@ class ServiceApp:
         self._mcp_registry: McpServerRegistry | None = None
         self._plugin_manager: PluginManager | None = None
         self._admin_timeline: TraceTimeline | None = None
+        self._session_query: SessionQueryService | None = None
         self._admin_server: AdminServer | None = None
 
     @property
@@ -225,12 +227,15 @@ class ServiceApp:
             self._memory_optimizer_loop,
             self._mcp_registry,
             self._plugin_manager,
+            self._session_query,
         ) = create_app_runtime(cfg)
         if cfg.admin_api.enabled:
+            if self._session_query is None:
+                raise RuntimeError("会话查询服务未初始化")
             self._admin_timeline = TraceTimeline()
             self._event_bus.subscribe(self._admin_timeline)
             self._admin_server = AdminServer(
-                create_admin_app(self._admin_timeline),
+                create_admin_app(self._admin_timeline, self._session_query),
                 host=cfg.admin_api.host,
                 port=cfg.admin_api.port,
             )

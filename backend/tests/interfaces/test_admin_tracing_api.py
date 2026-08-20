@@ -1,9 +1,15 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 from application.agent.app.tracing import TraceTimeline
+from application.passive.app.session_query import (
+    SessionDetail,
+    SessionMessage,
+    SessionSummary,
+)
 from infra.bus.event import Event
 from interfaces.admin.router import create_admin_app
 
@@ -20,8 +26,55 @@ def _routes():
         event = Event(event_type, trace_id=trace_id, payload=payload)
         event.timestamp = started + timedelta(seconds=seconds)
         timeline.record(event)
-    app = create_admin_app(timeline)
+    app = create_admin_app(timeline, _SessionQuery())
     return {route.path: route.endpoint for route in app.routes}
+
+
+class _SessionQuery:
+    def list_sessions(
+        self, start_date: date, end_date: date, limit: int
+    ) -> list[SessionSummary]:
+        return [
+            SessionSummary(
+                id="telegram:1",
+                channel="telegram",
+                external_conversation_id="1",
+                created_at="2026-08-21T02:00:00+00:00",
+                updated_at="2026-08-21T02:00:00+00:00",
+                message_count=1,
+                preview="你好",
+            )
+        ]
+
+    def get_session(self, session_id: str) -> SessionDetail | None:
+        if session_id == "missing":
+            return None
+        return SessionDetail(
+            id="telegram:1",
+            channel="telegram",
+            external_conversation_id="1",
+            created_at="2026-08-21T02:00:00+00:00",
+            updated_at="2026-08-21T02:00:00+00:00",
+            message_count=1,
+            preview="你好",
+            messages=[
+                SessionMessage(
+                    role="user",
+                    content="你好",
+                    timestamp="2026-08-21T02:00:00+00:00",
+                    tool_chain=[],
+                )
+            ],
+        )
+
+
+def _routes_with_sessions():
+    app = _app_with_sessions()
+    return {route.path: route.endpoint for route in app.routes}
+
+
+def _app_with_sessions():
+    return create_admin_app(TraceTimeline(), _SessionQuery())
 
 
 def test_traces_filters_and_excludes_sensitive_data():
@@ -59,3 +112,33 @@ def test_unknown_trace_returns_contract_error():
 
     with pytest.raises(HTTPException, match="未找到追踪记录: missing"):
         routes["/api/traces/{trace_id}"]("missing")
+
+
+def test_sessions_routes_return_summaries_and_details():
+    routes = _routes_with_sessions()
+
+    summaries = routes["/api/sessions"](
+        start_date=date(2026, 8, 21), end_date=date(2026, 8, 21), limit=50
+    )
+    detail = routes["/api/sessions/{session_id}"]("telegram:1")
+
+    assert summaries[0].channel == "telegram"
+    assert detail.messages[0].content == "你好"
+
+
+def test_unknown_session_returns_404():
+    routes = _routes_with_sessions()
+
+    with pytest.raises(HTTPException, match="未找到会话: missing"):
+        routes["/api/sessions/{session_id}"]("missing")
+
+
+def test_sessions_rejects_reversed_date_range():
+    client = TestClient(_app_with_sessions())
+
+    response = client.get(
+        "/api/sessions",
+        params={"start_date": "2026-08-22", "end_date": "2026-08-21"},
+    )
+
+    assert response.status_code == 422

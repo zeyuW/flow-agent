@@ -31,3 +31,27 @@ export const traceDetailSchema = traceSummarySchema.extend({
   events: z.array(traceEventSchema)
 });
 export type TraceDetail = z.infer<typeof traceDetailSchema>;
+
+export const sessionSummarySchema = z.object({
+  id: z.string(),
+  channel: z.string(),
+  external_conversation_id: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  message_count: z.number().int().nonnegative(),
+  preview: z.string().nullable()
+});
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+
+export const sessionMessageSchema = z.object({
+  role: z.enum(["user", "assistant"]),
+  content: z.string(),
+  timestamp: z.string(),
+  tool_chain: z.array(z.string())
+});
+export type SessionMessage = z.infer<typeof sessionMessageSchema>;
+
+export const sessionDetailSchema = sessionSummarySchema.extend({
+  messages: z.array(sessionMessageSchema)
+});
+export type SessionDetail = z.infer<typeof sessionDetailSchema>;

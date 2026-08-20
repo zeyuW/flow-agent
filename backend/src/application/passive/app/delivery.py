@@ -83,7 +83,7 @@ class PassiveTurnDelivery:
             metadata.update(flow.inbound_metadata)
         request = SendMessage(
             channel=flow.channel,
-            conversation_id=flow.session_id,
+            conversation_id=getattr(flow, "chat_id", "") or flow.session_id,
             text=flow.final_output,
             recipient_id=getattr(flow, "chat_id", "") or flow.session_id,
             metadata=metadata,
@@ -119,7 +119,7 @@ class PassiveTurnDelivery:
             metadata.update(flow.inbound_metadata)
         request = SendMessage(
             channel=flow.channel,
-            conversation_id=flow.session_id,
+            conversation_id=getattr(flow, "chat_id", "") or flow.session_id,
             text=f"处理消息时出错: {exc}",
             recipient_id=getattr(flow, "chat_id", "") or flow.session_id,
             metadata=metadata,

@@ -295,7 +295,7 @@ def test_passive_pipeline_submits_reply_through_message_sender():
     assert submitted == [
         SendMessage(
             channel="telegram",
-            conversation_id="telegram:42",
+            conversation_id="42",
             recipient_id="42",
             text="回复",
             metadata={
