@@ -1,46 +1,49 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-const navigation = [
-  "概览",
-  "会话与回合",
-  "投递与事件",
-  "自动化与主动策略",
-  "记忆",
-  "渠道",
-  "扩展",
-  "审计日志",
-  "设置与权限"
+export type ConsolePage = "sessions" | "schedules" | "capabilities" | "plugins";
+
+const navigation: Array<{ id: ConsolePage; label: string }> = [
+  { id: "sessions", label: "会话" },
+  { id: "schedules", label: "定时任务" },
+  { id: "capabilities", label: "技能与连接器" },
+  { id: "plugins", label: "插件" }
 ];
 
 export function WorkbenchShell({
+  activePage,
   children,
-  details,
-  header
+  header,
+  onNavigate
 }: {
+  activePage: ConsolePage;
   children: ReactNode;
-  details: ReactNode;
   header: ReactNode;
+  onNavigate: (page: ConsolePage) => void;
 }) {
   return (
     <div className="workbench">
       <aside className="sidebar">
         <Link className="brand" href="/">
           <span>FLOW</span>
-          <strong>Agent 控制台</strong>
+          <strong>Agent 工作台</strong>
         </Link>
         <nav aria-label="主导航">
-          {navigation.map((item, index) => (
-            <a aria-current={index === 0 ? "page" : undefined} href={index === 0 ? "/" : "#"} key={item}>
-              {item}
-            </a>
+          {navigation.map((item) => (
+            <button
+              aria-current={activePage === item.id ? "page" : undefined}
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              type="button"
+            >
+              {item.label}
+            </button>
           ))}
         </nav>
-        <p className="sidebar-foot">观察工作区 · 管理员</p>
+        <p className="sidebar-foot">本地 Agent 工作台</p>
       </aside>
       <header className="topbar">{header}</header>
       <main>{children}</main>
-      <aside className="details-panel">{details}</aside>
     </div>
   );
 }
