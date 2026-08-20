@@ -117,6 +117,20 @@ class ObserveConfig(FrozenConfig):
     trace_path: str = Field(default=".flow/logs/trace.jsonl", min_length=1)
 
 
+class AdminApiConfig(FrozenConfig):
+    """本机只读管理 API 的监听配置。"""
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = Field(default=8790, ge=1, le=65535)
+
+    @model_validator(mode="after")
+    def validate_local_host(self) -> AdminApiConfig:
+        if self.host not in {"127.0.0.1", "localhost"}:
+            raise ValueError("管理 API 只能绑定本机地址")
+        return self
+
+
 class MemoryPolicyConfig(FrozenConfig):
     """会话记忆选择策略。"""
 
@@ -258,6 +272,7 @@ class AppConfig(FrozenConfig):
     mcp: McpConfig = Field(default_factory=McpConfig)
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     observe: ObserveConfig = Field(default_factory=ObserveConfig)
+    admin_api: AdminApiConfig = Field(default_factory=AdminApiConfig)
     memory_policy: MemoryPolicyConfig = Field(default_factory=MemoryPolicyConfig)
     memory: MemoryMaintenanceConfig = Field(default_factory=MemoryMaintenanceConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
