@@ -25,6 +25,9 @@ from infra.workspace import (
 )
 from infra.bus.event import EventBus
 from infra.bus.message import MessageBus
+from application.agent.app.tracing import TraceTimeline
+from interfaces.admin.router import create_admin_app
+from interfaces.admin.server import AdminServer
 from interfaces.channels.base import ChannelContext
 from interfaces.channels.service import ChannelService, register_builtin_channels
 
@@ -59,6 +62,8 @@ class ServiceApp:
         self._memory_optimizer_loop: MemoryOptimizerLoop | None = None
         self._mcp_registry: McpServerRegistry | None = None
         self._plugin_manager: PluginManager | None = None
+        self._admin_timeline: TraceTimeline | None = None
+        self._admin_server: AdminServer | None = None
 
     @property
     def state(self) -> str:
@@ -98,6 +103,8 @@ class ServiceApp:
             self._channel_service.start_all()
             for adapter in self._channel_service.adapters():
                 print(f"{adapter.name} channel started")
+            if self._admin_server is not None:
+                self._admin_server.start()
 
             if self._passive_loop is not None:
                 self._passive_loop.start_background()
@@ -149,6 +156,10 @@ class ServiceApp:
 
         # 先停止入口，阻止新的入站消息继续进入业务线程；单个渠道失败时继续清理。
         attempt("channels.stop", self._channel_service.stop_all)
+        admin_server = getattr(self, "_admin_server", None)
+        if admin_server is not None:
+            attempt("admin_api.stop", admin_server.stop)
+            attempt("admin_api.join", lambda: admin_server.join(timeout=8.0))
         if self._proactive_runtime is not None:
             attempt("proactive", self._proactive_runtime.request_stop)
         if self._memory_optimizer_loop is not None:
@@ -215,6 +226,14 @@ class ServiceApp:
             self._mcp_registry,
             self._plugin_manager,
         ) = create_app_runtime(cfg)
+        if cfg.admin_api.enabled:
+            self._admin_timeline = TraceTimeline()
+            self._event_bus.subscribe(self._admin_timeline)
+            self._admin_server = AdminServer(
+                create_admin_app(self._admin_timeline),
+                host=cfg.admin_api.host,
+                port=cfg.admin_api.port,
+            )
         self._channel_context = ChannelContext(
             bus=self._message_bus,
             event_bus=self._event_bus,

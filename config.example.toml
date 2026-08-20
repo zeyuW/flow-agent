@@ -22,6 +22,12 @@ model = "text-embedding-v3"
 api_key = ""
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
+# 本机只读管理 API，供独立前端查询追踪状态。
+[admin_api]
+enabled = true
+host = "127.0.0.1"
+port = 8790
+
 # 当前使用 Telegram 作为外部消息渠道。
 [channels.telegram]
 enabled = false
