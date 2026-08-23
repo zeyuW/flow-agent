@@ -124,3 +124,32 @@ def test_registry_selects_skill_installer_for_chinese_install_request():
     )
 
     assert selected[0]["function"]["name"] == "install_skill"
+
+
+def test_registry_exposes_tools_from_explicit_mcp_server():
+    class McpTool(EchoTool):
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        @property
+        def name(self) -> str:
+            return self._name
+
+        @property
+        def description(self) -> str:
+            return "MCP 文档搜索工具"
+
+    registry = ToolRegistry()
+    for name in (
+        "mcp__mcp-docs__search_model_context_protocol",
+        "mcp__mcp-docs__query_docs_filesystem_model_context_protocol",
+    ):
+        registry.register(McpTool(name))
+    for index in range(12):
+        registry.register(McpTool(f"mcp__other__tool_{index}"))
+
+    selected = registry.select_openai_tools(
+        "请使用 mcp-docs 搜索 Streamable HTTP", max_tools=1
+    )
+
+    assert selected[0]["function"]["name"] == "mcp__mcp-docs__search_model_context_protocol"

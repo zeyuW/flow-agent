@@ -415,10 +415,13 @@ function CapabilitiesPage() {
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [isMcpDialogOpen, setIsMcpDialogOpen] = useState(false);
   const [mcpName, setMcpName] = useState("");
+  const [mcpType, setMcpType] = useState<"stdio" | "http">("stdio");
   const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpUrl, setMcpUrl] = useState("");
   const [mcpArgs, setMcpArgs] = useState("");
   const [mcpCwd, setMcpCwd] = useState("");
   const [mcpEnv, setMcpEnv] = useState("");
+  const [mcpHeaders, setMcpHeaders] = useState("");
   const refreshCapabilities = () =>
     queryClient.invalidateQueries({ queryKey: ["capabilities"] });
   const installMutation = useMutation({
@@ -445,18 +448,23 @@ function CapabilitiesPage() {
   });
   const saveMcpMutation = useMutation({
     mutationFn: () => saveMcpServer(mcpName, {
-      command: mcpCommand,
-      args: mcpArgs.trim() ? mcpArgs.trim().split(/\s+/) : [],
-      cwd: mcpCwd.trim() || null,
-      env: mcpEnv.trim() ? JSON.parse(mcpEnv) : {}
+      command: mcpType === "stdio" ? mcpCommand : "",
+      url: mcpType === "http" ? mcpUrl : null,
+      args: mcpType === "stdio" && mcpArgs.trim() ? mcpArgs.trim().split(/\s+/) : [],
+      cwd: mcpType === "stdio" ? mcpCwd.trim() || null : null,
+      env: mcpEnv.trim() ? JSON.parse(mcpEnv) : {},
+      headers: mcpHeaders.trim() ? JSON.parse(mcpHeaders) : {}
     }),
     onSuccess: () => {
       setIsMcpDialogOpen(false);
       setMcpName("");
+      setMcpType("stdio");
       setMcpCommand("");
+      setMcpUrl("");
       setMcpArgs("");
       setMcpCwd("");
       setMcpEnv("");
+      setMcpHeaders("");
       refreshCapabilities();
     }
   });
@@ -677,10 +685,14 @@ function CapabilitiesPage() {
               <button type="button" onClick={() => setIsMcpDialogOpen(false)}>关闭</button>
             </header>
             <label>名称<input required value={mcpName} onChange={(event) => setMcpName(event.target.value)} placeholder="weather" /></label>
-            <label>启动命令<input required value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} placeholder="npx" /></label>
-            <label>参数<input value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} placeholder="-y @example/mcp-server" /></label>
-            <label>工作目录<input value={mcpCwd} onChange={(event) => setMcpCwd(event.target.value)} placeholder="可选" /></label>
+            <label>连接方式<select value={mcpType} onChange={(event) => setMcpType(event.target.value as "stdio" | "http")}><option value="stdio">本地 stdio</option><option value="http">远程 Streamable HTTP</option></select></label>
+            {mcpType === "stdio" ? <>
+              <label>启动命令<input required value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} placeholder="npx" /></label>
+              <label>参数<input value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} placeholder="-y @example/mcp-server" /></label>
+              <label>工作目录<input value={mcpCwd} onChange={(event) => setMcpCwd(event.target.value)} placeholder="可选" /></label>
+            </> : <label>远程 MCP 地址<input required value={mcpUrl} onChange={(event) => setMcpUrl(event.target.value)} placeholder="https://example.com/mcp" /></label>}
             <label>环境变量（JSON）<textarea value={mcpEnv} onChange={(event) => setMcpEnv(event.target.value)} placeholder='{"API_KEY":"your-key"}' /></label>
+            {mcpType === "http" ? <label>请求头（JSON）<textarea value={mcpHeaders} onChange={(event) => setMcpHeaders(event.target.value)} placeholder='{"Authorization":"Bearer ..."}' /></label> : null}
             {saveMcpMutation.isError ? <p className="form-error">连接器保存失败，请检查配置。</p> : null}
             <footer>
               <button type="button" onClick={() => setIsMcpDialogOpen(false)}>取消</button>

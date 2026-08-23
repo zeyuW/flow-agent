@@ -16,6 +16,8 @@ class McpServerSpec:
 
     name: str
     command: tuple[str, ...]
+    url: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     watch_paths: tuple[str, ...] = ()
@@ -35,7 +37,14 @@ class McpServerSpec:
     def revision(self) -> str:
         """计算声明和监视文件状态的稳定修订值。"""
         digest = hashlib.sha256()
-        digest.update(repr((self.name, self.command, self.cwd, sorted(self.env.items()))).encode())
+        digest.update(repr((
+            self.name,
+            self.command,
+            self.url,
+            sorted(self.headers.items()),
+            self.cwd,
+            sorted(self.env.items()),
+        )).encode())
         for raw_path in self.watch_paths:
             path = Path(raw_path)
             digest.update(str(path).encode())
@@ -68,10 +77,11 @@ def load_project_mcp_specs(config_path: Path) -> list[McpServerSpec]:
             raise ValueError(f"MCP 服务配置必须是对象: {name}")
         if not bool(value.get("enabled", True)):
             continue
+        url = str(value.get("url", "")).strip() or None
         command_name = str(value.get("command", "")).strip()
-        if not command_name:
-            raise ValueError(f"外部 MCP 缺少 command: {name}")
-        command = (command_name, *_string_tuple(value.get("args")))
+        if not command_name and not url:
+            raise ValueError(f"外部 MCP 缺少 command 或 url: {name}")
+        command = (command_name, *_string_tuple(value.get("args"))) if command_name else ()
         cwd = _resolve_user_path(config_path.parent, value.get("cwd"))
         watch_paths = tuple(
             str(_resolve_user_path(config_path.parent, item))
@@ -80,6 +90,8 @@ def load_project_mcp_specs(config_path: Path) -> list[McpServerSpec]:
         specs.append(McpServerSpec(
             name=str(name),
             command=command,
+            url=url,
+            headers=_string_dict(value.get("headers")),
             cwd=str(cwd) if cwd is not None else None,
             env=_string_dict(value.get("env")),
             watch_paths=watch_paths,
@@ -112,8 +124,8 @@ def save_mcp_server(
         raise ValueError("MCP 服务名不能为空")
     if not isinstance(server, dict):
         raise ValueError("MCP 服务配置必须是对象")
-    if not str(server.get("command", "")).strip():
-        raise ValueError("MCP 服务缺少 command")
+    if not str(server.get("command", "")).strip() and not str(server.get("url", "")).strip():
+        raise ValueError("MCP 服务缺少 command 或 url")
     raw = load_mcp_config(config_path)
     raw["mcpServers"][name] = server
     _write_mcp_config(config_path, raw)

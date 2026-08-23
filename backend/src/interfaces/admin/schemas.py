@@ -100,9 +100,11 @@ class ConnectorCapability(BaseModel):
 
 
 class McpServerInput(BaseModel):
-    command: str
+    command: str = ""
+    url: str | None = None
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
     enabled: bool = True
 

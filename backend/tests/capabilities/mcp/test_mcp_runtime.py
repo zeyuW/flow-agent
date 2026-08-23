@@ -8,6 +8,7 @@ import pytest
 
 from application.capabilities.mcp import builtin_server
 from application.capabilities.mcp.mcp_client import McpClient
+from application.capabilities.mcp.http_client import McpHttpClient
 from application.capabilities.mcp.config import (
     McpServerSpec,
     load_project_mcp_specs,
@@ -86,6 +87,26 @@ def test_project_json_loads_external_server(tmp_path: Path):
     assert [spec.name for spec in specs] == ["demo"]
 
 
+def test_project_json_loads_streamable_http_server(tmp_path: Path):
+    config = tmp_path / ".flow" / "mcp.json"
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps({
+        "schemaVersion": 1,
+        "mcpServers": {
+            "docs": {
+                "url": "https://example.com/mcp",
+                "headers": {"Authorization": "Bearer test"},
+            }
+        },
+    }), encoding="utf-8")
+
+    specs = load_project_mcp_specs(config)
+
+    assert specs[0].url == "https://example.com/mcp"
+    assert specs[0].command == ()
+    assert specs[0].headers == {"Authorization": "Bearer test"}
+
+
 def test_mcp_config_can_save_toggle_and_remove_server(tmp_path: Path):
     config = tmp_path / ".flow" / "mcp.json"
 
@@ -101,6 +122,44 @@ def test_mcp_config_can_save_toggle_and_remove_server(tmp_path: Path):
     assert load_mcp_config(config)["mcpServers"]["weather"]["enabled"] is False
     assert remove_mcp_server(config, "weather") is True
     assert remove_mcp_server(config, "weather") is False
+
+
+def test_http_mcp_client_discovers_and_calls_tools(monkeypatch):
+    requests: list[dict] = []
+
+    class Response:
+        headers = {"mcp-session-id": "session-1"}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            request = requests[-1]
+            if request["method"] == "initialize":
+                return {"jsonrpc": "2.0", "id": request["id"], "result": {"capabilities": {"tools": {}}}}
+            if request["method"] == "tools/list":
+                return {"jsonrpc": "2.0", "id": request["id"], "result": {"tools": [{"name": "echo", "inputSchema": {"type": "object"}}]}}
+            return {"jsonrpc": "2.0", "id": request["id"], "result": {"content": [{"type": "text", "text": "remote:hello"}]}}
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.headers = kwargs["headers"]
+
+        def post(self, url, json, **kwargs):
+            requests.append(json)
+            return Response()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("application.capabilities.mcp.http_client.httpx.Client", Client)
+    client = McpHttpClient("remote", "https://example.com/mcp")
+
+    assert [tool.name for tool in client.start()] == ["echo"]
+    assert client.call_sync("echo", {"text": "hello"}) == "remote:hello"
+    assert requests[0]["method"] == "initialize"
+    assert requests[-1]["method"] == "tools/call"
+    client.stop()
 
 
 def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):

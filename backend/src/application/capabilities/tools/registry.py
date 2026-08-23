@@ -156,7 +156,10 @@ class ToolRegistry:
         explicitly_named = [
             item
             for item in all_tools
-            if str(item.get("function", {}).get("name", "")).lower() in normalized_input
+            if _tool_is_explicitly_requested(
+                str(item.get("function", {}).get("name", "")),
+                normalized_input,
+            )
         ]
         explicitly_named_names = {
             str(item.get("function", {}).get("name", "")) for item in explicitly_named
@@ -210,3 +213,12 @@ def _tokenize(text: str) -> set[str]:
     tokens.update(cjk)
     tokens.update(cjk[index : index + 2] for index in range(max(0, len(cjk) - 1)))
     return {token for token in tokens if token}
+
+
+def _tool_is_explicitly_requested(tool_name: str, normalized_input: str) -> bool:
+    """用户点名 MCP 服务时，将该服务的工具视为显式候选。"""
+    tool_name = tool_name.lower()
+    if tool_name in normalized_input:
+        return True
+    parts = tool_name.split("__")
+    return len(parts) == 3 and parts[0] == "mcp" and parts[1] in normalized_input

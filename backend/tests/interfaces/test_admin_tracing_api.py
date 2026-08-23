@@ -285,6 +285,8 @@ def test_mcp_management_routes_save_toggle_and_remove_server():
         "command": "npx",
         "args": ["-y", "github-mcp"],
         "env": {},
+        "url": None,
+        "headers": {},
         "cwd": None,
         "enabled": True,
     }

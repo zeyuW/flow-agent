@@ -17,6 +17,7 @@ from application.capabilities.mcp.config import (
     set_mcp_server_enabled,
 )
 from application.capabilities.mcp.mcp_client import McpClient
+from application.capabilities.mcp.http_client import McpHttpClient
 from application.capabilities.mcp.tool_wrapper import McpToolWrapper
 
 logger = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ class McpServerRegistry:
     builtin_catalog: dict[str, McpServerSpec] = field(default_factory=builtin_mcp_catalog)
     startup_timeout: float = 30.0
     call_timeout: float = 60.0
-    _clients: dict[str, McpClient] = field(default_factory=dict)
+    _clients: dict[str, Any] = field(default_factory=dict)
     _server_tools: dict[str, list[str]] = field(default_factory=dict)
     _additional_specs: list[McpServerSpec] = field(default_factory=list)
     _watch_thread: threading.Thread | None = None
@@ -136,13 +137,21 @@ class McpServerRegistry:
         candidate_tools: dict[str, list[Any]] = {}
         try:
             for spec in specs:
-                client = McpClient(
-                    name=spec.name,
-                    command=list(spec.command),
-                    env=spec.env or None,
-                    cwd=spec.cwd,
-                    call_timeout=self.call_timeout,
-                )
+                if spec.url:
+                    client = McpHttpClient(
+                        name=spec.name,
+                        url=spec.url,
+                        headers=spec.headers,
+                        call_timeout=self.call_timeout,
+                    )
+                else:
+                    client = McpClient(
+                        name=spec.name,
+                        command=list(spec.command),
+                        env=spec.env or None,
+                        cwd=spec.cwd,
+                        call_timeout=self.call_timeout,
+                    )
                 candidates[spec.name] = client
                 candidate_tools[spec.name] = client.start(self.startup_timeout)
         except Exception:
