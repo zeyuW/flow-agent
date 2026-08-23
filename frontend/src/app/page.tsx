@@ -13,12 +13,15 @@ import {
   cancelSchedule,
   createSchedule,
   getCapabilities,
+  removeMcpServer,
+  saveMcpServer,
   getSchedules,
   getSession,
   getSessions,
   installSkill,
   resumeSchedule,
   scanSkills,
+  setMcpServerEnabled,
   uninstallSkill
 } from "@/lib/api/client";
 import type { CreateScheduleInput } from "@/lib/api/client";
@@ -397,9 +400,9 @@ function SchedulesPage() {
                 创建任务
               </button>
             </footer>
-          </form>
-        </div>
-      ) : null}
+            </form>
+          </div>
+        ) : null}
     </>
   );
 }
@@ -410,6 +413,12 @@ function CapabilitiesPage() {
   const [repositoryUrl, setRepositoryUrl] = useState("");
   const [candidates, setCandidates] = useState<{ name: string }[] | null>(null);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [isMcpDialogOpen, setIsMcpDialogOpen] = useState(false);
+  const [mcpName, setMcpName] = useState("");
+  const [mcpCommand, setMcpCommand] = useState("");
+  const [mcpArgs, setMcpArgs] = useState("");
+  const [mcpCwd, setMcpCwd] = useState("");
+  const [mcpEnv, setMcpEnv] = useState("");
   const refreshCapabilities = () =>
     queryClient.invalidateQueries({ queryKey: ["capabilities"] });
   const installMutation = useMutation({
@@ -432,6 +441,32 @@ function CapabilitiesPage() {
   });
   const uninstallMutation = useMutation({
     mutationFn: (name: string) => uninstallSkill(name),
+    onSuccess: refreshCapabilities
+  });
+  const saveMcpMutation = useMutation({
+    mutationFn: () => saveMcpServer(mcpName, {
+      command: mcpCommand,
+      args: mcpArgs.trim() ? mcpArgs.trim().split(/\s+/) : [],
+      cwd: mcpCwd.trim() || null,
+      env: mcpEnv.trim() ? JSON.parse(mcpEnv) : {}
+    }),
+    onSuccess: () => {
+      setIsMcpDialogOpen(false);
+      setMcpName("");
+      setMcpCommand("");
+      setMcpArgs("");
+      setMcpCwd("");
+      setMcpEnv("");
+      refreshCapabilities();
+    }
+  });
+  const toggleMcpMutation = useMutation({
+    mutationFn: ({ name, enabled }: { name: string; enabled: boolean }) =>
+      setMcpServerEnabled(name, enabled),
+    onSuccess: refreshCapabilities
+  });
+  const removeMcpMutation = useMutation({
+    mutationFn: (name: string) => removeMcpServer(name),
     onSuccess: refreshCapabilities
   });
   const capabilitiesQuery = useQuery({
@@ -505,7 +540,12 @@ function CapabilitiesPage() {
             <p className="eyebrow">MCP connectors</p>
             <h2>连接器</h2>
           </div>
-          <span>{capabilities.connectors.length} 个连接器</span>
+          <div className="section-actions">
+            <span>{capabilities.connectors.length} 个连接器</span>
+            <button type="button" onClick={() => setIsMcpDialogOpen(true)}>
+              添加连接器
+            </button>
+          </div>
         </div>
         <div className="compact-card-grid">
           {capabilities.connectors.length === 0 ? (
@@ -515,9 +555,27 @@ function CapabilitiesPage() {
               <article className="feature-card" key={connector.name}>
                 <h3>{connector.name}</h3>
                 <p>{connector.tools.join("、") || "暂未发现工具"}</p>
-                <small>
-                  {connector.connected ? "已连接" : "未连接"} · {connector.tools.length} 个工具
-                </small>
+                <footer>
+                  <small>
+                    {connector.connected ? "已连接" : connector.enabled ? "未连接" : "已禁用"} · {connector.tools.length} 个工具
+                  </small>
+                  <span className="card-actions">
+                    <button
+                      type="button"
+                      aria-label={`${connector.enabled ? "禁用" : "启用"} ${connector.name}`}
+                      onClick={() => toggleMcpMutation.mutate({ name: connector.name, enabled: !connector.enabled })}
+                    >
+                      {connector.enabled ? "禁用" : "启用"}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`删除 ${connector.name}`}
+                      onClick={() => removeMcpMutation.mutate(connector.name)}
+                    >
+                      删除
+                    </button>
+                  </span>
+                </footer>
               </article>
             ))
           )}
@@ -600,6 +658,33 @@ function CapabilitiesPage() {
                     ? "安装中…"
                     : `安装 ${selectedNames.length} 个 Skill`}
               </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
+      {isMcpDialogOpen ? (
+        <div className="dialog-backdrop" role="presentation">
+          <form
+            className="schedule-dialog"
+            aria-label="添加 MCP 连接器"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveMcpMutation.mutate();
+            }}
+          >
+            <header>
+              <h2>添加 MCP 连接器</h2>
+              <button type="button" onClick={() => setIsMcpDialogOpen(false)}>关闭</button>
+            </header>
+            <label>名称<input required value={mcpName} onChange={(event) => setMcpName(event.target.value)} placeholder="weather" /></label>
+            <label>启动命令<input required value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} placeholder="npx" /></label>
+            <label>参数<input value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} placeholder="-y @example/mcp-server" /></label>
+            <label>工作目录<input value={mcpCwd} onChange={(event) => setMcpCwd(event.target.value)} placeholder="可选" /></label>
+            <label>环境变量（JSON）<textarea value={mcpEnv} onChange={(event) => setMcpEnv(event.target.value)} placeholder='{"API_KEY":"your-key"}' /></label>
+            {saveMcpMutation.isError ? <p className="form-error">连接器保存失败，请检查配置。</p> : null}
+            <footer>
+              <button type="button" onClick={() => setIsMcpDialogOpen(false)}>取消</button>
+              <button type="submit" disabled={saveMcpMutation.isPending}>{saveMcpMutation.isPending ? "保存中…" : "保存并连接"}</button>
             </footer>
           </form>
         </div>

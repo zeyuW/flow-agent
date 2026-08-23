@@ -8,7 +8,14 @@ import pytest
 
 from application.capabilities.mcp import builtin_server
 from application.capabilities.mcp.mcp_client import McpClient
-from application.capabilities.mcp.config import McpServerSpec, load_project_mcp_specs
+from application.capabilities.mcp.config import (
+    McpServerSpec,
+    load_project_mcp_specs,
+    load_mcp_config,
+    remove_mcp_server,
+    save_mcp_server,
+    set_mcp_server_enabled,
+)
 from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
 from application.capabilities.tools.registry import ToolRegistry
@@ -77,6 +84,23 @@ def test_project_json_loads_external_server(tmp_path: Path):
     specs = load_project_mcp_specs(config)
 
     assert [spec.name for spec in specs] == ["demo"]
+
+
+def test_mcp_config_can_save_toggle_and_remove_server(tmp_path: Path):
+    config = tmp_path / ".flow" / "mcp.json"
+
+    save_mcp_server(config, "weather", {
+        "command": sys.executable,
+        "args": ["server.py"],
+        "env": {"API_KEY": "local"},
+        "enabled": True,
+    })
+    assert load_mcp_config(config)["mcpServers"]["weather"]["command"] == sys.executable
+
+    assert set_mcp_server_enabled(config, "weather", False) is True
+    assert load_mcp_config(config)["mcpServers"]["weather"]["enabled"] is False
+    assert remove_mcp_server(config, "weather") is True
+    assert remove_mcp_server(config, "weather") is False
 
 
 def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):

@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 from application.capabilities.mcp.builtin import builtin_mcp_catalog
-from application.capabilities.mcp.config import McpServerSpec, load_project_mcp_specs, merge_mcp_specs
+from application.capabilities.mcp.config import (
+    McpServerSpec,
+    load_mcp_config,
+    load_project_mcp_specs,
+    merge_mcp_specs,
+    remove_mcp_server,
+    save_mcp_server,
+    set_mcp_server_enabled,
+)
 from application.capabilities.mcp.mcp_client import McpClient
 from application.capabilities.mcp.tool_wrapper import McpToolWrapper
 
@@ -20,7 +28,7 @@ class McpServerRegistry:
 
     特性：
     - 宿主内置 MCP 始终随 Agent 发布
-    - 读取 .flow/mcp.json 中的用户外部 MCP
+    - 读取 ~/.flow/mcp.json 中的用户外部 MCP
     - 合并插件声明
     - 工具注册/注销到 ToolRegistry
     - 并行连接多个 servers
@@ -188,6 +196,41 @@ class McpServerRegistry:
                     "tools": self._server_tools.get(name, []),
                 })
             return result
+
+    def list_configured_servers(self) -> list[dict[str, Any]]:
+        """列出用户配置中的 server，包括已禁用但未连接的服务。"""
+        raw = load_mcp_config(self.config_path)
+        connected = {item["name"]: item for item in self.list_servers()}
+        result = []
+        for name, value in raw["mcpServers"].items():
+            item = connected.get(name, {})
+            result.append({
+                "name": name,
+                "enabled": bool(value.get("enabled", True)),
+                "connected": bool(item.get("connected", False)),
+                "tools": item.get("tools", []),
+            })
+        configured_names = set(raw["mcpServers"])
+        for item in connected.values():
+            if item["name"] not in configured_names:
+                result.append({**item, "enabled": True})
+        return result
+
+    def upsert_server(self, name: str, config: dict[str, Any]) -> None:
+        save_mcp_server(self.config_path, name, config)
+        self.reload()
+
+    def remove_server(self, name: str) -> bool:
+        removed = remove_mcp_server(self.config_path, name)
+        if removed:
+            self.reload()
+        return removed
+
+    def set_server_enabled(self, name: str, enabled: bool) -> bool:
+        updated = set_mcp_server_enabled(self.config_path, name, enabled)
+        if updated:
+            self.reload()
+        return updated
 
     @property
     def server_names(self) -> list[str]:

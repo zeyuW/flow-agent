@@ -10,6 +10,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from application.agent.app.tracing import TraceTimeline
 from application.capabilities.app.capability_query import CapabilityQueryService
 from application.capabilities.skills.installer import SkillInstaller
+from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.passive.app.session_query import SessionQueryService
 from application.schedule.app.runtime import SchedulerService
 from interfaces.admin.schemas import (
@@ -19,6 +20,8 @@ from interfaces.admin.schemas import (
     InstallSkill,
     SkillListResponse,
     SkillRepository,
+    McpServerEnabled,
+    McpServerInput,
     SessionDetail,
     SessionSummary,
     ScheduleSummary,
@@ -34,6 +37,7 @@ def create_admin_app(
     scheduler: SchedulerService,
     capability_query: CapabilityQueryService | None = None,
     skill_installer: SkillInstaller | None = None,
+    mcp_registry: McpServerRegistry | None = None,
 ) -> FastAPI:
     """创建本机管理 API。"""
 
@@ -45,6 +49,43 @@ def create_admin_app(
         if capability_query is None:
             return {"skills": [], "connectors": []}
         return capability_query.get_capabilities()
+
+    @router.get("/mcp/servers")
+    def list_mcp_servers() -> list[dict[str, Any]]:
+        if mcp_registry is None:
+            raise HTTPException(503, detail="MCP 管理服务未初始化")
+        return mcp_registry.list_configured_servers()
+
+    @router.put("/mcp/servers/{name}")
+    def save_mcp_server(name: str, payload: McpServerInput) -> dict[str, Any]:
+        if mcp_registry is None:
+            raise HTTPException(503, detail="MCP 管理服务未初始化")
+        try:
+            mcp_registry.upsert_server(name, payload.model_dump())
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return {
+            "name": name,
+            "enabled": payload.enabled,
+            "connected": False,
+            "tools": [],
+        }
+
+    @router.delete("/mcp/servers/{name}")
+    def delete_mcp_server(name: str) -> dict[str, bool]:
+        if mcp_registry is None:
+            raise HTTPException(503, detail="MCP 管理服务未初始化")
+        if not mcp_registry.remove_server(name):
+            raise HTTPException(404, detail=f"未找到 MCP 服务: {name}")
+        return {"removed": True}
+
+    @router.post("/mcp/servers/{name}/enabled")
+    def set_mcp_enabled(name: str, payload: McpServerEnabled) -> dict[str, bool]:
+        if mcp_registry is None:
+            raise HTTPException(503, detail="MCP 管理服务未初始化")
+        if not mcp_registry.set_server_enabled(name, payload.enabled):
+            raise HTTPException(404, detail=f"未找到 MCP 服务: {name}")
+        return {"enabled": payload.enabled}
 
     @router.post("/skills/scan", response_model=SkillListResponse)
     def scan_skills(payload: SkillRepository) -> dict[str, list[dict[str, str]]]:

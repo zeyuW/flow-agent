@@ -85,6 +85,7 @@ export const skillCapabilitySchema = z.object({
 
 export const connectorCapabilitySchema = z.object({
   name: z.string(),
+  enabled: z.boolean().default(true),
   connected: z.boolean(),
   tools: z.array(z.string())
 });
@@ -94,3 +95,5 @@ export const capabilitySnapshotSchema = z.object({
   connectors: z.array(connectorCapabilitySchema)
 });
 export type CapabilitySnapshot = z.infer<typeof capabilitySnapshotSchema>;
+export const mcpServerSchema = connectorCapabilitySchema;
+export type McpServer = z.infer<typeof mcpServerSchema>;

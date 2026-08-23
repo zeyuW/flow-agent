@@ -28,9 +28,10 @@ class CapabilityQueryService:
             "connectors": [
                 {
                     "name": server["name"],
+                    "enabled": server["enabled"],
                     "connected": server["connected"],
                     "tools": server["tools"],
                 }
-                for server in self._mcp_registry.list_servers()
+                for server in self._mcp_registry.list_configured_servers()
             ],
         }

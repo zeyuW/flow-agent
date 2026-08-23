@@ -253,6 +253,7 @@ class ServiceApp:
                     self._scheduler,
                     self._capability_query,
                     self._skill_installer,
+                    self._mcp_registry,
                 ),
                 host=cfg.admin_api.host,
                 port=cfg.admin_api.port,

@@ -144,6 +144,28 @@ describe("管理 API 客户端", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities", expect.any(Object));
   });
 
+  it("管理 MCP 连接器", async () => {
+    const server = { name: "weather", enabled: true, connected: false, tools: [] };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue([server]) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue(server) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue({ enabled: false }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: vi.fn().mockResolvedValue({ removed: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { getMcpServers, saveMcpServer, setMcpServerEnabled, removeMcpServer } = await import("./client");
+    await expect(getMcpServers()).resolves.toEqual([server]);
+    await expect(saveMcpServer("weather", { command: "python", args: ["server.py"] })).resolves.toEqual(server);
+    await expect(setMcpServerEnabled("weather", false)).resolves.toBeUndefined();
+    await expect(removeMcpServer("weather")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/mcp/servers", expect.any(Object));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/mcp/servers/weather", expect.objectContaining({ method: "PUT" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "/api/mcp/servers/weather/enabled", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/mcp/servers/weather", expect.objectContaining({ method: "DELETE" }));
+  });
+
   it("扫描、安装并卸载 Skill", async () => {
     const fetchMock = vi
       .fn()
@@ -248,14 +270,18 @@ describe("管理 API 客户端", () => {
       "createSchedule",
       "getCapabilities",
       "getEvents",
+      "getMcpServers",
       "getSchedules",
       "getSession",
       "getSessions",
       "getTrace",
       "getTraces",
       "installSkill",
+      "removeMcpServer",
       "resumeSchedule",
+      "saveMcpServer",
       "scanSkills",
+      "setMcpServerEnabled",
       "uninstallSkill"
     ]);
   });

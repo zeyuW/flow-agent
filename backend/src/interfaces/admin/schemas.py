@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 TraceStatus = Literal["running", "completed", "failed", "cancelled", "unknown"]
 
@@ -94,8 +94,21 @@ class SkillCapability(BaseModel):
 
 class ConnectorCapability(BaseModel):
     name: str
+    enabled: bool = True
     connected: bool
     tools: list[str]
+
+
+class McpServerInput(BaseModel):
+    command: str
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    cwd: str | None = None
+    enabled: bool = True
+
+
+class McpServerEnabled(BaseModel):
+    enabled: bool
 
 
 class CapabilitySnapshot(BaseModel):

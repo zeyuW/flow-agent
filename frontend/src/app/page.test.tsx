@@ -5,12 +5,16 @@ import {
   cancelSchedule,
   createSchedule,
   getCapabilities,
+  getMcpServers,
   getSchedules,
   getSession,
   getSessions,
   installSkill,
+  removeMcpServer,
   resumeSchedule,
   scanSkills,
+  saveMcpServer,
+  setMcpServerEnabled,
   uninstallSkill
 } from "@/lib/api/client";
 
@@ -20,12 +24,16 @@ vi.mock("@/lib/api/client", () => ({
   cancelSchedule: vi.fn(),
   createSchedule: vi.fn(),
   getCapabilities: vi.fn(),
+  getMcpServers: vi.fn(),
   getSchedules: vi.fn(),
   getSession: vi.fn(),
   getSessions: vi.fn(),
   installSkill: vi.fn(),
+  removeMcpServer: vi.fn(),
   resumeSchedule: vi.fn(),
   scanSkills: vi.fn(),
+  saveMcpServer: vi.fn(),
+  setMcpServerEnabled: vi.fn(),
   uninstallSkill: vi.fn()
 }));
 
@@ -42,7 +50,9 @@ function renderPage() {
 
 describe("OverviewPage", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(getCapabilities).mockResolvedValue({ skills: [], connectors: [] });
+    vi.mocked(getMcpServers).mockResolvedValue([]);
     vi.mocked(getSchedules).mockResolvedValue([]);
     vi.mocked(cancelSchedule).mockResolvedValue(undefined);
     vi.mocked(createSchedule).mockResolvedValue({
@@ -66,6 +76,9 @@ describe("OverviewPage", () => {
     vi.mocked(scanSkills).mockResolvedValue([{ name: "daily-brief" }]);
     vi.mocked(installSkill).mockResolvedValue([{ name: "daily-brief" }]);
     vi.mocked(uninstallSkill).mockResolvedValue(undefined);
+    vi.mocked(removeMcpServer).mockResolvedValue(undefined);
+    vi.mocked(saveMcpServer).mockResolvedValue({ name: "weather", enabled: true, connected: false, tools: [] });
+    vi.mocked(setMcpServerEnabled).mockResolvedValue(undefined);
     vi.mocked(getSessions).mockResolvedValue([]);
     vi.mocked(getSession).mockResolvedValue({
       id: "telegram:1",
@@ -77,6 +90,19 @@ describe("OverviewPage", () => {
       preview: null,
       messages: []
     });
+  });
+
+  it("展示连接器状态并支持禁用", async () => {
+    vi.mocked(getCapabilities).mockResolvedValueOnce({
+      skills: [],
+      connectors: [{ name: "weather", enabled: true, connected: true, tools: ["forecast"] }]
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "技能与连接器" }));
+
+    expect(await screen.findByText("weather")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "禁用 weather" }));
+    await waitFor(() => expect(setMcpServerEnabled).toHaveBeenCalledWith("weather", false));
   });
 
   it("只保留日期选择器，不显示快捷日期筛选", async () => {

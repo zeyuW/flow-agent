@@ -1,4 +1,4 @@
-"""插件声明与项目级外部 MCP JSON 配置。"""
+"""插件声明与用户级 MCP JSON 配置。"""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ class McpServerSpec:
 
 
 def load_project_mcp_specs(config_path: Path) -> list[McpServerSpec]:
-    """加载 .flow/mcp.json 中由用户添加的外部 MCP。"""
+    """加载 ~/.flow/mcp.json 中由用户添加的外部 MCP。"""
     _ensure_project_config(config_path)
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     if int(raw.get("schemaVersion", 1)) != 1:
@@ -89,6 +89,57 @@ def load_project_mcp_specs(config_path: Path) -> list[McpServerSpec]:
     return specs
 
 
+def load_mcp_config(config_path: Path) -> dict[str, Any]:
+    """读取符合 MCP 生态的 mcpServers 配置。"""
+    _ensure_project_config(config_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or int(raw.get("schemaVersion", 1)) != 1:
+        raise ValueError("不支持的 MCP 配置版本")
+    servers = raw.get("mcpServers", {})
+    if not isinstance(servers, dict):
+        raise ValueError("mcpServers 必须是对象")
+    return raw
+
+
+def save_mcp_server(
+    config_path: Path,
+    name: str,
+    server: dict[str, Any],
+) -> None:
+    """原子写入一个 MCP server，避免写入过程中留下半份 JSON。"""
+    name = name.strip()
+    if not name:
+        raise ValueError("MCP 服务名不能为空")
+    if not isinstance(server, dict):
+        raise ValueError("MCP 服务配置必须是对象")
+    if not str(server.get("command", "")).strip():
+        raise ValueError("MCP 服务缺少 command")
+    raw = load_mcp_config(config_path)
+    raw["mcpServers"][name] = server
+    _write_mcp_config(config_path, raw)
+
+
+def remove_mcp_server(config_path: Path, name: str) -> bool:
+    """删除用户配置中的 MCP server。"""
+    raw = load_mcp_config(config_path)
+    if name not in raw["mcpServers"]:
+        return False
+    del raw["mcpServers"][name]
+    _write_mcp_config(config_path, raw)
+    return True
+
+
+def set_mcp_server_enabled(config_path: Path, name: str, enabled: bool) -> bool:
+    """更新 MCP server 的启用状态。"""
+    raw = load_mcp_config(config_path)
+    server = raw["mcpServers"].get(name)
+    if not isinstance(server, dict):
+        return False
+    server["enabled"] = enabled
+    _write_mcp_config(config_path, raw)
+    return True
+
+
 def merge_mcp_specs(*groups: list[McpServerSpec]) -> list[McpServerSpec]:
     """合并用户和插件声明，并拒绝全局名称冲突。"""
     specs = [spec for group in groups for spec in group]
@@ -107,6 +158,16 @@ def _ensure_project_config(config_path: Path) -> None:
     temporary = config_path.with_suffix(".json.tmp")
     temporary.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(config_path)
+
+
+def _write_mcp_config(config_path: Path, raw: dict[str, Any]) -> None:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = config_path.with_suffix(config_path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(raw, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
     temporary.replace(config_path)

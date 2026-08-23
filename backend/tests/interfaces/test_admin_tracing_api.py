@@ -14,7 +14,12 @@ from application.schedule.domain.models import ScheduledTask
 from application.schedule.app.runtime import SchedulerService
 from infra.bus.event import Event
 from interfaces.admin.router import create_admin_app
-from interfaces.admin.schemas import InstallSkill, SkillRepository
+from interfaces.admin.schemas import (
+    InstallSkill,
+    McpServerEnabled,
+    McpServerInput,
+    SkillRepository,
+)
 
 
 def _routes():
@@ -159,6 +164,27 @@ class _CapabilityQuery:
         }
 
 
+class _McpRegistry:
+    def __init__(self) -> None:
+        self.saved: dict[str, object] = {}
+        self.removed = ""
+        self.enabled: tuple[str, bool] | None = None
+
+    def list_configured_servers(self):
+        return [{"name": "weather", "enabled": True, "connected": True, "tools": ["forecast"]}]
+
+    def upsert_server(self, name: str, config: dict[str, object]) -> None:
+        self.saved[name] = config
+
+    def remove_server(self, name: str) -> bool:
+        self.removed = name
+        return name == "weather"
+
+    def set_server_enabled(self, name: str, enabled: bool) -> bool:
+        self.enabled = (name, enabled)
+        return name == "weather"
+
+
 class _SkillInstaller:
     def __init__(self) -> None:
         self.repository_url = ""
@@ -226,6 +252,45 @@ def test_skill_install_and_uninstall_routes():
     assert installer.repository_url == "https://github.com/acme/daily-brief.git"
     assert removed == {"removed": True}
     assert installer.removed_name == "daily-brief"
+
+
+def test_mcp_management_routes_save_toggle_and_remove_server():
+    registry = _McpRegistry()
+    app = create_admin_app(
+        TraceTimeline(),
+        _SessionQuery(),
+        _Scheduler(),
+        mcp_registry=registry,
+    )
+    routes = {
+        (route.path, next(iter(route.methods), "")): route.endpoint
+        for route in app.routes
+        if hasattr(route, "methods")
+    }
+
+    listed = routes[("/api/mcp/servers", "GET")]()
+    saved = routes[("/api/mcp/servers/{name}", "PUT")](
+        "github",
+        McpServerInput(command="npx", args=["-y", "github-mcp"]),
+    )
+    toggled = routes[("/api/mcp/servers/{name}/enabled", "POST")](
+        "weather",
+        McpServerEnabled(enabled=False),
+    )
+    removed = routes[("/api/mcp/servers/{name}", "DELETE")]("weather")
+
+    assert listed[0]["name"] == "weather"
+    assert saved["name"] == "github"
+    assert registry.saved["github"] == {
+        "command": "npx",
+        "args": ["-y", "github-mcp"],
+        "env": {},
+        "cwd": None,
+        "enabled": True,
+    }
+    assert toggled == {"enabled": False}
+    assert registry.enabled == ("weather", False)
+    assert removed == {"removed": True}
 
 
 def test_traces_filters_and_excludes_sensitive_data():

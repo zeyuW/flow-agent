@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import {
   capabilitySnapshotSchema,
+  mcpServerSchema,
   scheduleSummarySchema,
   sessionDetailSchema,
   sessionSummarySchema,
@@ -111,6 +112,45 @@ export function getSchedules(): Promise<ScheduleSummary[]> {
 
 export function getCapabilities() {
   return getJson("/api/capabilities", capabilitySnapshotSchema);
+}
+
+const mcpInputSchema = z.object({
+  command: z.string(),
+  args: z.array(z.string()).optional(),
+  env: z.record(z.string()).optional(),
+  cwd: z.string().nullable().optional(),
+  enabled: z.boolean().optional()
+});
+export type McpServerInput = z.input<typeof mcpInputSchema>;
+
+export function getMcpServers() {
+  return getJson("/api/mcp/servers", z.array(mcpServerSchema));
+}
+
+export function saveMcpServer(name: string, input: McpServerInput) {
+  return requestJson(
+    `/api/mcp/servers/${encodeURIComponent(name)}`,
+    mcpServerSchema,
+    "PUT",
+    JSON.stringify(input)
+  );
+}
+
+export async function setMcpServerEnabled(name: string, enabled: boolean): Promise<void> {
+  await requestJson(
+    `/api/mcp/servers/${encodeURIComponent(name)}/enabled`,
+    z.object({ enabled: z.boolean() }),
+    "POST",
+    JSON.stringify({ enabled })
+  );
+}
+
+export async function removeMcpServer(name: string): Promise<void> {
+  await requestJson(
+    `/api/mcp/servers/${encodeURIComponent(name)}`,
+    z.object({ removed: z.literal(true) }),
+    "DELETE"
+  );
 }
 
 const skillListSchema = z.object({ skills: z.array(z.object({ name: z.string() })) });
