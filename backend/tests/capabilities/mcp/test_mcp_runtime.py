@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
 import pytest
 
 from application.capabilities.mcp import builtin_server
@@ -157,8 +158,114 @@ def test_http_mcp_client_discovers_and_calls_tools(monkeypatch):
 
     assert [tool.name for tool in client.start()] == ["echo"]
     assert client.call_sync("echo", {"text": "hello"}) == "remote:hello"
-    assert requests[0]["method"] == "initialize"
+    assert requests[0]["method"] == "tools/list"
     assert requests[-1]["method"] == "tools/call"
+    client.stop()
+
+
+def test_http_mcp_client_prefers_modern_streamable_http(monkeypatch):
+    requests: list[tuple[dict, dict]] = []
+
+    class Response:
+        headers = {"content-type": "application/json"}
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            request = requests[-1][0]
+            return {
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "result": {"tools": [{"name": "echo", "inputSchema": {"type": "object"}}]},
+            }
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.headers = kwargs["headers"]
+
+        def post(self, url, json, headers, **kwargs):
+            requests.append((json, headers))
+            return Response()
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("application.capabilities.mcp.http_client.httpx.Client", Client)
+    client = McpHttpClient("modern", "https://example.com/mcp")
+
+    assert [tool.name for tool in client.start()] == ["echo"]
+    assert requests[0][0]["method"] == "tools/list"
+    assert requests[0][0]["params"]["_meta"][
+        "io.modelcontextprotocol/protocolVersion"
+    ] == "2026-07-28"
+    assert requests[0][1]["MCP-Protocol-Version"] == "2026-07-28"
+    assert requests[0][1]["Mcp-Method"] == "tools/list"
+    client.stop()
+
+
+def test_http_mcp_client_falls_back_to_legacy_streamable_http(monkeypatch):
+    requests: list[tuple[dict, dict]] = []
+
+    class Response:
+        def __init__(self, request, headers):
+            self.request = request
+            self.headers_sent = headers
+            self.status_code = (
+                400
+                if request["method"] == "tools/list"
+                and headers.get("MCP-Protocol-Version") == "2026-07-28"
+                else 200
+            )
+            if request["method"] == "notifications/initialized":
+                self.status_code = 202
+            self.headers = {"content-type": "application/json"}
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError(
+                    "bad request", request=httpx.Request("POST", "https://example.com/mcp"), response=self
+                )
+
+        def json(self):
+            if (
+                self.request["method"] == "tools/list"
+                and self.headers_sent.get("MCP-Protocol-Version") == "2026-07-28"
+            ):
+                return {"error": {"code": -32600, "message": "legacy server"}}
+            if self.request["method"] == "tools/list":
+                return {"jsonrpc": "2.0", "id": self.request["id"], "result": {
+                    "tools": [{"name": "echo", "inputSchema": {"type": "object"}}]
+                }}
+            if self.request["method"] == "initialize":
+                return {"jsonrpc": "2.0", "id": self.request["id"], "result": {
+                    "protocolVersion": "2025-11-25", "capabilities": {"tools": {}}
+                }}
+            if self.request["method"] == "tools/call":
+                return {"jsonrpc": "2.0", "id": self.request["id"], "result": {
+                    "content": [{"type": "text", "text": "legacy:hello"}]
+                }}
+            return {}
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.headers = kwargs["headers"]
+
+        def post(self, url, json, headers, **kwargs):
+            requests.append((json, headers))
+            return Response(json, headers)
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("application.capabilities.mcp.http_client.httpx.Client", Client)
+    client = McpHttpClient("legacy", "https://example.com/mcp")
+
+    assert [tool.name for tool in client.start()] == ["echo"]
+    assert requests[0][0]["method"] == "tools/list"
+    assert any(request[0]["method"] == "initialize" for request in requests)
+    assert client.call_sync("echo", {"text": "hello"}) == "legacy:hello"
     client.stop()
 
 
