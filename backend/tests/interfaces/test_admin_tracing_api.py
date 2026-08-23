@@ -14,6 +14,7 @@ from application.schedule.domain.models import ScheduledTask
 from application.schedule.app.runtime import SchedulerService
 from infra.bus.event import Event
 from interfaces.admin.router import create_admin_app
+from interfaces.admin.schemas import InstallSkill, SkillRepository
 
 
 def _routes():
@@ -158,6 +159,26 @@ class _CapabilityQuery:
         }
 
 
+class _SkillInstaller:
+    def __init__(self) -> None:
+        self.repository_url = ""
+        self.removed_name = ""
+
+    def scan(self, repository_url: str):
+        self.repository_url = repository_url
+        return [
+            type("SkillCandidate", (), {"name": "daily-brief"})(),
+            type("SkillCandidate", (), {"name": "code-review"})(),
+        ]
+
+    def install(self, repository_url: str, names: list[str]):
+        self.repository_url = repository_url
+        return [type("InstalledSkill", (), {"name": name})() for name in names]
+
+    def uninstall(self, name: str) -> None:
+        self.removed_name = name
+
+
 def _routes_with_schedules():
     scheduler = _Scheduler()
     app = create_admin_app(TraceTimeline(), _SessionQuery(), scheduler)
@@ -178,6 +199,33 @@ def test_capabilities_route_returns_safe_skill_and_connector_data():
     assert response.json()["skills"][0]["source"] == "project"
     assert "path" not in response.text
     assert "command" not in response.text
+
+
+def test_skill_install_and_uninstall_routes():
+    installer = _SkillInstaller()
+    app = create_admin_app(
+        TraceTimeline(),
+        _SessionQuery(),
+        _Scheduler(),
+        skill_installer=installer,
+    )
+    routes = {route.path: route.endpoint for route in app.routes}
+    scanned = routes["/api/skills/scan"](
+        SkillRepository(repository_url="https://github.com/acme/daily-brief.git")
+    )
+    installed = routes["/api/skills/install"](
+        InstallSkill(
+            repository_url="https://github.com/acme/daily-brief.git",
+            names=["daily-brief"],
+        )
+    )
+    removed = routes["/api/skills/{name}"]("daily-brief")
+
+    assert scanned == {"skills": [{"name": "daily-brief"}, {"name": "code-review"}]}
+    assert installed == {"skills": [{"name": "daily-brief"}]}
+    assert installer.repository_url == "https://github.com/acme/daily-brief.git"
+    assert removed == {"removed": True}
+    assert installer.removed_name == "daily-brief"
 
 
 def test_traces_filters_and_excludes_sensitive_data():

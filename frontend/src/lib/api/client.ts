@@ -113,6 +113,39 @@ export function getCapabilities() {
   return getJson("/api/capabilities", capabilitySnapshotSchema);
 }
 
+const skillListSchema = z.object({ skills: z.array(z.object({ name: z.string() })) });
+
+export async function scanSkills(repositoryUrl: string): Promise<{ name: string }[]> {
+  const response = await requestJson(
+    "/api/skills/scan",
+    skillListSchema,
+    "POST",
+    JSON.stringify({ repository_url: repositoryUrl })
+  );
+  return response.skills;
+}
+
+export async function installSkill(
+  repositoryUrl: string,
+  names: string[]
+): Promise<{ name: string }[]> {
+  const response = await requestJson(
+    "/api/skills/install",
+    skillListSchema,
+    "POST",
+    JSON.stringify({ repository_url: repositoryUrl, names })
+  );
+  return response.skills;
+}
+
+export async function uninstallSkill(name: string): Promise<void> {
+  await requestJson(
+    `/api/skills/${encodeURIComponent(name)}`,
+    z.object({ removed: z.literal(true) }),
+    "DELETE"
+  );
+}
+
 export async function cancelSchedule(taskId: string): Promise<void> {
   await requestJson(
     `/api/schedules/${encodeURIComponent(taskId)}/cancel`,

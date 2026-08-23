@@ -37,7 +37,9 @@ def test_openai_client_uses_one_explicit_endpoint(monkeypatch):
         return object()
 
     monkeypatch.setattr("application.capabilities.llm.client.OpenAI", create_client)
-    monkeypatch.setattr("application.capabilities.llm.client.AsyncOpenAI", create_client)
+    monkeypatch.setattr(
+        "application.capabilities.llm.client.AsyncOpenAI", create_client
+    )
     endpoint = ModelEndpointConfig(
         model="model-name",
         api_key="secret",
@@ -100,6 +102,35 @@ def test_prompt_renderer_requires_selected_core_tool_use():
     assert "不得声称没有该能力" in system_content
 
 
+def test_prompt_renderer_requires_flow_skill_installer():
+    context = ConversationContext()
+    agent = Agent(
+        system_prompt="You are helpful.",
+        llm_client=FakeLLMClient(),
+        context=context,
+    )
+    registry = ToolRegistry()
+    registry.register(InstallSkillTool())
+    renderer = PromptRenderer(agent=agent, tool_registry=registry)
+
+    flow = renderer.render(
+        TurnFlow(
+            user_input="请安装这个 Skill 仓库 https://github.com/Leonxlnx/taste-skill",
+            session_id="session",
+            channel="telegram",
+            trace_id="trace",
+        )
+    )
+
+    assert [item["function"]["name"] for item in flow.tools] == ["install_skill"]
+    system_content = "\n".join(
+        str(message["content"])
+        for message in flow.messages
+        if message["role"] == "system"
+    )
+    assert "不得使用 npx skills" in system_content
+
+
 class EchoTool:
     @property
     def name(self) -> str:
@@ -112,6 +143,12 @@ class EchoTool:
     @property
     def input_schema(self) -> dict[str, object]:
         return {"type": "object", "properties": {}}
+
+
+class InstallSkillTool(EchoTool):
+    @property
+    def name(self) -> str:
+        return "install_skill"
 
 
 def test_context_uses_session_storage(tmp_path):

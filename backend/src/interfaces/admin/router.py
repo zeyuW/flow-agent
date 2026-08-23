@@ -9,12 +9,16 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 
 from application.agent.app.tracing import TraceTimeline
 from application.capabilities.app.capability_query import CapabilityQueryService
+from application.capabilities.skills.installer import SkillInstaller
 from application.passive.app.session_query import SessionQueryService
 from application.schedule.app.runtime import SchedulerService
 from interfaces.admin.schemas import (
     CreateSchedule,
     CapabilitySnapshot,
     EventSummary,
+    InstallSkill,
+    SkillListResponse,
+    SkillRepository,
     SessionDetail,
     SessionSummary,
     ScheduleSummary,
@@ -29,6 +33,7 @@ def create_admin_app(
     session_query: SessionQueryService,
     scheduler: SchedulerService,
     capability_query: CapabilityQueryService | None = None,
+    skill_installer: SkillInstaller | None = None,
 ) -> FastAPI:
     """创建本机管理 API。"""
 
@@ -40,6 +45,36 @@ def create_admin_app(
         if capability_query is None:
             return {"skills": [], "connectors": []}
         return capability_query.get_capabilities()
+
+    @router.post("/skills/scan", response_model=SkillListResponse)
+    def scan_skills(payload: SkillRepository) -> dict[str, list[dict[str, str]]]:
+        if skill_installer is None:
+            raise HTTPException(503, detail="Skill 安装服务未初始化")
+        try:
+            skills = skill_installer.scan(payload.repository_url)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return {"skills": [{"name": skill.name} for skill in skills]}
+
+    @router.post("/skills/install", response_model=SkillListResponse)
+    def install_skill(payload: InstallSkill) -> dict[str, list[dict[str, str]]]:
+        if skill_installer is None:
+            raise HTTPException(503, detail="Skill 安装服务未初始化")
+        try:
+            skills = skill_installer.install(payload.repository_url, payload.names)
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
+        return {"skills": [{"name": skill.name} for skill in skills]}
+
+    @router.delete("/skills/{name}")
+    def uninstall_skill(name: str) -> dict[str, bool]:
+        if skill_installer is None:
+            raise HTTPException(503, detail="Skill 安装服务未初始化")
+        try:
+            skill_installer.uninstall(name)
+        except ValueError as exc:
+            raise HTTPException(404, detail=str(exc)) from exc
+        return {"removed": True}
 
     @router.get("/traces", response_model=list[TraceSummary])
     def list_traces(

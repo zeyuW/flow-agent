@@ -90,7 +90,7 @@ class ToolingConfig(FrozenConfig):
     """工具选择和执行轮数参数。"""
 
     enabled: bool = True
-    max_tool_steps: int = Field(default=5, ge=1)
+    max_tool_steps: int = Field(default=12, ge=1)
     tool_selection_max: int = Field(default=8, ge=1)
 
 

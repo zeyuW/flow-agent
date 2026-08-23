@@ -86,8 +86,10 @@ from application.proactive.app.tools import (
 from application.capabilities.tools.guard import ProactiveFrequencyGuard, ToolGuard
 from application.capabilities.app.capability_query import CapabilityQueryService
 from application.capabilities.skills.catalog import SkillCatalog
+from application.capabilities.skills.installer import SkillInstaller
 from application.capabilities.tools.bash import BashTool
 from application.capabilities.tools.edit import EditTool
+from application.capabilities.tools.install_skill import InstallSkillTool
 from application.capabilities.tools.read import ReadTool
 from application.capabilities.tools.write import WriteTool
 from application.delegation.app.spawn import SpawnTool
@@ -176,6 +178,10 @@ def create_core_components(config: AppConfig):
         )
         tool_registry.register_with_meta(
             WriteTool(WORKSPACE_LAYOUT.root, WORKSPACE_LAYOUT.flow_dir), risk="write"
+        )
+        tool_registry.register_with_meta(
+            InstallSkillTool(SkillInstaller(WORKSPACE_LAYOUT.installed_skills_dir)),
+            risk="write",
         )
         spawn_tool = SpawnTool()
         tool_registry.register(spawn_tool)

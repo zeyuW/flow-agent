@@ -16,7 +16,10 @@ import {
   getSchedules,
   getSession,
   getSessions,
-  resumeSchedule
+  installSkill,
+  resumeSchedule,
+  scanSkills,
+  uninstallSkill
 } from "@/lib/api/client";
 import type { CreateScheduleInput } from "@/lib/api/client";
 
@@ -402,6 +405,35 @@ function SchedulesPage() {
 }
 
 function CapabilitiesPage() {
+  const queryClient = useQueryClient();
+  const [isInstallDialogOpen, setIsInstallDialogOpen] = useState(false);
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [candidates, setCandidates] = useState<{ name: string }[] | null>(null);
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const refreshCapabilities = () =>
+    queryClient.invalidateQueries({ queryKey: ["capabilities"] });
+  const installMutation = useMutation({
+    mutationFn: ({ url, names }: { url: string; names: string[] }) =>
+      installSkill(url, names),
+    onSuccess: () => {
+      setRepositoryUrl("");
+      setCandidates(null);
+      setSelectedNames([]);
+      setIsInstallDialogOpen(false);
+      refreshCapabilities();
+    }
+  });
+  const scanMutation = useMutation({
+    mutationFn: (url: string) => scanSkills(url),
+    onSuccess: (skills) => {
+      setCandidates(skills);
+      setSelectedNames(skills.map((skill) => skill.name));
+    }
+  });
+  const uninstallMutation = useMutation({
+    mutationFn: (name: string) => uninstallSkill(name),
+    onSuccess: refreshCapabilities
+  });
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities"],
     queryFn: getCapabilities
@@ -424,7 +456,19 @@ function CapabilitiesPage() {
             <p className="eyebrow">Custom skills</p>
             <h2>自定义 Skills</h2>
           </div>
-          <span>{capabilities.skills.length} 个 Skill</span>
+          <div className="section-actions">
+            <span>{capabilities.skills.length} 个 Skill</span>
+            <button
+              type="button"
+              onClick={() => {
+                setCandidates(null);
+                setSelectedNames([]);
+                setIsInstallDialogOpen(true);
+              }}
+            >
+              从仓库安装
+            </button>
+          </div>
         </div>
         <div className="compact-card-grid">
           {capabilities.skills.length === 0 ? (
@@ -434,10 +478,22 @@ function CapabilitiesPage() {
               <article className="feature-card" key={`${skill.source}-${skill.name}`}>
                 <h3>{skill.name}</h3>
                 <p>{skill.description}</p>
-                <small>
-                  {skill.source === "project" ? "项目 Skill" : "已安装 Skill"}
-                  {skill.status === "conflict" ? ` · ${skill.reason}` : ""}
-                </small>
+                <footer>
+                  <small>
+                    {skill.source === "project" ? "项目 Skill" : "已安装 Skill"}
+                    {skill.status === "conflict" ? ` · ${skill.reason}` : ""}
+                  </small>
+                  {skill.source === "installed" ? (
+                    <button
+                      type="button"
+                      aria-label={`卸载 ${skill.name}`}
+                      disabled={uninstallMutation.isPending}
+                      onClick={() => uninstallMutation.mutate(skill.name)}
+                    >
+                      卸载
+                    </button>
+                  ) : null}
+                </footer>
               </article>
             ))
           )}
@@ -467,6 +523,87 @@ function CapabilitiesPage() {
           )}
         </div>
       </section>
+      {isInstallDialogOpen ? (
+        <div className="dialog-backdrop" role="presentation">
+          <form
+            className="schedule-dialog"
+            aria-label="从仓库安装 Skill"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (candidates === null) {
+                scanMutation.mutate(repositoryUrl);
+              } else {
+                installMutation.mutate({ url: repositoryUrl, names: selectedNames });
+              }
+            }}
+          >
+            <header>
+              <h2>从仓库安装 Skill</h2>
+              <button type="button" onClick={() => setIsInstallDialogOpen(false)}>
+                关闭
+              </button>
+            </header>
+            <label>
+              仓库地址
+              <input
+                required
+                value={repositoryUrl}
+                placeholder="https://github.com/owner/skill.git"
+                onChange={(event) => {
+                  setRepositoryUrl(event.target.value);
+                  setCandidates(null);
+                  setSelectedNames([]);
+                }}
+              />
+            </label>
+            {candidates ? (
+              <div className="skill-picker">
+                {candidates.map((skill) => (
+                  <label key={skill.name}>
+                    <input
+                      type="checkbox"
+                      aria-label={`选择 ${skill.name}`}
+                      checked={selectedNames.includes(skill.name)}
+                      onChange={() =>
+                        setSelectedNames((names) =>
+                          names.includes(skill.name)
+                            ? names.filter((name) => name !== skill.name)
+                            : [...names, skill.name]
+                        )
+                      }
+                    />
+                    {skill.name}
+                  </label>
+                ))}
+              </div>
+            ) : null}
+            {scanMutation.isError || installMutation.isError ? (
+              <p className="form-error">操作失败，请确认仓库地址和 Skill 内容。</p>
+            ) : null}
+            <footer>
+              <button type="button" onClick={() => setIsInstallDialogOpen(false)}>
+                取消
+              </button>
+              <button
+                disabled={
+                  scanMutation.isPending ||
+                  installMutation.isPending ||
+                  (candidates !== null && selectedNames.length === 0)
+                }
+                type="submit"
+              >
+                {candidates === null
+                  ? scanMutation.isPending
+                    ? "扫描中…"
+                    : "扫描"
+                  : installMutation.isPending
+                    ? "安装中…"
+                    : `安装 ${selectedNames.length} 个 Skill`}
+              </button>
+            </footer>
+          </form>
+        </div>
+      ) : null}
     </>
   );
 }

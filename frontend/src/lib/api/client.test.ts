@@ -8,7 +8,10 @@ import {
   getSchedules,
   getSessions,
   getTraces,
-  resumeSchedule
+  installSkill,
+  uninstallSkill,
+  resumeSchedule,
+  scanSkills
 } from "./client";
 
 describe("管理 API 客户端", () => {
@@ -141,6 +144,51 @@ describe("管理 API 客户端", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/capabilities", expect.any(Object));
   });
 
+  it("扫描、安装并卸载 Skill", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ skills: [{ name: "daily-brief" }] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ skills: [{ name: "daily-brief" }] })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: vi.fn().mockResolvedValue({ removed: true })
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(scanSkills("https://github.com/acme/daily-brief.git")).resolves.toEqual([
+      { name: "daily-brief" }
+    ]);
+    await expect(
+      installSkill("https://github.com/acme/daily-brief.git", ["daily-brief"])
+    ).resolves.toEqual([{ name: "daily-brief" }]);
+    await expect(uninstallSkill("daily-brief")).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/skills/scan",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/skills/install",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/skills/daily-brief",
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
   it("创建并重新启用定时任务", async () => {
     const task = {
       id: "new-task",
@@ -205,7 +253,10 @@ describe("管理 API 客户端", () => {
       "getSessions",
       "getTrace",
       "getTraces",
-      "resumeSchedule"
+      "installSkill",
+      "resumeSchedule",
+      "scanSkills",
+      "uninstallSkill"
     ]);
   });
 });

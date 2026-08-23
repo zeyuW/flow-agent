@@ -103,3 +103,24 @@ def test_registry_selects_core_tools_for_chinese_intents():
 
     names = {item["function"]["name"] for item in selected}
     assert {"write", "edit", "bash"} == names
+
+
+def test_registry_selects_skill_installer_for_chinese_install_request():
+    class InstallTool(EchoTool):
+        @property
+        def name(self) -> str:
+            return "install_skill"
+
+        @property
+        def description(self) -> str:
+            return "从 Git 仓库安装 Skill 到 ~/.flow/skills"
+
+    registry = ToolRegistry()
+    registry.register(InstallTool())
+
+    selected = registry.select_openai_tools(
+        "请安装这个 Skill 仓库 https://github.com/Leonxlnx/taste-skill",
+        max_tools=1,
+    )
+
+    assert selected[0]["function"]["name"] == "install_skill"

@@ -8,7 +8,10 @@ import {
   getSchedules,
   getSession,
   getSessions,
-  resumeSchedule
+  installSkill,
+  resumeSchedule,
+  scanSkills,
+  uninstallSkill
 } from "@/lib/api/client";
 
 import OverviewPage from "./page";
@@ -20,7 +23,10 @@ vi.mock("@/lib/api/client", () => ({
   getSchedules: vi.fn(),
   getSession: vi.fn(),
   getSessions: vi.fn(),
-  resumeSchedule: vi.fn()
+  installSkill: vi.fn(),
+  resumeSchedule: vi.fn(),
+  scanSkills: vi.fn(),
+  uninstallSkill: vi.fn()
 }));
 
 function renderPage() {
@@ -57,6 +63,9 @@ describe("OverviewPage", () => {
       last_error: null
     });
     vi.mocked(resumeSchedule).mockResolvedValue(undefined);
+    vi.mocked(scanSkills).mockResolvedValue([{ name: "daily-brief" }]);
+    vi.mocked(installSkill).mockResolvedValue([{ name: "daily-brief" }]);
+    vi.mocked(uninstallSkill).mockResolvedValue(undefined);
     vi.mocked(getSessions).mockResolvedValue([]);
     vi.mocked(getSession).mockResolvedValue({
       id: "telegram:1",
@@ -332,5 +341,47 @@ describe("OverviewPage", () => {
     expect(screen.getByText("项目 Skill")).toBeInTheDocument();
     expect(screen.getByText("已安装 Skill")).toBeInTheDocument();
     expect(screen.getByText("已连接 · 1 个工具")).toBeInTheDocument();
+  });
+
+  it("扫描、选择、安装并卸载已安装 Skill", async () => {
+    vi.mocked(getCapabilities).mockResolvedValueOnce({
+      skills: [
+        {
+          name: "personal-notes",
+          description: "个人笔记",
+          source: "installed",
+          status: "available",
+          reason: null
+        }
+      ],
+      connectors: []
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "技能与连接器" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "卸载 personal-notes" }));
+    await waitFor(() => expect(uninstallSkill).toHaveBeenCalledWith("personal-notes"));
+    fireEvent.click(await screen.findByRole("button", { name: "从仓库安装" }));
+    fireEvent.change(screen.getByLabelText("仓库地址"), {
+      target: { value: "https://github.com/acme/daily-brief.git" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "扫描" }));
+
+    await waitFor(() =>
+      expect(scanSkills).toHaveBeenCalledWith("https://github.com/acme/daily-brief.git")
+    );
+    fireEvent.click(await screen.findByLabelText("选择 daily-brief"));
+    fireEvent.click(screen.getByRole("button", { name: "安装 0 个 Skill" }));
+
+    expect(installSkill).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByLabelText("选择 daily-brief"));
+    fireEvent.click(screen.getByRole("button", { name: "安装 1 个 Skill" }));
+
+    await waitFor(() =>
+      expect(installSkill).toHaveBeenCalledWith(
+        "https://github.com/acme/daily-brief.git",
+        ["daily-brief"]
+      )
+    );
   });
 });

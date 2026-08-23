@@ -97,6 +97,9 @@ h3 { font-size: 1rem; margin-bottom: .5rem; }
 .capability-section + .capability-section { margin-top: 1.6rem; }
 .section-heading { align-items: center; display: flex; justify-content: space-between; margin-bottom: .8rem; }
 .section-heading > span { color: var(--muted); font-size: .8rem; }
+.section-actions { align-items: center; display: flex; gap: .7rem; }
+.section-actions span { color: var(--muted); font-size: .8rem; }
+.section-actions button { background: var(--accent); border: 1px solid var(--accent); border-radius: .4rem; color: white; padding: .42rem .7rem; }
 .capability-section .feature-card { height: 8.5rem; min-height: 8.5rem; }
 .capability-section .feature-card p { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; font-size: .82rem; line-height: 1.4; overflow: hidden; }
 .capability-section .feature-card small { align-self: flex-start; }
@@ -108,6 +111,9 @@ h3 { font-size: 1rem; margin-bottom: .5rem; }
 .schedule-dialog label { color: var(--muted); display: grid; font-size: .82rem; gap: .35rem; }
 .schedule-dialog input, .schedule-dialog select, .schedule-dialog textarea { background: var(--canvas); border: 1px solid var(--border); border-radius: .4rem; color: var(--ink); padding: .5rem; }
 .schedule-dialog textarea { min-height: 4.5rem; resize: vertical; }
+.form-error { color: #b42318; font-size: .82rem; margin: 0; }
+.skill-picker { display: grid; gap: .35rem; max-height: 14rem; overflow: auto; }
+.skill-picker label { align-items: center; color: var(--ink); display: flex; font-size: .85rem; gap: .5rem; }
 
 @media (max-width: 760px) {
   .workbench { display: block; }

@@ -128,8 +128,7 @@ class PassiveReasoner:
                         "content": tool_message,
                     }
                 )
-        flow.final_output = "工具调用次数超过上限，请调整请求后重试。"
-        return flow
+        return await self._finish_after_tool_limit_async(flow, current_messages)
 
     def _run_tool_loop(self, flow: TurnFlow, initial_result=None) -> TurnFlow:
         current_messages = list(flow.messages)
@@ -167,7 +166,7 @@ class PassiveReasoner:
                         "content": tool_message,
                     }
                 )
-        flow.final_output = "工具调用次数超过上限，请调整请求后重试。"
+        self._finish_after_tool_limit(flow, current_messages)
         self._record_event(
             {
                 "type": "tool_loop_perf",
@@ -178,6 +177,50 @@ class PassiveReasoner:
             }
         )
         return flow
+
+    async def _finish_after_tool_limit_async(
+        self,
+        flow: TurnFlow,
+        current_messages: list[dict[str, Any]],
+    ) -> TurnFlow:
+        result = await self.agent.generate_from_messages_async(
+            self._tool_limit_messages(current_messages),
+            tools=None,
+        )
+        flow.final_output = result.content or self._tool_limit_fallback(flow)
+        return flow
+
+    def _finish_after_tool_limit(
+        self,
+        flow: TurnFlow,
+        current_messages: list[dict[str, Any]],
+    ) -> None:
+        result = self.agent.generate_from_messages(
+            self._tool_limit_messages(current_messages),
+            tools=None,
+        )
+        flow.final_output = result.content or self._tool_limit_fallback(flow)
+
+    @staticmethod
+    def _tool_limit_messages(
+        current_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return [
+            *current_messages,
+            {
+                "role": "system",
+                "content": (
+                    "工具调用已达到本回合上限。不要再调用工具；请根据已有工具结果，"
+                    "直接给用户一个简洁的最终答复。若任务尚未完成，说明已完成部分和下一步。"
+                ),
+            },
+        ]
+
+    def _tool_limit_fallback(self, flow: TurnFlow) -> str:
+        return (
+            f"本回合已完成 {len(flow.tool_trace)} 次工具调用。"
+            "请基于当前结果继续，或将任务拆分为下一步。"
+        )
 
     def _execute_tool(
         self,

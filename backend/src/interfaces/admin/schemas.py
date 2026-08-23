@@ -101,3 +101,19 @@ class ConnectorCapability(BaseModel):
 class CapabilitySnapshot(BaseModel):
     skills: list[SkillCapability]
     connectors: list[ConnectorCapability]
+
+
+class SkillRepository(BaseModel):
+    repository_url: str
+
+
+class InstallSkill(SkillRepository):
+    names: list[str]
+
+
+class InstalledSkillResponse(BaseModel):
+    name: str
+
+
+class SkillListResponse(BaseModel):
+    skills: list[InstalledSkillResponse]

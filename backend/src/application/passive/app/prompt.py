@@ -66,6 +66,9 @@ class PromptRenderer:
             "当需要获取外部信息时，请使用工具函数调用。",
             "用户要求读取文件、写入文件、编辑文本或执行命令时，必须分别调用 read、write、edit、bash；"
             "只要可用工具中列出对应名称，就不得声称没有该能力。",
+            "用户要求安装 Skill 时，必须调用 install_skill；不得使用 npx skills，"
+            "也不得写入 ~/.agents、~/.claude 或其他 Agent 的目录。"
+            "Flow 的个人 Skill 唯一安装位置是 ~/.flow/skills。",
         ]
         if scheduled_execution:
             instructions.append(

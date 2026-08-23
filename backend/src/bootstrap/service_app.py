@@ -9,6 +9,7 @@ from pathlib import Path
 
 from application.capabilities.tools.message_push import MessagePushTool
 from application.capabilities.app.capability_query import CapabilityQueryService
+from application.capabilities.skills.installer import SkillInstaller
 from application.capabilities.mcp.server_registry import McpServerRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
 from application.delegation.app.runtime import SubagentRuntime
@@ -69,6 +70,7 @@ class ServiceApp:
         self._session_query: SessionQueryService | None = None
         self._scheduler: SchedulerService | None = None
         self._capability_query: CapabilityQueryService | None = None
+        self._skill_installer = SkillInstaller(WORKSPACE_LAYOUT.installed_skills_dir)
         self._admin_server: AdminServer | None = None
 
     @property
@@ -250,6 +252,7 @@ class ServiceApp:
                     self._session_query,
                     self._scheduler,
                     self._capability_query,
+                    self._skill_installer,
                 ),
                 host=cfg.admin_api.host,
                 port=cfg.admin_api.port,
