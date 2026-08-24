@@ -133,6 +133,8 @@ def complete_config() -> dict[str, object]:
 
 def test_config_is_frozen_and_rejects_unknown_fields():
     config = AppConfig.model_validate(minimal_config())
+    assert config.subagent.max_turns == 10
+    assert config.subagent.timeout_seconds == 300.0
     with pytest.raises(ValidationError):
         config.jobs.max_async_workers = 8
 

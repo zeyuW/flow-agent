@@ -118,9 +118,16 @@ class PassiveTurnPipeline:
                 "trace_id": flow.trace_id,
                 "session_id": flow.session_id,
                 "user_input": flow.user_input,
+                "message_id": getattr(inbound, "message_id", ""),
+                "provider_message_id": flow.inbound_metadata.get("message_id", ""),
             }
         )
-        logger.info("turn start session=%s", flow.session_id)
+        logger.info(
+            "turn start session=%s message_id=%s provider_message_id=%s",
+            flow.session_id,
+            getattr(inbound, "message_id", ""),
+            flow.inbound_metadata.get("message_id", ""),
+        )
 
         try:
             self._call_phase_modules(flow, "on_turn_started")
@@ -148,6 +155,8 @@ class PassiveTurnPipeline:
                 "trace_id": flow.trace_id,
                 "session_id": flow.session_id,
                 "user_input": flow.user_input,
+                "message_id": getattr(inbound, "message_id", ""),
+                "provider_message_id": flow.inbound_metadata.get("message_id", ""),
             }
         )
         try:
@@ -174,6 +183,7 @@ class PassiveTurnPipeline:
             trace_id=uuid4().hex[:12],
         )
         flow.inbound_metadata["media"] = list(inbound.media)
+        flow.extensions["inbound_message_id"] = inbound.message_id
         flow.extensions["_phase_modules"] = self._phase_module_snapshot()
         return flow
 
@@ -186,6 +196,7 @@ class PassiveTurnPipeline:
                 "session_id": flow.session_id,
                 "assistant_output": flow.final_output,
                 "tool_trace": flow.tool_trace,
+                "message_id": flow.extensions.get("inbound_message_id", ""),
             }
         )
         logger.info("turn end session=%s", flow.session_id)

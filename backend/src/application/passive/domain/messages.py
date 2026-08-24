@@ -21,3 +21,4 @@ class IncomingMessage:
     received_at: datetime = field(default_factory=_utc_now)
     metadata: Mapping[str, object] = field(default_factory=dict)
     chat_id: str = ""
+    message_id: str = ""

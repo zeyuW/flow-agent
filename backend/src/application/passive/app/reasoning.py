@@ -290,8 +290,10 @@ class PassiveReasoner:
             "configure_proactive_policy",
             "get_proactive_status",
             "spawn",
+            "task",
         }:
             tool_input["__session_id"] = flow.session_id
+            tool_input["__trace_id"] = flow.trace_id
             tool_input["__channel"] = flow.channel
             tool_input["__chat_id"] = getattr(flow, "chat_id", "") or flow.session_id
         if tool_call.name == "message_push":

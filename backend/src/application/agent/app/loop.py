@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import logging
 import threading
@@ -42,12 +43,15 @@ class AgentLoop:
         event_bus: Any | None = None,
         message_mapper: Callable[[ReceivedMessage], Any] | None = None,
         poll_interval_ms: int = 100,
+        dedupe_window_seconds: float = 20.0,
     ) -> None:
         self._consumer = consumer
         self._processor = processor
         self._event_bus = event_bus
         self._message_mapper = message_mapper or (lambda message: message)
         self._poll_interval_ms = max(1, poll_interval_ms)
+        self._dedupe_window_seconds = max(0.0, dedupe_window_seconds)
+        self._seen_message_keys: dict[str, float] = {}
         self._running = False
         self._active_by_conversation: dict[str, asyncio.Task[None]] = {}
         self._pending_by_conversation: dict[str, deque[ReceivedMessage]] = {}
@@ -189,6 +193,15 @@ class AgentLoop:
         return sum(len(items) for items in self._pending_by_conversation.values())
 
     def _enqueue_or_start(self, message: ReceivedMessage) -> None:
+        if self._is_duplicate(message):
+            logger.info(
+                "duplicate inbound skipped: channel=%s conversation=%s message_id=%s",
+                message.channel,
+                message.conversation_id,
+                message.message_id,
+            )
+            asyncio.create_task(self._ack_duplicate(message.message_id))
+            return
         conversation_id = message.conversation_id
         if conversation_id in self._active_by_conversation:
             self._pending_by_conversation.setdefault(conversation_id, deque()).append(
@@ -196,6 +209,48 @@ class AgentLoop:
             )
             return
         self._start(message)
+
+    async def _ack_duplicate(self, message_id: str) -> None:
+        try:
+            await self._consumer.ack(message_id)
+        except Exception:
+            logger.exception("failed acknowledging duplicate inbound: %s", message_id)
+
+    def _is_duplicate(self, message: ReceivedMessage) -> bool:
+        if self._dedupe_window_seconds <= 0:
+            return False
+
+        now = asyncio.get_running_loop().time()
+        expired = [
+            key
+            for key, seen_at in self._seen_message_keys.items()
+            if now - seen_at >= self._dedupe_window_seconds
+        ]
+        for key in expired:
+            self._seen_message_keys.pop(key, None)
+
+        keys = []
+        provider_id = str(message.metadata.get("message_id", "")).strip()
+        if provider_id:
+            keys.append(f"id:{message.channel}:{message.conversation_id}:{provider_id}")
+
+        normalized = " ".join(message.text.split()).casefold()
+        media = "\x1f".join(message.media)
+        raw = "\x1f".join(
+            (
+                message.channel,
+                message.conversation_id,
+                message.sender_id,
+                normalized,
+                media,
+            )
+        )
+        keys.append("text:" + hashlib.sha256(raw.encode("utf-8")).hexdigest())
+
+        duplicate = any(key in self._seen_message_keys for key in keys)
+        for key in keys:
+            self._seen_message_keys[key] = now
+        return duplicate
 
     def _start(self, message: ReceivedMessage) -> None:
         task = asyncio.create_task(self._process_async(message))
@@ -256,6 +311,8 @@ class AgentLoop:
                 payload={
                     "channel": message.channel,
                     "user_input": message.text,
+                    "message_id": message.message_id,
+                    "provider_message_id": message.metadata.get("message_id", ""),
                 },
             )
         )

@@ -298,6 +298,7 @@ def test_passive_pipeline_submits_reply_through_message_sender():
             conversation_id="42",
             recipient_id="42",
             text="回复",
+            message_id="trace-1",
             metadata={
                 "trace_id": "trace-1",
                 "tool_trace": [],

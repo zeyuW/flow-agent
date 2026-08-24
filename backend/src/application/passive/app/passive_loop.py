@@ -22,6 +22,7 @@ def to_incoming_message(message: ReceivedMessage) -> IncomingMessage:
         media=message.media,
         metadata=dict(message.metadata),
         chat_id=message.chat_id,
+        message_id=message.message_id,
     )
 
 

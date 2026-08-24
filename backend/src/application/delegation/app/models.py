@@ -3,6 +3,37 @@
 from dataclasses import dataclass, field
 from typing import Any
 
+
+SUBAGENT_STATUSES = frozenset(
+    {"completed", "failed", "timed_out", "cancelled"}
+)
+
+
+@dataclass(slots=True)
+class SubagentResult:
+    """Subagent 对 Lead Agent 暴露的稳定结果协议。"""
+
+    task_id: str
+    status: str
+    summary: str = ""
+    error: str | None = None
+    steps: int = 0
+
+    def __post_init__(self) -> None:
+        if self.status not in SUBAGENT_STATUSES:
+            raise ValueError(f"不支持的 Subagent 状态: {self.status}")
+        self.steps = max(0, int(self.steps))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task_id": self.task_id,
+            "status": self.status,
+            "summary": self.summary,
+            "error": self.error,
+            "steps": self.steps,
+        }
+
+
 @dataclass(slots=True)
 class AgentBackgroundJobSpec:
     """Configuration for an AgentBackgroundJobRunner."""

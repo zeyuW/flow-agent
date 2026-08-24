@@ -232,6 +232,9 @@ class SubagentConfig(FrozenConfig):
     """委托子代理的并发与持久化参数。"""
 
     max_concurrency: int = Field(default=2, ge=1)
+    max_total_per_run: int = Field(default=6, ge=1, le=50)
+    max_turns: int = Field(default=10, ge=1, le=100)
+    timeout_seconds: float = Field(default=300.0, ge=1.0, le=1800.0)
     tasks_file: str = Field(default=".flow/sessions/subagent_tasks.jsonl", min_length=1)
 
 

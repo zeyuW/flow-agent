@@ -86,6 +86,7 @@ class PassiveTurnDelivery:
             conversation_id=getattr(flow, "chat_id", "") or flow.session_id,
             text=flow.final_output,
             recipient_id=getattr(flow, "chat_id", "") or flow.session_id,
+            message_id=flow.trace_id,
             metadata=metadata,
         )
         try:
@@ -99,6 +100,7 @@ class PassiveTurnDelivery:
                         session_id=request.conversation_id,
                         text=request.text,
                         chat_id=request.recipient_id,
+                        delivery_id=request.message_id,
                         metadata=dict(request.metadata),
                     )
                 )

@@ -89,6 +89,7 @@ from application.capabilities.tools.install_skill import InstallSkillTool
 from application.capabilities.tools.read import ReadTool
 from application.capabilities.tools.write import WriteTool
 from application.delegation.app.spawn import SpawnTool
+from application.delegation.app.task_tool import TaskTool
 from application.capabilities.tools.registry import ToolRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
 
@@ -149,6 +150,7 @@ def create_core_components(config: AppConfig):
     # 工具注册表
     tool_registry = ToolRegistry()
     spawn_tool: SpawnTool | None = None
+    task_tool: TaskTool | None = None
     tool_registry.set_guard(
         ToolGuard(
             # 只有已注册的内置、插件或声明式 MCP 工具才能进入执行路径。
@@ -174,6 +176,8 @@ def create_core_components(config: AppConfig):
         )
         spawn_tool = SpawnTool()
         tool_registry.register(spawn_tool)
+        task_tool = TaskTool()
+        tool_registry.register(task_tool)
         undo_tool = UndoTool()
         cast(Any, undo_tool).session_manager = session_manager
         undo_tool.memory_store = None  # 记忆运行时创建后再注入
@@ -207,6 +211,7 @@ def create_core_components(config: AppConfig):
         "session_query": session_query,
         "llm_client": llm_client,
         "spawn_tool": spawn_tool,
+        "task_tool": task_tool,
         "mcp_registry": mcp_registry,
     }
 
@@ -298,6 +303,7 @@ def create_app_runtime(config: AppConfig):
     session_query = components["session_query"]
     llm_client = components["llm_client"]
     spawn_tool = components["spawn_tool"]
+    task_tool = components["task_tool"]
     mcp_registry = components["mcp_registry"]
     capability_query = CapabilityQueryService(
         SkillCatalog(
@@ -553,12 +559,17 @@ def create_app_runtime(config: AppConfig):
         DATA_DIR,
         tasks_file=cfg.subagent.tasks_file,
         max_concurrency=cfg.subagent.max_concurrency,
+        max_total_per_run=cfg.subagent.max_total_per_run,
+        max_turns=cfg.subagent.max_turns,
+        timeout_seconds=cfg.subagent.timeout_seconds,
         message_bus=message_bus,
         llm_client=llm_client,
     )
 
     if spawn_tool is not None:
         spawn_tool._manager = subagent_runtime.manager
+    if task_tool is not None:
+        task_tool._manager = subagent_runtime.manager
 
     return (
         proactive_loop,

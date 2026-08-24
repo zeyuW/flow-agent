@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 from application.capabilities.tools.registry import ToolRegistry
@@ -37,6 +38,7 @@ class SubAgent:
         for t in self._tools:
             self._registry.register(t)
         self.last_exit_reason: str = ""
+        self.last_steps: int = 0
 
     async def run(self, task: str) -> str:
         """Execute the multi-step task (spec 4a)."""
@@ -46,6 +48,8 @@ class SubAgent:
         ]
 
         for iteration in range(self._max_iterations):
+            self.last_steps = iteration + 1
+            step_started = time.monotonic()
             # 4b: LLM call with tools
             response = self._llm.generate(
                 messages=messages,
@@ -54,7 +58,21 @@ class SubAgent:
 
             if response is None:
                 self.last_exit_reason = "error"
+                logger.info(
+                    "[subagent] step=%d/%d elapsed=%.2fs result=error",
+                    iteration + 1,
+                    self._max_iterations,
+                    time.monotonic() - step_started,
+                )
                 return "SubAgent: no LLM client configured"
+
+            logger.info(
+                "[subagent] step=%d/%d elapsed=%.2fs tool_calls=%d",
+                iteration + 1,
+                self._max_iterations,
+                time.monotonic() - step_started,
+                len(response.tool_calls or []),
+            )
 
             # 4c: Completion detection — no tool calls means finished
             if not response.tool_calls:
@@ -113,5 +131,9 @@ def _trim_old_tool_results(messages: list, keep_recent: int = 20) -> list:
     if len(messages) <= keep_recent + 2:
         return messages
     head = messages[:2]
-    tail = messages[-(keep_recent):]
+    start = max(2, len(messages) - keep_recent)
+    # Never start with a tool result: it must follow its assistant tool call.
+    while start < len(messages) and messages[start].get("role") == "tool":
+        start += 1
+    tail = messages[start:]
     return head + tail

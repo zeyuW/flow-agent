@@ -11,9 +11,11 @@ from uuid import uuid4
 from application.delegation.app.models import (
     AgentBackgroundJobSpec,
     JobRunResult,
+    SubagentResult,
     SubagentSpec,
 )
 from application.delegation.app.runner import AgentBackgroundJobRunner
+from application.delegation.app.executor import SubagentExecutor
 from application.delegation.app.profiles import build_spawn_spec, PROFILE_RESEARCH
 from application.delegation.domain.models import (
     RunningSubagentJob,
@@ -23,9 +25,10 @@ from application.delegation.domain.models import (
     SubagentTask,
 )
 from application.delegation.infra.store import JsonlTaskStore
+from application.capabilities.tools.guard import GuardDecision
 
 logger = logging.getLogger(__name__)
-_SPAWN_MAX_ITERATIONS = 30
+_SPAWN_MAX_ITERATIONS = 10
 _COMPLETION_RESULT_MAX_CHARS = 12_000
 
 
@@ -42,6 +45,7 @@ class SubagentManager:
         self._task_store = task_store
         self._bus = message_bus
         self._llm = llm_client
+        self._executor = SubagentExecutor(runtime=self)
         self._persist_lock = threading.Lock()
         self._running_tasks: dict[str, asyncio.Task] = {}
         self._running_jobs: dict[str, RunningSubagentJob] = {}
@@ -52,6 +56,12 @@ class SubagentManager:
         self._worker_lock = threading.Lock()
         self._announced_job_ids: set[str] = set()
         self.max_concurrency = 2
+        self.max_total_subagents = 6
+        self.default_timeout_seconds = 300.0
+        self.default_max_turns = _SPAWN_MAX_ITERATIONS
+        self._task_counts: dict[str, int] = {}
+        self._active_task_count = 0
+        self._task_limit_lock = threading.Lock()
 
     def create_task(self, kind: str, payload: dict, *, parent_trace_id: str | None = None) -> Any:
         task = SubagentTask(
@@ -207,6 +217,75 @@ class SubagentManager:
             thread.join(timeout=timeout)
         self._worker_loop = None
         self._worker_thread = None
+
+    def run_task_threadsafe(
+        self,
+        *,
+        task_id: str,
+        description: str,
+        profile: str = PROFILE_RESEARCH,
+        context: str = "",
+        max_turns: int | None = None,
+        timeout: float | None = None,
+        run_id: str = "default",
+    ) -> Any:
+        """从同步工具边界执行一次可等待的 Subagent 任务。"""
+
+        decision = self._reserve_task(run_id)
+        if not decision.allowed:
+            return SubagentResult(
+                task_id=task_id,
+                status="failed",
+                error=decision.reason,
+            )
+
+        effective_turns = max_turns or self.default_max_turns
+        effective_timeout = timeout or self.default_timeout_seconds
+        self._trace(task_id, "started", {"run_id": run_id, "profile": profile})
+        released = False
+
+        def release_once() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                self._release_task(run_id)
+
+        async def execute() -> Any:
+            try:
+                result = await self._executor.execute(
+                    task_id=task_id,
+                    description=description,
+                    profile=profile,
+                    context=context,
+                    max_turns=effective_turns,
+                    timeout=effective_timeout,
+                )
+                self._trace(task_id, result.status, result.to_dict())
+                return result
+            finally:
+                release_once()
+
+        try:
+            loop = self._ensure_worker_loop()
+            future = asyncio.run_coroutine_threadsafe(execute(), loop)
+            return future.result(timeout=max(1.0, effective_timeout) + 5.0)
+        except Exception:
+            release_once()
+            raise
+
+    def _reserve_task(self, run_id: str) -> GuardDecision:
+        with self._task_limit_lock:
+            if self._active_task_count >= self.max_concurrency:
+                return GuardDecision(False, "subagent_concurrency_limit")
+            if self._task_counts.get(run_id, 0) >= self.max_total_subagents:
+                return GuardDecision(False, "subagent_total_limit")
+            self._active_task_count += 1
+            self._task_counts[run_id] = self._task_counts.get(run_id, 0) + 1
+            return GuardDecision(True, "ok")
+
+    def _release_task(self, run_id: str) -> None:
+        with self._task_limit_lock:
+            self._active_task_count = max(0, self._active_task_count - 1)
 
 
     # ── 子代理创建 ──

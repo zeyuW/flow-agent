@@ -506,6 +506,12 @@ Skill 不应：
 
 ## 4. 统一生命周期、安全和验证
 
+### 4.0 Subagent 任务委派
+
+主 Agent 可通过 `task` 工具调用隔离 Subagent。输入包括 `description`、`profile`、可选 `context`、`max_turns` 和 `timeout`。Subagent 不继承完整会话历史，只接收任务和显式上下文；结果以 `status`、`summary`、`error`、`steps` 和 `task_id` 返回，主 Agent 负责最终汇总。
+
+运行时限制每次运行的并发数和总委派数，并记录任务生命周期。Subagent 默认不能递归调用 `task`。长耗时任务使用独立后台任务路径，不依赖当前回合阻塞。
+
 
 
 ### 4.1 三条路径如何组合

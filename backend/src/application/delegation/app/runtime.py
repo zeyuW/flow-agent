@@ -18,6 +18,9 @@ def create_subagent_runtime(
     *,
     tasks_file: str | None = None,
     max_concurrency: int = 2,
+    max_total_per_run: int = 6,
+    max_turns: int = 10,
+    timeout_seconds: float = 300.0,
     message_bus=None,
     llm_client=None,
 ) -> SubagentRuntime:
@@ -28,4 +31,7 @@ def create_subagent_runtime(
         llm_client=llm_client,
     )
     manager.max_concurrency = max_concurrency
+    manager.max_total_subagents = max_total_per_run
+    manager.default_max_turns = max_turns
+    manager.default_timeout_seconds = timeout_seconds
     return SubagentRuntime(manager=manager)
