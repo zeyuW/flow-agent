@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from application.agent.app.agent import Agent
-from application.capabilities.llm.client import LLMToolCall
+from application.capabilities.llm.client import LLMToolCall, llm_stage
 from application.capabilities.tools.registry import ToolRegistry
 from application.passive.app.phase import TurnFlow
 from infra.bus.event import EventBus, StreamDeltaReady
@@ -67,11 +67,14 @@ class PassiveReasoner:
                     )
 
                 if hasattr(self.agent.llm_client, "generate_stream"):
-                    result = self.agent.llm_client.generate_stream(
-                        messages=flow.messages,
-                        tools=flow.tools,
-                        on_delta=on_delta,
-                    )
+                    with llm_stage("passive"):
+                        result = self.agent.llm_client.generate_stream(
+                            messages=flow.messages,
+                            tools=flow.tools,
+                            on_delta=on_delta,
+                        )
+                    if getattr(result, "error", None):
+                        return self._finish_llm_error(flow, result)
                     if getattr(result, "tool_calls", None):
                         self._mark_first_token(flow, getattr(result, "content", ""))
                         return self._run_tool_loop(flow, initial_result=result)
@@ -93,11 +96,14 @@ class PassiveReasoner:
         current_messages = list(flow.messages)
         loop_started = time.perf_counter()
         for step in range(self.max_tool_steps):
-            result = await self.agent.generate_from_messages_async(
-                current_messages,
-                tools=flow.tools if flow.tools else None,
-            )
+            with llm_stage("passive"):
+                result = await self.agent.generate_from_messages_async(
+                    current_messages,
+                    tools=flow.tools if flow.tools else None,
+                )
             self._mark_first_token(flow, result.content)
+            if getattr(result, "error", None):
+                return self._finish_llm_error(flow, result)
             if not result.tool_calls:
                 flow.final_output = result.content or ""
                 self._record_event(
@@ -137,11 +143,14 @@ class PassiveReasoner:
             if step == 0 and initial_result is not None:
                 result = initial_result
             else:
-                result = self.agent.generate_from_messages(
-                    current_messages,
-                    tools=flow.tools if flow.tools else None,
-                )
+                with llm_stage("passive"):
+                    result = self.agent.generate_from_messages(
+                        current_messages,
+                        tools=flow.tools if flow.tools else None,
+                    )
             self._mark_first_token(flow, result.content)
+            if getattr(result, "error", None):
+                return self._finish_llm_error(flow, result)
             if not result.tool_calls:
                 flow.final_output = result.content or ""
                 self._record_event(
@@ -183,10 +192,14 @@ class PassiveReasoner:
         flow: TurnFlow,
         current_messages: list[dict[str, Any]],
     ) -> TurnFlow:
-        result = await self.agent.generate_from_messages_async(
-            self._tool_limit_messages(current_messages),
-            tools=None,
-        )
+        with llm_stage("passive"):
+            result = await self.agent.generate_from_messages_async(
+                self._tool_limit_messages(current_messages),
+                tools=None,
+            )
+        if getattr(result, "error", None):
+            self._finish_llm_error(flow, result)
+            return
         flow.final_output = result.content or self._tool_limit_fallback(flow)
         return flow
 
@@ -195,11 +208,39 @@ class PassiveReasoner:
         flow: TurnFlow,
         current_messages: list[dict[str, Any]],
     ) -> None:
-        result = self.agent.generate_from_messages(
-            self._tool_limit_messages(current_messages),
-            tools=None,
-        )
+        with llm_stage("passive"):
+            result = self.agent.generate_from_messages(
+                self._tool_limit_messages(current_messages),
+                tools=None,
+            )
+        if getattr(result, "error", None):
+            self._finish_llm_error(flow, result)
+            return
         flow.final_output = result.content or self._tool_limit_fallback(flow)
+
+    def _finish_llm_error(self, flow: TurnFlow, result) -> TurnFlow:
+        flow.final_output = result.content or "模型服务暂时不可用，请稍后重试。"
+        flow.extensions["llm_error"] = result.error
+        flow.extensions["llm_error_type"] = getattr(result, "error_type", "")
+        flow.extensions["llm_status_code"] = getattr(result, "status_code", None)
+        self._record_event(
+            {
+                "type": "llm_error",
+                "trace_id": flow.trace_id,
+                "session_id": flow.session_id,
+                "stage": getattr(result, "stage", "passive"),
+                "error_type": getattr(result, "error_type", ""),
+                "status_code": getattr(result, "status_code", None),
+            }
+        )
+        logger.error(
+            "passive LLM request failed: trace=%s stage=%s error_type=%s status_code=%s",
+            flow.trace_id,
+            getattr(result, "stage", "passive"),
+            getattr(result, "error_type", ""),
+            getattr(result, "status_code", ""),
+        )
+        return flow
 
     @staticmethod
     def _tool_limit_messages(

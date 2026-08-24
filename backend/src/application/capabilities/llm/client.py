@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import logging
 from typing import Any, Callable, Iterator
@@ -17,12 +19,28 @@ from infra.resilience import RetryPolicy, retry_call, with_fallback
 from infra.config import ModelEndpointConfig
 
 logger = logging.getLogger(__name__)
+_llm_stage: ContextVar[str] = ContextVar("llm_stage", default="unknown")
+
+
+@contextmanager
+def llm_stage(stage: str):
+    """标记当前 LLM 请求所属阶段，便于区分主 Agent 和子 Agent。"""
+
+    token = _llm_stage.set(stage)
+    try:
+        yield
+    finally:
+        _llm_stage.reset(token)
 
 
 @dataclass(slots=True)
 class LLMResult:
     content: str
     tool_calls: list["LLMToolCall"] | None = None
+    error: str | None = None
+    error_type: str | None = None
+    status_code: int | None = None
+    stage: str = "unknown"
 
 
 @dataclass(slots=True)
@@ -97,17 +115,21 @@ class OpenAILLMClient:
                 lambda exc: (_raise(exc)),
             )
         except AuthenticationError as exc:
-            logger.exception("LLM authentication failed, please check API key")
-            return LLMResult(content="认证失败：请检查 API Key 是否正确。")
+            return _failed_result(
+                "认证失败：请检查 API Key 是否正确。",
+                exc,
+                "LLM authentication failed, please check API key",
+            )
         except (APIConnectionError, APITimeoutError) as exc:
-            logger.exception("LLM network request failed")
-            return LLMResult(content="网络异常：暂时无法连接到模型服务，请稍后重试。")
+            return _failed_result(
+                "网络异常：暂时无法连接到模型服务，请稍后重试。",
+                exc,
+                "LLM network request failed",
+            )
         except APIError as exc:
-            logger.exception("LLM API returned an error")
-            return LLMResult(content="模型服务暂时不可用，请稍后重试。")
-        except Exception:
-            logger.exception("Unexpected error during LLM request")
-            return LLMResult(content="发生未知错误，请稍后重试。")
+            return _failed_result("模型服务暂时不可用，请稍后重试。", exc, "LLM API returned an error")
+        except Exception as exc:
+            return _failed_result("发生未知错误，请稍后重试。", exc, "Unexpected error during LLM request")
 
         if not response.choices:
             logger.warning("LLM returned no choices")
@@ -152,18 +174,22 @@ class OpenAILLMClient:
             response = await self.async_client.chat.completions.create(
                 **request_kwargs,
             )
-        except AuthenticationError:
-            logger.exception("LLM authentication failed, please check API key")
-            return LLMResult(content="认证失败：请检查 API Key 是否正确。")
-        except (APIConnectionError, APITimeoutError):
-            logger.exception("LLM network request failed")
-            return LLMResult(content="网络异常：暂时无法连接到模型服务，请稍后重试。")
-        except APIError:
-            logger.exception("LLM API returned an error")
-            return LLMResult(content="模型服务暂时不可用，请稍后重试。")
-        except Exception:
-            logger.exception("Unexpected error during async LLM request")
-            return LLMResult(content="发生未知错误，请稍后重试。")
+        except AuthenticationError as exc:
+            return _failed_result(
+                "认证失败：请检查 API Key 是否正确。",
+                exc,
+                "LLM authentication failed, please check API key",
+            )
+        except (APIConnectionError, APITimeoutError) as exc:
+            return _failed_result(
+                "网络异常：暂时无法连接到模型服务，请稍后重试。",
+                exc,
+                "LLM network request failed",
+            )
+        except APIError as exc:
+            return _failed_result("模型服务暂时不可用，请稍后重试。", exc, "LLM API returned an error")
+        except Exception as exc:
+            return _failed_result("发生未知错误，请稍后重试。", exc, "Unexpected error during async LLM request")
 
         if not response.choices:
             logger.warning("LLM returned no choices")
@@ -219,17 +245,21 @@ class OpenAILLMClient:
                 lambda exc: (_raise(exc)),
             )
         except AuthenticationError as exc:
-            logger.exception("LLM authentication failed, please check API key")
-            return LLMResult(content="认证失败：请检查 API Key 是否正确。")
+            return _failed_result(
+                "认证失败：请检查 API Key 是否正确。",
+                exc,
+                "LLM authentication failed, please check API key",
+            )
         except (APIConnectionError, APITimeoutError) as exc:
-            logger.exception("LLM network request failed")
-            return LLMResult(content="网络异常：暂时无法连接到模型服务，请稍后重试。")
+            return _failed_result(
+                "网络异常：暂时无法连接到模型服务，请稍后重试。",
+                exc,
+                "LLM network request failed",
+            )
         except APIError as exc:
-            logger.exception("LLM API returned an error")
-            return LLMResult(content="模型服务暂时不可用，请稍后重试。")
-        except Exception:
-            logger.exception("Unexpected error during LLM request")
-            return LLMResult(content="发生未知错误，请稍后重试。")
+            return _failed_result("模型服务暂时不可用，请稍后重试。", exc, "LLM API returned an error")
+        except Exception as exc:
+            return _failed_result("发生未知错误，请稍后重试。", exc, "Unexpected error during LLM request")
 
         full_content = ""
         tool_call_parts: dict[int, dict[str, str]] = {}
@@ -307,6 +337,23 @@ class OpenAILLMClient:
 
 def _raise(exc: Exception):
     raise exc
+
+
+def _failed_result(content: str, exc: Exception, message: str) -> LLMResult:
+    status_code = getattr(exc, "status_code", None)
+    logger.exception(
+        "%s: stage=%s status_code=%s",
+        message,
+        _llm_stage.get(),
+        status_code,
+    )
+    return LLMResult(
+        content=content,
+        error=str(exc),
+        error_type=type(exc).__name__,
+        status_code=status_code if isinstance(status_code, int) else None,
+        stage=_llm_stage.get(),
+    )
 
 
 class FakeLLMClient:

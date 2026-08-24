@@ -78,6 +78,35 @@ def test_default_tool_step_limit_is_twelve():
     assert config.tooling.max_tool_steps == 12
 
 
+def test_reasoner_exposes_llm_error_without_continuing_tool_loop():
+    class FailedAgent:
+        def generate_from_messages_async(self, messages, *, tools=None):
+            raise AssertionError("test uses synchronous error path")
+
+        def generate_from_messages(self, messages, *, tools=None):
+            return LLMResult(
+                content="模型服务暂时不可用，请稍后重试。",
+                error="api_400: invalid tool message",
+            )
+
+    flow = TurnFlow(
+        user_input="测试",
+        session_id="telegram:1",
+        channel="telegram",
+        trace_id="trace-error",
+        messages=[{"role": "user", "content": "测试"}],
+    )
+    reasoner = PassiveReasoner(
+        agent=FailedAgent(),
+        tool_registry=ToolRegistry(),
+    )
+
+    result = reasoner.run_sync(flow)
+
+    assert result.final_output == "模型服务暂时不可用，请稍后重试。"
+    assert result.extensions["llm_error"] == "api_400: invalid tool message"
+
+
 def test_reasoner_requests_a_final_answer_when_tool_limit_is_reached():
     agent = _Agent()
     registry = ToolRegistry()

@@ -55,7 +55,11 @@ class SubagentExecutor:
                 task_id=task_id,
                 status=status,
                 summary=_trim(str(summary or "")),
-                error=None if status == "completed" else str(exit_reason),
+                error=(
+                    None
+                    if status == "completed"
+                    else str(getattr(agent, "last_error", "") or exit_reason)
+                ),
                 steps=steps,
             )
         except asyncio.TimeoutError:

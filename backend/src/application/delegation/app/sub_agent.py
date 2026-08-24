@@ -8,6 +8,7 @@ from typing import Any
 
 from application.capabilities.tools.registry import ToolRegistry
 from application.capabilities.tools.base import ToolResult
+from application.capabilities.llm.client import llm_stage
 
 logger = logging.getLogger(__name__)
 _TOOL_RESULT_TRIM_N = 3000
@@ -38,6 +39,7 @@ class SubAgent:
         for t in self._tools:
             self._registry.register(t)
         self.last_exit_reason: str = ""
+        self.last_error: str = ""
         self.last_steps: int = 0
 
     async def run(self, task: str) -> str:
@@ -51,13 +53,15 @@ class SubAgent:
             self.last_steps = iteration + 1
             step_started = time.monotonic()
             # 4b: LLM call with tools
-            response = self._llm.generate(
-                messages=messages,
-                tools=self._tool_schemas,
-            ) if self._llm else None
+            with llm_stage("subagent"):
+                response = self._llm.generate(
+                    messages=messages,
+                    tools=self._tool_schemas,
+                ) if self._llm else None
 
             if response is None:
                 self.last_exit_reason = "error"
+                self.last_error = "no_llm_client"
                 logger.info(
                     "[subagent] step=%d/%d elapsed=%.2fs result=error",
                     iteration + 1,
@@ -65,6 +69,17 @@ class SubAgent:
                     time.monotonic() - step_started,
                 )
                 return "SubAgent: no LLM client configured"
+
+            if getattr(response, "error", None):
+                self.last_exit_reason = "error"
+                self.last_error = str(response.error)
+                logger.error(
+                    "[subagent] LLM request failed: stage=%s error_type=%s status_code=%s",
+                    getattr(response, "stage", "subagent"),
+                    getattr(response, "error_type", ""),
+                    getattr(response, "status_code", ""),
+                )
+                return (response.content or "").strip()
 
             logger.info(
                 "[subagent] step=%d/%d elapsed=%.2fs tool_calls=%d",
