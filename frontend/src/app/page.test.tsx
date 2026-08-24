@@ -105,6 +105,27 @@ describe("OverviewPage", () => {
     await waitFor(() => expect(setMcpServerEnabled).toHaveBeenCalledWith("weather", false));
   });
 
+  it("展示连接器协议版本和连接失败原因", async () => {
+    vi.mocked(getCapabilities).mockResolvedValueOnce({
+      skills: [],
+      connectors: [{
+        name: "mcp-docs",
+        enabled: true,
+        connected: false,
+        transport: "http",
+        protocol_version: "2026-07-28",
+        tools: [],
+        error: "远程 MCP 返回 401"
+      }]
+    });
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "技能与连接器" }));
+
+    expect(await screen.findByText("mcp-docs")).toBeInTheDocument();
+    expect(screen.getByText("远程 MCP 返回 401")).toBeInTheDocument();
+  });
+
   it("只保留日期选择器，不显示快捷日期筛选", async () => {
     renderPage();
 
@@ -357,7 +378,7 @@ describe("OverviewPage", () => {
           reason: null
         }
       ],
-      connectors: [{ name: "ai-news", connected: true, tools: ["news_search"] }]
+      connectors: [{ name: "ai-news", connected: true, transport: "stdio", protocol_version: "2024-11-05", tools: ["news_search"] }]
     });
 
     renderPage();
@@ -366,7 +387,7 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("weekly-report")).toBeInTheDocument();
     expect(screen.getByText("项目 Skill")).toBeInTheDocument();
     expect(screen.getByText("已安装 Skill")).toBeInTheDocument();
-    expect(screen.getByText("已连接 · 1 个工具")).toBeInTheDocument();
+    expect(screen.getByText("关联 Skill：无")).toBeInTheDocument();
   });
 
   it("扫描、选择、安装并卸载已安装 Skill", async () => {

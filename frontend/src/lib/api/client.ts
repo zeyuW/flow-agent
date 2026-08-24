@@ -117,6 +117,7 @@ export function getCapabilities() {
 const mcpInputSchema = z.object({
   command: z.string().default(""),
   url: z.string().nullable().optional(),
+  description: z.string().optional(),
   args: z.array(z.string()).optional(),
   env: z.record(z.string()).optional(),
   headers: z.record(z.string()).optional(),

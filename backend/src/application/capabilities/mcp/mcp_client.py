@@ -52,6 +52,7 @@ class McpClient:
         self._next_id = 1
         self._lock = threading.RLock()
         self._connected = False
+        self._protocol_version: str | None = None
         self._discovered_tools: list[McpToolInfo] = []
         self._stderr_thread: threading.Thread | None = None
 
@@ -59,6 +60,10 @@ class McpClient:
     def is_connected(self) -> bool:
         process = self._process
         return self._connected and process is not None and process.poll() is None
+
+    @property
+    def protocol_version(self) -> str | None:
+        return self._protocol_version
 
     def _new_id(self) -> int:
         request_id = self._next_id
@@ -102,7 +107,10 @@ class McpClient:
                         "clientInfo": {"name": "flow-agent", "version": "1.0"},
                     },
                 })
-                self._recv(init_id, "initialize", timeout=timeout)
+                initialize = self._recv(init_id, "initialize", timeout=timeout)
+                self._protocol_version = (
+                    initialize.get("result", {}).get("protocolVersion")
+                )
                 self._send({
                     "jsonrpc": "2.0",
                     "method": "notifications/initialized",
@@ -199,6 +207,7 @@ class McpClient:
         with self._lock:
             process = self._process
             self._connected = False
+            self._protocol_version = None
             self._process = None
             if process is None:
                 return

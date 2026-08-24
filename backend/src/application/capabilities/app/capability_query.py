@@ -14,6 +14,7 @@ class CapabilityQueryService:
         self._mcp_registry = mcp_registry
 
     def get_capabilities(self) -> dict[str, list[dict[str, Any]]]:
+        skills = self._catalog.list_items()
         return {
             "skills": [
                 {
@@ -23,7 +24,7 @@ class CapabilityQueryService:
                     "status": item.status,
                     "reason": item.reason,
                 }
-                for item in self._catalog.list_items()
+                for item in skills
             ],
             "connectors": [
                 {
@@ -31,6 +32,15 @@ class CapabilityQueryService:
                     "enabled": server["enabled"],
                     "connected": server["connected"],
                     "tools": server["tools"],
+                    "description": server.get("description") or "为 Agent 提供外部工具能力。",
+                    "transport": server.get("transport"),
+                    "protocol_version": server.get("protocol_version"),
+                    "error": server.get("error"),
+                    "related_skills": [
+                        item.name
+                        for item in skills
+                        if server["name"] in item.spec.requires_mcp
+                    ],
                 }
                 for server in self._mcp_registry.list_configured_servers()
             ],

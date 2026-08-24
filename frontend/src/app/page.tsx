@@ -418,6 +418,7 @@ function CapabilitiesPage() {
   const [mcpType, setMcpType] = useState<"stdio" | "http">("stdio");
   const [mcpCommand, setMcpCommand] = useState("");
   const [mcpUrl, setMcpUrl] = useState("");
+  const [mcpDescription, setMcpDescription] = useState("");
   const [mcpArgs, setMcpArgs] = useState("");
   const [mcpCwd, setMcpCwd] = useState("");
   const [mcpEnv, setMcpEnv] = useState("");
@@ -450,6 +451,7 @@ function CapabilitiesPage() {
     mutationFn: () => saveMcpServer(mcpName, {
       command: mcpType === "stdio" ? mcpCommand : "",
       url: mcpType === "http" ? mcpUrl : null,
+      description: mcpDescription.trim(),
       args: mcpType === "stdio" && mcpArgs.trim() ? mcpArgs.trim().split(/\s+/) : [],
       cwd: mcpType === "stdio" ? mcpCwd.trim() || null : null,
       env: mcpEnv.trim() ? JSON.parse(mcpEnv) : {},
@@ -461,6 +463,7 @@ function CapabilitiesPage() {
       setMcpType("stdio");
       setMcpCommand("");
       setMcpUrl("");
+      setMcpDescription("");
       setMcpArgs("");
       setMcpCwd("");
       setMcpEnv("");
@@ -560,13 +563,9 @@ function CapabilitiesPage() {
             <p className="empty-state">尚未连接 MCP 连接器。</p>
           ) : (
             capabilities.connectors.map((connector) => (
-              <article className="feature-card" key={connector.name}>
-                <h3>{connector.name}</h3>
-                <p>{connector.tools.join("、") || "暂未发现工具"}</p>
-                <footer>
-                  <small>
-                    {connector.connected ? "已连接" : connector.enabled ? "未连接" : "已禁用"} · {connector.tools.length} 个工具
-                  </small>
+              <article className="feature-card connector-card" key={connector.name}>
+                <header className="connector-card-header">
+                  <h3>{connector.name}</h3>
                   <span className="card-actions">
                     <button
                       type="button"
@@ -583,7 +582,15 @@ function CapabilitiesPage() {
                       删除
                     </button>
                   </span>
-                </footer>
+                </header>
+                <div className="connector-divider" />
+                <div className="connector-card-body">
+                  <p>{connector.description || "为 Agent 提供外部工具能力。"}</p>
+                  <small>关联 Skill：{connector.related_skills?.length ? connector.related_skills.join("、") : "无"}</small>
+                  {connector.error ? (
+                    <small className="form-error">{connector.error}</small>
+                  ) : null}
+                </div>
               </article>
             ))
           )}
@@ -686,6 +693,7 @@ function CapabilitiesPage() {
             </header>
             <label>名称<input required value={mcpName} onChange={(event) => setMcpName(event.target.value)} placeholder="weather" /></label>
             <label>连接方式<select value={mcpType} onChange={(event) => setMcpType(event.target.value as "stdio" | "http")}><option value="stdio">本地 stdio</option><option value="http">远程 Streamable HTTP</option></select></label>
+            <label>说明<textarea value={mcpDescription} onChange={(event) => setMcpDescription(event.target.value)} placeholder="例如：查询 GitHub 仓库、Issue 和 Pull Request。" /></label>
             {mcpType === "stdio" ? <>
               <label>启动命令<input required value={mcpCommand} onChange={(event) => setMcpCommand(event.target.value)} placeholder="npx" /></label>
               <label>参数<input value={mcpArgs} onChange={(event) => setMcpArgs(event.target.value)} placeholder="-y @example/mcp-server" /></label>

@@ -24,6 +24,10 @@ def builtin_mcp_catalog() -> dict[str, McpServerSpec]:
             ),
             cwd=str(project_root),
             watch_paths=(str(server_file),),
+            description={
+                "weather": "查询天气和未来天气预报。",
+                "ai-news": "聚合 AI 新闻，支持按时间范围查询。",
+            }[name],
             source=f"builtin:{name}",
         )
         for name in ("weather", "ai-news")

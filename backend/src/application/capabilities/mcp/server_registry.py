@@ -43,6 +43,8 @@ class McpServerRegistry:
     _clients: dict[str, Any] = field(default_factory=dict)
     _server_tools: dict[str, list[str]] = field(default_factory=dict)
     _additional_specs: list[McpServerSpec] = field(default_factory=list)
+    _server_errors: dict[str, str] = field(default_factory=dict)
+    _server_descriptions: dict[str, str] = field(default_factory=dict)
     _watch_thread: threading.Thread | None = None
     _watch_stop: threading.Event = field(default_factory=threading.Event)
     _generation_lock: threading.RLock = field(default_factory=threading.RLock)
@@ -105,6 +107,8 @@ class McpServerRegistry:
                     self.tool_registry.unregister(tool_name)
             self._server_tools.clear()
             self._clients.clear()
+            self._server_errors.clear()
+            self._server_descriptions.clear()
             self._revision = ""
             for client in clients:
                 logger.debug("MCP registry stopping client: %s", client.name)
@@ -154,10 +158,17 @@ class McpServerRegistry:
                     )
                 candidates[spec.name] = client
                 candidate_tools[spec.name] = client.start(self.startup_timeout)
-        except Exception:
+        except Exception as exc:
+            if spec.name:
+                self._server_errors[spec.name] = str(exc)
             for client in candidates.values():
                 client.stop()
             raise
+
+        self._server_errors.clear()
+        self._server_descriptions = {
+            spec.name: spec.description for spec in specs
+        }
 
         old_clients = self._clients
         old_tools = self._server_tools
@@ -203,6 +214,10 @@ class McpServerRegistry:
                     "connected": client.is_connected,
                     "command": client.command,
                     "tools": self._server_tools.get(name, []),
+                    "transport": "http" if isinstance(client, McpHttpClient) else "stdio",
+                    "protocol_version": getattr(client, "protocol_version", None),
+                    "error": self._server_errors.get(name),
+                    "description": self._server_descriptions.get(name, ""),
                 })
             return result
 
@@ -218,6 +233,14 @@ class McpServerRegistry:
                 "enabled": bool(value.get("enabled", True)),
                 "connected": bool(item.get("connected", False)),
                 "tools": item.get("tools", []),
+                "transport": item.get("transport", "http" if value.get("url") else "stdio"),
+                "protocol_version": item.get("protocol_version"),
+                "error": item.get("error") or self._server_errors.get(name),
+                "description": (
+                    str(value.get("description", "")).strip()
+                    or item.get("description")
+                    or _default_description(name, item.get("tools", []))
+                ),
             })
         configured_names = set(raw["mcpServers"])
         for item in connected.values():
@@ -268,3 +291,11 @@ def _specs_revision(specs: list[McpServerSpec]) -> str:
     for spec in sorted(specs, key=lambda item: item.name):
         digest.update(spec.revision().encode())
     return digest.hexdigest()
+
+
+def _default_description(name: str, tools: list[str]) -> str:
+    if name == "mcp-docs":
+        return "查询 MCP 官方文档和协议资料。"
+    if tools:
+        return f"提供 {len(tools)} 个工具，用于扩展 Agent 能力。"
+    return "为 Agent 提供外部工具能力。"

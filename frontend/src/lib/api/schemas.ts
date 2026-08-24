@@ -87,7 +87,12 @@ export const connectorCapabilitySchema = z.object({
   name: z.string(),
   enabled: z.boolean().default(true),
   connected: z.boolean(),
-  tools: z.array(z.string())
+  tools: z.array(z.string()),
+  description: z.string().optional(),
+  related_skills: z.array(z.string()).optional(),
+  transport: z.string().nullable().optional(),
+  protocol_version: z.string().nullable().optional(),
+  error: z.string().nullable().optional()
 });
 
 export const capabilitySnapshotSchema = z.object({

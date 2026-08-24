@@ -40,6 +40,10 @@ class McpHttpClient:
     def is_connected(self) -> bool:
         return self._connected
 
+    @property
+    def protocol_version(self) -> str | None:
+        return self._protocol_version
+
     def start(self, timeout: float = 30.0) -> list[McpToolInfo]:
         """优先连接最新协议，失败后回退到历史版本。"""
         if self.is_connected:

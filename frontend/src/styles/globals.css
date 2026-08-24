@@ -103,6 +103,17 @@ h3 { font-size: 1rem; margin-bottom: .5rem; }
 .capability-section .feature-card { height: 8.5rem; min-height: 8.5rem; }
 .capability-section .feature-card p { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; font-size: .82rem; line-height: 1.4; overflow: hidden; }
 .capability-section .feature-card small { align-self: flex-start; }
+.connector-card-header { align-items: center; display: flex; gap: .6rem; justify-content: space-between; }
+.connector-card-header h3 { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connector-card-header .card-actions { display: flex; flex-shrink: 0; gap: .35rem; }
+.connector-card-header button { background: transparent; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .72rem; padding: .28rem .5rem; }
+.connector-card-header button:hover { border-color: var(--accent); color: var(--ink); }
+.connector-divider { border-top: 1px solid var(--border); }
+.connector-card-body { display: grid; gap: .45rem; min-width: 0; }
+.connector-card-body p { margin: 0; }
+.connector-card-body small { align-self: flex-start; }
+.capability-section .connector-card { height: 10rem; min-height: 10rem; }
+.connector-card-body p { -webkit-box-orient: vertical; -webkit-line-clamp: 2; display: -webkit-box; overflow: hidden; }
 .empty-state { color: var(--muted); padding: 1rem; }
 .dialog-backdrop { align-items: center; background: color-mix(in srgb, #000 35%, transparent); display: flex; inset: 0; justify-content: center; padding: 1rem; position: fixed; z-index: 10; }
 .schedule-dialog { background: var(--panel); border: 1px solid var(--border); border-radius: .7rem; display: grid; gap: .8rem; max-width: 27rem; padding: 1rem; width: 100%; }

@@ -97,11 +97,17 @@ class ConnectorCapability(BaseModel):
     enabled: bool = True
     connected: bool
     tools: list[str]
+    description: str = ""
+    related_skills: list[str] = Field(default_factory=list)
+    transport: str | None = None
+    protocol_version: str | None = None
+    error: str | None = None
 
 
 class McpServerInput(BaseModel):
     command: str = ""
     url: str | None = None
+    description: str = ""
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)

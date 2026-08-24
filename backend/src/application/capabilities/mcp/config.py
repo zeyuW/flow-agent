@@ -18,6 +18,7 @@ class McpServerSpec:
     command: tuple[str, ...]
     url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    description: str = ""
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     watch_paths: tuple[str, ...] = ()
@@ -42,6 +43,7 @@ class McpServerSpec:
             self.command,
             self.url,
             sorted(self.headers.items()),
+            self.description,
             self.cwd,
             sorted(self.env.items()),
         )).encode())
@@ -92,6 +94,7 @@ def load_project_mcp_specs(config_path: Path) -> list[McpServerSpec]:
             command=command,
             url=url,
             headers=_string_dict(value.get("headers")),
+            description=str(value.get("description", "")).strip(),
             cwd=str(cwd) if cwd is not None else None,
             env=_string_dict(value.get("env")),
             watch_paths=watch_paths,
