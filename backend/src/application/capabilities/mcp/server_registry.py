@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from application.capabilities.mcp.builtin import builtin_mcp_catalog
 from application.capabilities.mcp.config import (
     McpServerSpec,
     load_mcp_config,
@@ -28,7 +27,6 @@ class McpServerRegistry:
     """MCP 服务器注册表：管理 MCP server 的生命周期。
 
     特性：
-    - 宿主内置 MCP 始终随 Agent 发布
     - 读取 ~/.flow/mcp.json 中的用户外部 MCP
     - 合并插件声明
     - 工具注册/注销到 ToolRegistry
@@ -37,7 +35,7 @@ class McpServerRegistry:
 
     config_path: Path
     tool_registry: Any  # ToolRegistry，避免循环导入
-    builtin_catalog: dict[str, McpServerSpec] = field(default_factory=builtin_mcp_catalog)
+    builtin_catalog: dict[str, McpServerSpec] = field(default_factory=dict)
     startup_timeout: float = 30.0
     call_timeout: float = 60.0
     _clients: dict[str, Any] = field(default_factory=dict)
@@ -241,6 +239,12 @@ class McpServerRegistry:
                     or item.get("description")
                     or _default_description(name, item.get("tools", []))
                 ),
+                "command": str(value.get("command", "")),
+                "url": value.get("url"),
+                "args": value.get("args", []),
+                "cwd": value.get("cwd"),
+                "env": value.get("env", {}),
+                "headers": value.get("headers", {}),
             })
         configured_names = set(raw["mcpServers"])
         for item in connected.values():

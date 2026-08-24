@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
-SkillSource = Literal["builtin", "project", "installed"]
+SkillSource = Literal["project", "installed"]
 SkillStatus = Literal["available", "conflict"]
 
 

@@ -13,6 +13,7 @@ import {
   cancelSchedule,
   createSchedule,
   getCapabilities,
+  getMcpServers,
   removeMcpServer,
   saveMcpServer,
   getSchedules,
@@ -423,8 +424,25 @@ function CapabilitiesPage() {
   const [mcpCwd, setMcpCwd] = useState("");
   const [mcpEnv, setMcpEnv] = useState("");
   const [mcpHeaders, setMcpHeaders] = useState("");
+  const [editingMcpName, setEditingMcpName] = useState<string | null>(null);
+  const resetMcpForm = () => {
+    setMcpName("");
+    setMcpType("stdio");
+    setMcpCommand("");
+    setMcpUrl("");
+    setMcpDescription("");
+    setMcpArgs("");
+    setMcpCwd("");
+    setMcpEnv("");
+    setMcpHeaders("");
+    setEditingMcpName(null);
+  };
   const refreshCapabilities = () =>
     queryClient.invalidateQueries({ queryKey: ["capabilities"] });
+  const mcpServersQuery = useQuery({
+    queryKey: ["mcp-servers"],
+    queryFn: getMcpServers
+  });
   const installMutation = useMutation({
     mutationFn: ({ url, names }: { url: string; names: string[] }) =>
       installSkill(url, names),
@@ -459,16 +477,9 @@ function CapabilitiesPage() {
     }),
     onSuccess: () => {
       setIsMcpDialogOpen(false);
-      setMcpName("");
-      setMcpType("stdio");
-      setMcpCommand("");
-      setMcpUrl("");
-      setMcpDescription("");
-      setMcpArgs("");
-      setMcpCwd("");
-      setMcpEnv("");
-      setMcpHeaders("");
+      resetMcpForm();
       refreshCapabilities();
+      queryClient.invalidateQueries({ queryKey: ["mcp-servers"] });
     }
   });
   const toggleMcpMutation = useMutation({
@@ -480,6 +491,21 @@ function CapabilitiesPage() {
     mutationFn: (name: string) => removeMcpServer(name),
     onSuccess: refreshCapabilities
   });
+  const editMcp = (name: string) => {
+    const server = mcpServersQuery.data?.find((item) => item.name === name);
+    if (!server) return;
+    setEditingMcpName(name);
+    setMcpName(name);
+    setMcpType(server.url ? "http" : "stdio");
+    setMcpCommand(server.command ?? "");
+    setMcpUrl(server.url ?? "");
+    setMcpDescription(server.description ?? "");
+    setMcpArgs((server.args ?? []).join(" "));
+    setMcpCwd(server.cwd ?? "");
+    setMcpEnv(JSON.stringify(server.env ?? {}, null, 2));
+    setMcpHeaders(JSON.stringify(server.headers ?? {}, null, 2));
+    setIsMcpDialogOpen(true);
+  };
   const capabilitiesQuery = useQuery({
     queryKey: ["capabilities"],
     queryFn: getCapabilities
@@ -553,7 +579,7 @@ function CapabilitiesPage() {
           </div>
           <div className="section-actions">
             <span>{capabilities.connectors.length} 个连接器</span>
-            <button type="button" onClick={() => setIsMcpDialogOpen(true)}>
+            <button type="button" onClick={() => { resetMcpForm(); setIsMcpDialogOpen(true); }}>
               添加连接器
             </button>
           </div>
@@ -567,6 +593,13 @@ function CapabilitiesPage() {
                 <header className="connector-card-header">
                   <h3>{connector.name}</h3>
                   <span className="card-actions">
+                    <button
+                      type="button"
+                      aria-label={`编辑 ${connector.name}`}
+                      onClick={() => editMcp(connector.name)}
+                    >
+                      编辑
+                    </button>
                     <button
                       type="button"
                       aria-label={`${connector.enabled ? "禁用" : "启用"} ${connector.name}`}
@@ -681,17 +714,17 @@ function CapabilitiesPage() {
         <div className="dialog-backdrop" role="presentation">
           <form
             className="schedule-dialog"
-            aria-label="添加 MCP 连接器"
+            aria-label={`${editingMcpName ? "编辑" : "添加"} MCP 连接器`}
             onSubmit={(event) => {
               event.preventDefault();
               saveMcpMutation.mutate();
             }}
           >
             <header>
-              <h2>添加 MCP 连接器</h2>
-              <button type="button" onClick={() => setIsMcpDialogOpen(false)}>关闭</button>
+              <h2>{editingMcpName ? "编辑 MCP 连接器" : "添加 MCP 连接器"}</h2>
+              <button type="button" onClick={() => { resetMcpForm(); setIsMcpDialogOpen(false); }}>关闭</button>
             </header>
-            <label>名称<input required value={mcpName} onChange={(event) => setMcpName(event.target.value)} placeholder="weather" /></label>
+            <label>名称<input required disabled={Boolean(editingMcpName)} value={mcpName} onChange={(event) => setMcpName(event.target.value)} placeholder="weather" /></label>
             <label>连接方式<select value={mcpType} onChange={(event) => setMcpType(event.target.value as "stdio" | "http")}><option value="stdio">本地 stdio</option><option value="http">远程 Streamable HTTP</option></select></label>
             <label>说明<textarea value={mcpDescription} onChange={(event) => setMcpDescription(event.target.value)} placeholder="例如：查询 GitHub 仓库、Issue 和 Pull Request。" /></label>
             {mcpType === "stdio" ? <>
@@ -703,8 +736,8 @@ function CapabilitiesPage() {
             {mcpType === "http" ? <label>请求头（JSON）<textarea value={mcpHeaders} onChange={(event) => setMcpHeaders(event.target.value)} placeholder='{"Authorization":"Bearer ..."}' /></label> : null}
             {saveMcpMutation.isError ? <p className="form-error">连接器保存失败，请检查配置。</p> : null}
             <footer>
-              <button type="button" onClick={() => setIsMcpDialogOpen(false)}>取消</button>
-              <button type="submit" disabled={saveMcpMutation.isPending}>{saveMcpMutation.isPending ? "保存中…" : "保存并连接"}</button>
+              <button type="button" onClick={() => { resetMcpForm(); setIsMcpDialogOpen(false); }}>取消</button>
+              <button type="submit" disabled={saveMcpMutation.isPending}>{saveMcpMutation.isPending ? "保存中…" : editingMcpName ? "保存并重连" : "保存并连接"}</button>
             </footer>
           </form>
         </div>

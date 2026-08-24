@@ -75,10 +75,6 @@ from application.delegation.app.runtime import (
 from application.proactive.app.runtime import build_proactive_runtime
 from application.proactive.infra.mcp_pool import RegistryMcpPool
 from application.proactive.infra.gate import ProactiveStateStore
-from application.capabilities.plugins.proactive import (
-    ProactiveSourceSpecImpl,
-    RegisteredProactiveSource,
-)
 from application.proactive.app.tools import (
     ConfigureProactivePolicyTool,
     GetProactiveStatusTool,
@@ -312,11 +308,6 @@ def create_app_runtime(config: AppConfig):
     mcp_registry = components["mcp_registry"]
     capability_query = CapabilityQueryService(
         SkillCatalog(
-            Path(__file__).resolve().parents[1]
-            / "application"
-            / "capabilities"
-            / "skills"
-            / "builtin",
             WORKSPACE_LAYOUT.project_skills_dir,
             WORKSPACE_LAYOUT.installed_skills_dir,
         ),
@@ -472,19 +463,6 @@ def create_app_runtime(config: AppConfig):
     # 插件系统暂时禁用，避免异步问题
     proactive_sources = dict(plugin_manager.get_proactive_sources())
     proactive_modules = plugin_manager.get_proactive_modules()
-    if cfg.mcp.enabled and "ai-news" in mcp_registry.server_names:
-        proactive_sources.setdefault("builtin", []).append(
-            RegisteredProactiveSource(
-                spec=ProactiveSourceSpecImpl(
-                    id="ai-news",
-                    channels=("content",),
-                    server="ai-news",
-                    fetch_tool="get_ai_news",
-                ),
-                plugin_id="builtin",
-            )
-        )
-
     local_sources = [
         LocalFileSource(WORKSPACE_LAYOUT.proactive_source_file),
         LocalTodoSource(WORKSPACE_LAYOUT.proactive_todo_file),

@@ -1,13 +1,11 @@
 import asyncio
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
 import pytest
 
-from application.capabilities.mcp import builtin_server
 from application.capabilities.mcp.mcp_client import McpClient
 from application.capabilities.mcp.http_client import McpHttpClient
 from application.capabilities.mcp.config import (
@@ -297,82 +295,6 @@ def test_registry_stop_all_terminates_external_server_process(tmp_path: Path):
 
     assert process.poll() is not None
     assert client.is_connected is False
-
-
-def test_ai_news_uses_independent_fallback_before_google(monkeypatch):
-    published_at = datetime.now(timezone.utc).isoformat()
-
-    monkeypatch.setattr(builtin_server, "AI_FEEDS", (("直连源", "https://direct"),))
-    monkeypatch.setattr(
-        builtin_server,
-        "fetch_feed",
-        lambda source, url, hours: ([{
-            "title": "OpenAI direct item",
-            "url": "https://direct/item",
-            "summary": "",
-            "source": source,
-            "published_at": published_at,
-            "provider": "Direct RSS",
-        }], None),
-    )
-    monkeypatch.setattr(
-        builtin_server,
-        "fetch_gdelt_news",
-        lambda hours, limit: [{
-            "title": f"AI fallback item {index}",
-            "url": f"https://fallback/{index}",
-            "summary": "",
-            "source": "备用源",
-            "published_at": published_at,
-            "provider": "GDELT",
-        } for index in range(9)],
-    )
-
-    def fail_google(hours, limit):
-        raise AssertionError("独立备用源足量时不应继续请求 Google News")
-
-    monkeypatch.setattr(builtin_server, "fetch_google_news", fail_google)
-
-    result = json.loads(builtin_server.get_ai_news(limit=10, hours=24))
-
-    assert result["count"] == 10
-    assert {item["provider"] for item in result["items"]} == {
-        "Direct RSS",
-        "GDELT",
-    }
-    assert result["provider_errors"] == []
-
-
-def test_ai_news_continues_after_independent_fallback_error(monkeypatch):
-    published_at = datetime.now(timezone.utc).isoformat()
-    monkeypatch.setattr(builtin_server, "AI_FEEDS", (("直连源", "https://direct"),))
-    monkeypatch.setattr(
-        builtin_server,
-        "fetch_feed",
-        lambda source, url, hours: ([], None),
-    )
-
-    def fail_gdelt(hours, limit):
-        raise RuntimeError("temporary error")
-
-    monkeypatch.setattr(builtin_server, "fetch_gdelt_news", fail_gdelt)
-    monkeypatch.setattr(
-        builtin_server,
-        "fetch_google_news",
-        lambda hours, limit: [{
-            "title": f"AI Google item {index}",
-            "url": f"https://google/{index}",
-            "summary": "",
-            "source": "Google News",
-            "published_at": published_at,
-            "provider": "Google News RSS",
-        } for index in range(10)],
-    )
-
-    result = json.loads(builtin_server.get_ai_news(limit=10, hours=24))
-
-    assert result["count"] == 10
-    assert result["provider_errors"] == ["GDELT: temporary error"]
 
 
 def test_failed_json_reload_keeps_previous_generation(tmp_path: Path):

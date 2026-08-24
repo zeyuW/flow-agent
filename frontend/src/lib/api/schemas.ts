@@ -92,7 +92,13 @@ export const connectorCapabilitySchema = z.object({
   related_skills: z.array(z.string()).optional(),
   transport: z.string().nullable().optional(),
   protocol_version: z.string().nullable().optional(),
-  error: z.string().nullable().optional()
+  error: z.string().nullable().optional(),
+  command: z.string().optional(),
+  url: z.string().nullable().optional(),
+  args: z.array(z.string()).optional(),
+  cwd: z.string().nullable().optional(),
+  env: z.record(z.string()).optional(),
+  headers: z.record(z.string()).optional()
 });
 
 export const capabilitySnapshotSchema = z.object({
