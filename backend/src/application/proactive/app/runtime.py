@@ -60,10 +60,8 @@ def build_proactive_runtime(
     hawkes_time_constant: float = 60.0,
     proactive_sources=None,
     proactive_modules: list[object] | None = None,
-    local_source_file: str | Path | None = None,
     state_path=None,
     trace_path=None,
-    local_sources=None,
     channel: str = "cli",
     state_store: ProactiveStateStore | None = None,
 ) -> ProactiveLoop | None:
@@ -82,13 +80,7 @@ def build_proactive_runtime(
         proactive_modules or [],
         initial_slots=("proactive:tick",),
     )
-    local_path = Path(local_source_file) if local_source_file else None
-    gateway = DataGateway(
-        pool,
-        sources,
-        local_source_file=local_path,
-        local_sources=local_sources,
-    )
+    gateway = DataGateway(pool, sources)
     state = state_store or ProactiveStateStore(state_path)
     judge = JudgeLoop(
         llm_client=llm_client,

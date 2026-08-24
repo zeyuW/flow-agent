@@ -2,7 +2,6 @@
 
 import json
 import asyncio
-import hashlib
 from datetime import datetime, timezone
 
 
@@ -10,11 +9,6 @@ from infra.bus.event import Event, EventBus
 from infra.telemetry import TraceRecorder
 from application.proactive.infra.gate import ProactiveStateStore
 from application.proactive.infra.data_gateway import DataGateway
-from application.proactive.infra.sources import (
-    LocalTaskSource,
-    LocalTodoSource,
-    WebSnapshotSource,
-)
 from application.proactive.app.events import ProactiveEventBridge
 from application.proactive.infra.mcp_pool import McpClientPool
 from application.proactive.domain.models import AgentTick, GateResult
@@ -45,19 +39,6 @@ def test_hawkes_user_event_increases_intensity_and_then_decays():
 
     assert immediate > baseline
     assert baseline < later < immediate
-
-
-def test_web_snapshot_fingerprint_is_stable_across_processes(tmp_path):
-    """网页快照指纹不能使用 Python 进程随机化的 hash。"""
-
-    snapshot = tmp_path / "article.txt"
-    content = "一条会在重启后再次被读取的新闻"
-    snapshot.write_text(content, encoding="utf-8")
-
-    record = WebSnapshotSource([snapshot]).fetch_records()[0]
-    expected = hashlib.sha256(content.encode("utf-8")).hexdigest()[:24]
-
-    assert record.dedup_key == f"web:article.txt:{expected}"
 
 
 def test_hawkes_event_shortens_next_interval():
@@ -263,19 +244,17 @@ def test_runtime_subscribes_target_interaction_bridge():
     assert runtime._hawkes.get_event_count(3600.0) == 1
 
 
-def test_data_gateway_reads_workspace_local_source(tmp_path):
-    """工作区本地候选文件应进入内容通道。"""
+def test_proactive_runtime_accepts_trace_path(tmp_path):
+    """主动运行时配置 trace 路径时应能正常创建记录器。"""
 
-    source_file = tmp_path / "proactive_items.txt"
-    source_file.write_text("需要提醒用户的事项\n", encoding="utf-8")
-    gateway = DataGateway(
-        McpClientPool(),
-        local_source_file=source_file,
+    runtime = build_proactive_runtime(
+        enabled=True,
+        chat_id="target",
+        state_path=tmp_path / "proactive.db",
+        trace_path=tmp_path / "proactive.jsonl",
     )
 
-    result = asyncio.run(gateway.run())
-
-    assert [item.content for item in result.content] == ["需要提醒用户的事项"]
+    assert runtime is not None
 
 
 def test_proactive_state_and_hawkes_events_survive_restart(tmp_path):
@@ -320,22 +299,3 @@ def test_proactive_tick_writes_structured_trace(tmp_path):
     assert payload["event"] == "proactive_tick"
     assert payload["gate_reason"] == "ok"
     assert payload["sent"] is False
-
-
-def test_data_gateway_reads_task_and_todo_sources(tmp_path):
-    """任务和待办目录文件都应进入主动内容通道。"""
-
-    tasks_file = tmp_path / "tasks.txt"
-    todo_file = tmp_path / "todo_items.txt"
-    tasks_file.write_text("整理发布说明\n", encoding="utf-8")
-    todo_file.write_text("确认会议时间\n", encoding="utf-8")
-    gateway = DataGateway(
-        McpClientPool(),
-        local_sources=[
-            LocalTaskSource(tasks_file),
-            LocalTodoSource(todo_file),
-        ],
-    )
-
-    result = asyncio.run(gateway.run())
-    assert {item.source for item in result.content} == {"local_task", "local_todo"}

@@ -91,13 +91,6 @@ from application.capabilities.tools.write import WriteTool
 from application.delegation.app.spawn import SpawnTool
 from application.capabilities.tools.registry import ToolRegistry
 from application.capabilities.plugins.plugin_loader import PluginManager
-from application.proactive.infra.sources import (
-    LocalFileSource,
-    LocalTaskSource,
-    LocalTodoSource,
-    RSSFeedSource,
-    WebSnapshotSource,
-)
 
 """新架构组装：MessageBus + EventBus + PassiveLoop + PassiveTurnPipeline
 
@@ -463,13 +456,6 @@ def create_app_runtime(config: AppConfig):
     # 插件系统暂时禁用，避免异步问题
     proactive_sources = dict(plugin_manager.get_proactive_sources())
     proactive_modules = plugin_manager.get_proactive_modules()
-    local_sources = [
-        LocalFileSource(WORKSPACE_LAYOUT.proactive_source_file),
-        LocalTodoSource(WORKSPACE_LAYOUT.proactive_todo_file),
-        LocalTaskSource(WORKSPACE_LAYOUT.proactive_tasks_file),
-        RSSFeedSource(sorted(WORKSPACE_LAYOUT.rss_sources_dir.glob("*.xml"))),
-        WebSnapshotSource(sorted(WORKSPACE_LAYOUT.snapshot_sources_dir.glob("*.txt"))),
-    ]
     # 主动链路关闭时不创建资源，也不要求配置目标用户。
     proactive_loop = None
     if cfg.proactive.enabled:
@@ -506,7 +492,6 @@ def create_app_runtime(config: AppConfig):
             hawkes_time_constant=cfg.proactive.hawkes_time_constant,
             proactive_sources=proactive_sources,
             proactive_modules=proactive_modules,
-            local_sources=local_sources,
             state_path=cfg.proactive.state_path,
             trace_path=cfg.proactive.trace_path,
             channel=proactive_channel,

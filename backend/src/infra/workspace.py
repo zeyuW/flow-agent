@@ -31,9 +31,6 @@ class WorkspaceLayout:
     drift_skills_dir: Path
     plugins_dir: Path
     plugin_data_dir: Path
-    sources_dir: Path
-    rss_sources_dir: Path
-    snapshot_sources_dir: Path
     sessions_dir: Path
     logs_dir: Path
     attachments_dir: Path
@@ -51,9 +48,6 @@ class WorkspaceLayout:
     proactive_trace_file: Path
     app_log_file: Path
     mcp_config_file: Path
-    proactive_source_file: Path
-    proactive_todo_file: Path
-    proactive_tasks_file: Path
     subagent_tasks_file: Path
     drift_history_file: Path
     marker_file: Path
@@ -67,7 +61,6 @@ def build_layout(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLay
     data = flow / "data"
     memory = flow / "memory"
     drift = flow / "drift"
-    sources = flow / "sources"
     sessions = flow / "sessions"
     logs = flow / "logs"
     attachments = flow / "attachments"
@@ -84,9 +77,6 @@ def build_layout(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLay
         drift_skills_dir=drift / "skills",
         plugins_dir=flow / "plugins",
         plugin_data_dir=flow / "plugin-data",
-        sources_dir=sources,
-        rss_sources_dir=sources / "rss",
-        snapshot_sources_dir=sources / "snapshots",
         sessions_dir=sessions,
         logs_dir=logs,
         attachments_dir=attachments,
@@ -104,9 +94,6 @@ def build_layout(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLay
         proactive_trace_file=logs / "proactive.jsonl",
         app_log_file=logs / "app.log",
         mcp_config_file=flow / "mcp.json",
-        proactive_source_file=sources / "proactive_items.txt",
-        proactive_todo_file=sources / "todo_items.txt",
-        proactive_tasks_file=sources / "tasks.txt",
         subagent_tasks_file=sessions / "subagent_tasks.jsonl",
         drift_history_file=drift / "drift.json",
         marker_file=flow / WORKSPACE_MARKER,
@@ -140,9 +127,6 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
         layout.drift_skills_dir,
         layout.plugins_dir,
         layout.plugin_data_dir,
-        layout.sources_dir,
-        layout.rss_sources_dir,
-        layout.snapshot_sources_dir,
         layout.sessions_dir,
         layout.logs_dir,
         layout.inbound_attachments_dir,
@@ -154,18 +138,6 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
     """返回可安全预创建的文本和 JSON 文件。"""
 
     return (
-        (
-            layout.proactive_source_file,
-            "# 一行一个主动候选，空行和井号开头的行会被忽略\n",
-        ),
-        (
-            layout.proactive_todo_file,
-            "# 一行一个待办事项，空行和井号开头的行会被忽略\n",
-        ),
-        (
-            layout.proactive_tasks_file,
-            "# 一行一个任务，空行和井号开头的行会被忽略\n",
-        ),
         (
             layout.project_skills_dir / "README.md",
             "# 项目技能\n\n每个技能目录包含 SKILL.md，可选 scripts、references、assets。本目录应提交到 Git。\n",
@@ -185,10 +157,6 @@ def _workspace_files(layout: WorkspaceLayout) -> tuple[tuple[Path, str], ...]:
         (
             layout.plugin_data_dir / "README.md",
             "# 插件私有数据\n\n按插件名称保存 plugin_config.json、.kv.json 和缓存，不与插件程序文件混放。\n",
-        ),
-        (
-            layout.sources_dir / "README.md",
-            "# 主动数据源\n\nproactive_items.txt、tasks.txt、todo_items.txt 均为一行一项；rss 放 XML，snapshots 放文本快照。\n",
         ),
         (layout.embedding_cache_file, "{}\n"),
         (layout.subagent_tasks_file, ""),
@@ -223,15 +191,6 @@ def apply_workspace_env(layout: WorkspaceLayout) -> None:
     os.environ.setdefault("FLOW_AGENT_MEMORY_DB_PATH", str(layout.memory_db))
     os.environ.setdefault("FLOW_AGENT_TRACE_PATH", str(layout.trace_file))
     os.environ.setdefault("FLOW_AGENT_SKILLS_DIR", str(layout.installed_skills_dir))
-    os.environ.setdefault(
-        "FLOW_AGENT_PROACTIVE_SOURCE_FILE", str(layout.proactive_source_file)
-    )
-    os.environ.setdefault(
-        "FLOW_AGENT_PROACTIVE_TODO_FILE", str(layout.proactive_todo_file)
-    )
-    os.environ.setdefault(
-        "FLOW_AGENT_PROACTIVE_TASKS_FILE", str(layout.proactive_tasks_file)
-    )
     os.environ.setdefault(
         "FLOW_AGENT_SUBAGENT_TASKS_FILE", str(layout.subagent_tasks_file)
     )

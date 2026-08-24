@@ -4,12 +4,10 @@ import asyncio
 import json
 import logging
 import hashlib
-from pathlib import Path
 from typing import Any
 
 from application.proactive.infra.mcp_pool import McpClientPool
 from application.proactive.domain.models import DataItem, GatewayResult
-from application.proactive.infra.sources import LocalFileSource, ProactiveSource
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +19,10 @@ class DataGateway:
         self,
         pool: McpClientPool,
         proactive_sources: list | None = None,
-        local_source_file: Path | None = None,
-        local_sources: list[ProactiveSource] | None = None,
     ) -> None:
         self._pool = pool
         self._content_store: dict[str, str] = {}
         self._proactive_sources = list(proactive_sources or [])
-        self._local_sources = list(local_sources or [])
-        self._local_source_file = local_source_file
-        if local_source_file is not None:
-            self._local_sources.append(LocalFileSource(local_source_file))
 
         self._channel_servers: dict[str, list[str]] = {
             "alert": [],
@@ -72,7 +64,6 @@ class DataGateway:
                     if isinstance(target, list):
                         target.extend(items)
 
-        result.content.extend(self._fetch_all_local_content())
         result.errors.extend(self._run_errors)
         return result
 
@@ -92,45 +83,7 @@ class DataGateway:
         self._proactive_sources = next_sources
         self._channel_servers = next_channel_servers
 
-    def _fetch_local_content(self) -> list[DataItem]:
-        """读取显式配置的本地数据文件。"""
 
-        if self._local_source_file is None or not self._local_source_file.exists():
-            return []
-        records = LocalFileSource(self._local_source_file).fetch_records()
-        return [
-            DataItem(
-                source=record.source,
-                item_id=record.dedup_key,
-                title=record.title,
-                summary=record.summary,
-                content=record.content,
-                priority_hint=record.priority_hint,
-            )
-            for record in records
-        ]
-
-    def _fetch_all_local_content(self) -> list[DataItem]:
-        """读取全部本地数据源，并隔离单个来源失败。"""
-
-        records = []
-        for source in self._local_sources:
-            try:
-                records.extend(source.fetch_records())
-            except Exception as exc:
-                logger.exception("本地主动数据源采集失败: source=%s", source.name)
-                self._run_errors.append(f"local:{source.name}: {exc}")
-        return [
-            DataItem(
-                source=record.source,
-                item_id=record.dedup_key,
-                title=record.title,
-                summary=record.summary,
-                content=record.content,
-                priority_hint=record.priority_hint,
-            )
-            for record in records
-        ]
     async def _call_source(self, server: str, tool: str) -> list[Any]:
         """调用单个数据源并提取 MCP 内容块。"""
 
