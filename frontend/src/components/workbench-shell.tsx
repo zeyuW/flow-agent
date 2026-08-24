@@ -1,13 +1,14 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-export type ConsolePage = "sessions" | "schedules" | "capabilities" | "plugins";
+export type ConsolePage = "sessions" | "schedules" | "capabilities" | "plugins" | "runs";
 
 const navigation: Array<{ id: ConsolePage; label: string }> = [
   { id: "sessions", label: "会话" },
   { id: "schedules", label: "定时任务" },
   { id: "capabilities", label: "技能与连接器" },
-  { id: "plugins", label: "插件" }
+  { id: "plugins", label: "插件" },
+  { id: "runs", label: "日志" }
 ];
 
 export function WorkbenchShell({

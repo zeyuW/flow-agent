@@ -2,6 +2,7 @@
 
 import logging
 import time
+from uuid import uuid4
 
 from application.proactive.infra.data_gateway import DataGateway
 from application.proactive.app.deliver import deliver_message
@@ -18,6 +19,8 @@ from application.proactive.app.lifecycle import (
 from application.proactive.domain.models import AgentTick, GatewayResult, JudgeResult
 from application.proactive.app.resolve import candidate_key, resolve_decision
 from infra.bus.types import MessageSender
+from application.capabilities.llm.client import llm_stage
+from infra.telemetry import trace_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +73,8 @@ class ProactiveTurnPipeline:
         """执行完整主动检查，并在所有退出路径记录完成时间。"""
 
         tick = AgentTick(chat_id=chat_id, base_score=base_score)
+        trace_id = uuid4().hex[:12]
+        trace_token = trace_id_var.set(trace_id)
         try:
             tick.phase_trace.append("gate")
             tick.gate_result = check_gate(
@@ -160,7 +165,8 @@ class ProactiveTurnPipeline:
             ):
                 tick.phase_trace.append("drift")
                 connected_mcp = set(getattr(self._mcp_pool, "connected_names", set()))
-                drift_tick = await drift_pipeline.run(connected_mcp=connected_mcp)
+                with llm_stage("proactive"):
+                    drift_tick = await drift_pipeline.run(connected_mcp=connected_mcp)
                 tick.drift_tick = drift_tick
                 if drift_tick.finished and drift_tick.runs:
                     self._state.mark_drift_run()
@@ -181,11 +187,12 @@ class ProactiveTurnPipeline:
 
             tick.phase_trace.append("judge")
             policy = self._state.get_policy(chat_id)
-            tick.judge_result = await self._judge.evaluate(
-                tick.gateway_result,
-                chat_id,
-                policy_topics=policy.topics,
-            )
+            with llm_stage("proactive"):
+                tick.judge_result = await self._judge.evaluate(
+                    tick.gateway_result,
+                    chat_id,
+                    policy_topics=policy.topics,
+                )
             logger.info(
                 "主动内容评估完成: decision=%s cited=%d discarded=%d",
                 tick.judge_result.decision,
@@ -201,6 +208,7 @@ class ProactiveTurnPipeline:
             return await self._finish_tick(tick)
         finally:
             tick.finished_at = time.time()
+            trace_id_var.reset(trace_token)
 
     def replace_contributions(
         self, sources: list, lifecycle: ProactiveLifecycle

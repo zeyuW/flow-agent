@@ -12,6 +12,8 @@ from application.memory.app.engine import MemoryEngine
 from application.memory.infra.retriever import DualChannelRetriever
 from application.memory.app.memorizer import Memorizer
 from application.memory.app.post_response import PostResponseMemoryWorker
+from application.capabilities.llm.client import llm_stage
+from infra.telemetry import trace_scope
 from application.memory.app.supersede import SupersedeDetector
 from application.memory.infra.vector_store import MemoryStore
 from application.memory.app.query_rewriter import QueryRewriter
@@ -199,38 +201,39 @@ def wire_memory_events(
         def _process(self, event: TurnCommitted) -> None:
             """在后台串行处理记忆更新，不能阻塞回复投递。"""
 
-            session_id = event.session_id or "default"
-            user_input = event.user_input or ""
-            assistant_output = event.assistant_output or ""
-            tool_trace = event.tool_trace or []
+            with trace_scope(event.trace_id), llm_stage("memory"):
+                session_id = event.session_id or "default"
+                user_input = event.user_input or ""
+                assistant_output = event.assistant_output or ""
+                tool_trace = event.tool_trace or []
 
-            # 立即生效的规则记忆处理。
-            try:
-                result = self.rt.post_response_worker.on_turn_committed(
-                    session_id=session_id,
-                    user_input=user_input,
-                    assistant_output=assistant_output,
-                    tool_trace=tool_trace,
-                )
-                logger.debug(
-                    "post-response memory: extracted=%d superseded=%d",
-                    result.extracted_memories,
-                    result.superseded_count,
-                )
-            except Exception:
-                logger.exception("post-response memory processing failed")
-
-            if consolidator is not None:
+                # 立即生效的规则记忆处理。
                 try:
-                    maintenance_result = consolidator.on_turn_committed(session_id)
+                    result = self.rt.post_response_worker.on_turn_committed(
+                        session_id=session_id,
+                        user_input=user_input,
+                        assistant_output=assistant_output,
+                        tool_trace=tool_trace,
+                    )
                     logger.debug(
-                        "memory consolidation: consolidated=%s history=%d pending=%d",
-                        maintenance_result.consolidated,
-                        maintenance_result.history_count,
-                        maintenance_result.pending_count,
+                        "post-response memory: extracted=%d superseded=%d",
+                        result.extracted_memories,
+                        result.superseded_count,
                     )
                 except Exception:
-                    logger.exception("memory consolidation failed")
+                    logger.exception("post-response memory processing failed")
+
+                if consolidator is not None:
+                    try:
+                        maintenance_result = consolidator.on_turn_committed(session_id)
+                        logger.debug(
+                            "memory consolidation: consolidated=%s history=%d pending=%d",
+                            maintenance_result.consolidated,
+                            maintenance_result.history_count,
+                            maintenance_result.pending_count,
+                        )
+                    except Exception:
+                        logger.exception("memory consolidation failed")
 
         @staticmethod
         def _log_failure(future) -> None:

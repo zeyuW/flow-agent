@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from application.memory.app.memory_runtime import wire_memory_events
 from infra.bus.event import EventBus, TurnCommitted
+from infra.telemetry import trace_id_var
 
 
 class RecordingExecutor:
@@ -56,3 +57,24 @@ def test_turn_committed_queues_memory_processing_without_running_it_inline():
     function(*args)
 
     assert calls == ["post_response", "consolidation"]
+
+
+def test_memory_processing_keeps_turn_trace_in_background_callback():
+    executor = RecordingExecutor()
+    observed: list[str | None] = []
+
+    class PostResponseWorker:
+        def on_turn_committed(self, **_kwargs):
+            observed.append(trace_id_var.get())
+
+    class Runtime:
+        post_response_worker = PostResponseWorker()
+
+    event_bus = EventBus()
+    wire_memory_events(Runtime(), event_bus, executor=executor)
+    event_bus.publish(TurnCommitted(trace_id="turn-123", session_id="chat-1"))
+
+    function, args = executor.jobs[-1]
+    function(*args)
+
+    assert observed[-1] == "turn-123"

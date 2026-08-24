@@ -91,6 +91,7 @@ class OpenAILLMClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResult:
+        self._log_request()
         request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -164,6 +165,7 @@ class OpenAILLMClient:
     ) -> LLMResult:
         """通过异步传输生成结果，使取消信号可抵达网络请求。"""
 
+        self._log_request()
         request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -220,6 +222,7 @@ class OpenAILLMClient:
         tools: list[dict[str, Any]] | None = None,
         on_delta: Callable[[str], None] | None = None,
     ) -> LLMResult:
+        self._log_request()
         request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -320,6 +323,9 @@ class OpenAILLMClient:
 
         logger.warning("流式模型返回空内容，回退到非流式请求")
         return self.generate(messages, tools)
+
+    def _log_request(self) -> None:
+        logger.info("LLM request stage=%s model=%s", _llm_stage.get(), self.model)
 
     def _parse_tool_arguments(self, arguments_json: str) -> dict[str, Any]:
         try:

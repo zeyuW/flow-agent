@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from collections import deque
+from contextlib import contextmanager
 from contextvars import ContextVar
 import json
 import logging
@@ -113,6 +114,17 @@ _RESERVED = {
 
 
 trace_id_var: ContextVar[str | None] = ContextVar("trace_id", default=None)
+
+
+@contextmanager
+def trace_scope(trace_id: str | None):
+    """在当前任务或线程内设置 trace，并在退出时恢复上层上下文。"""
+
+    token = trace_id_var.set(trace_id or None)
+    try:
+        yield
+    finally:
+        trace_id_var.reset(token)
 
 
 class TraceIdFilter(logging.Filter):

@@ -105,6 +105,19 @@ describe("OverviewPage", () => {
     await waitFor(() => expect(setMcpServerEnabled).toHaveBeenCalledWith("weather", false));
   });
 
+  it("展示运行记录并支持按业务阶段筛选", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "日志" }));
+
+    expect(await screen.findByLabelText("运行记录筛选")).toBeInTheDocument();
+    expect(screen.getAllByText("主动消息去重命中").length).toBeGreaterThan(0);
+
+    fireEvent.change(screen.getByLabelText("业务阶段"), { target: { value: "memory" } });
+
+    expect(screen.getAllByText("画像归档模型调用完成").length).toBeGreaterThan(0);
+    expect(screen.queryByText("主动消息去重命中")).not.toBeInTheDocument();
+  });
+
   it("展示连接器协议版本和连接失败原因", async () => {
     vi.mocked(getCapabilities).mockResolvedValueOnce({
       skills: [],

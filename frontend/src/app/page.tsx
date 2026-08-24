@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 
 import { ThemeToggle } from "@/components/theme-toggle";
+import { RunHistory } from "@/components/run-history";
 import { MessageContent } from "@/components/message-content";
 import {
   type ConsolePage,
@@ -783,7 +784,8 @@ export default function OverviewPage() {
     activePage === "sessions" ? <SessionsPage /> :
     activePage === "schedules" ? <SchedulesPage /> :
     activePage === "capabilities" ? <CapabilitiesPage /> :
-    <PluginsPage />;
+    activePage === "plugins" ? <PluginsPage /> :
+    <RunHistory />;
 
   return (
     <WorkbenchShell

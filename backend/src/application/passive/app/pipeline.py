@@ -21,7 +21,7 @@ from application.passive.domain.session_key import make_session_key
 from infra.bus.event import Event, EventBus
 from infra.bus.message import MessageBus, OutboundPort
 from infra.bus.types import MessageSender
-from infra.telemetry import TraceRecorder
+from infra.telemetry import TraceRecorder, trace_id_var
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +129,7 @@ class PassiveTurnPipeline:
             flow.inbound_metadata.get("message_id", ""),
         )
 
+        trace_token = trace_id_var.set(flow.trace_id)
         try:
             self._call_phase_modules(flow, "on_turn_started")
             flow = self._run_phase(flow, "before_turn", self._before_turn)
@@ -142,6 +143,8 @@ class PassiveTurnPipeline:
             self._record_turn_error(flow, exc)
             logger.exception("turn error session=%s", flow.session_id)
             self._send_error_reply(flow, exc)
+        finally:
+            trace_id_var.reset(trace_token)
 
     async def process_async(self, inbound: IncomingMessage) -> None:
         """异步处理一条入站消息，使模型等待不会阻塞其他会话。"""
@@ -159,6 +162,7 @@ class PassiveTurnPipeline:
                 "provider_message_id": flow.inbound_metadata.get("message_id", ""),
             }
         )
+        trace_token = trace_id_var.set(flow.trace_id)
         try:
             self._call_phase_modules(flow, "on_turn_started")
             flow = self._run_phase(flow, "before_turn", self._before_turn)
@@ -172,6 +176,8 @@ class PassiveTurnPipeline:
             self._record_turn_error(flow, exc)
             logger.exception("async turn error session=%s", flow.session_id)
             self._send_error_reply(flow, exc)
+        finally:
+            trace_id_var.reset(trace_token)
 
     def _create_flow(self, inbound: IncomingMessage) -> TurnFlow:
         flow = TurnFlow(

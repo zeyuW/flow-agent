@@ -8,8 +8,11 @@ import re
 import threading
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 from application.memory.infra.markdown_store import MarkdownStore
+from application.capabilities.llm.client import llm_stage
+from infra.telemetry import trace_scope
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +44,8 @@ class MemoryOptimizer:
             if not entries:
                 self._markdown.commit_pending_snapshot(snapshot)
                 return OptimizerResult(reason="快照中没有可归档事实")
-            optimized = self._optimize_with_llm(entries)
+            with trace_scope(f"memory-{uuid4().hex[:12]}"), llm_stage("memory"):
+                optimized = self._optimize_with_llm(entries)
             if optimized is None:
                 self._merge_deterministically(entries)
             else:
