@@ -63,7 +63,7 @@ class McpServerRegistry:
                 self._additional_specs,
             )
             revision = _specs_revision(specs)
-            if revision == self._revision and self._clients and all(
+            if revision == self._revision and all(
                 client.is_connected for client in self._clients.values()
             ):
                 return

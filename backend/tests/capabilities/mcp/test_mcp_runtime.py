@@ -78,6 +78,25 @@ def test_project_config_is_created_empty(tmp_path: Path):
     assert raw == {"schemaVersion": 1, "mcpServers": {}}
 
 
+def test_empty_mcp_generation_is_not_republished_when_revision_is_unchanged(
+    tmp_path: Path,
+    monkeypatch,
+):
+    config = tmp_path / ".flow" / "mcp.json"
+    registry = McpServerRegistry(config, ToolRegistry())
+    published: list[int] = []
+    monkeypatch.setattr(
+        McpServerRegistry,
+        "_replace_generation",
+        lambda _self, specs: published.append(len(specs)),
+    )
+
+    registry.reload()
+    registry.reload()
+
+    assert published == [0]
+
+
 def test_project_json_loads_external_server(tmp_path: Path):
     config = _write_external_config(tmp_path)
 

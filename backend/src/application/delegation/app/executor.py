@@ -79,9 +79,10 @@ class SubagentExecutor:
 def _build_prompt(description: str, context: str) -> str:
     description = description.strip()
     context = context.strip()
+    guidance = "优先读取代表性文件，完成后立即总结，不要无边界扩展读取范围。"
     if not context:
-        return f"目标：{description}"
-    return f"目标：{description}\n上下文：{context}"
+        return f"目标：{description}\n执行要求：{guidance}"
+    return f"目标：{description}\n上下文：{context}\n执行要求：{guidance}"
 
 
 def _trim(value: str) -> str:

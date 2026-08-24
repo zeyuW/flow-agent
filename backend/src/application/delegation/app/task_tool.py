@@ -24,7 +24,8 @@ class TaskTool:
     def description(self) -> str:
         return (
             "Delegate a bounded task to an isolated subagent. "
-            "Use the result to continue reasoning and answer the user."
+            "Use the result to continue reasoning and answer the user. "
+            "If multiple tasks are used, retry only failed tasks; do not rerun completed tasks."
         )
 
     @property
@@ -91,6 +92,47 @@ class TaskTool:
             )
         except Exception as exc:
             logger.exception("task tool failed: task_id=%s", task_id)
+            failed = SubagentResult(
+                task_id=task_id,
+                status="failed",
+                error=str(exc),
+            )
+            return ToolResult(
+                ok=False,
+                content=json.dumps(failed.to_dict(), ensure_ascii=False),
+            )
+
+    async def run_async(self, tool_input: dict[str, Any]) -> ToolResult:
+        """异步执行 task，供主 Agent 并行委派使用。"""
+
+        task_id = uuid4().hex[:12]
+        description = str(tool_input.get("description", "")).strip()
+        if not description:
+            return ToolResult(ok=False, content="task failed: description 不能为空")
+        if self._manager is None:
+            return ToolResult(ok=False, content="task failed: subagent manager 未配置")
+
+        try:
+            runner = getattr(self._manager, "run_task_async", None)
+            if not callable(runner):
+                return self.run(tool_input)
+            result = await runner(
+                task_id=task_id,
+                description=description,
+                profile=str(tool_input.get("profile", "research")),
+                context=str(tool_input.get("context", "")),
+                max_turns=int(tool_input.get("max_turns", 10)),
+                timeout=float(tool_input.get("timeout", 300)),
+                run_id=str(tool_input.get("__trace_id", "default")),
+            )
+            if not isinstance(result, SubagentResult):
+                raise TypeError("subagent manager 返回了无效结果")
+            return ToolResult(
+                ok=result.status == "completed",
+                content=json.dumps(result.to_dict(), ensure_ascii=False),
+            )
+        except Exception as exc:
+            logger.exception("async task tool failed: task_id=%s", task_id)
             failed = SubagentResult(
                 task_id=task_id,
                 status="failed",

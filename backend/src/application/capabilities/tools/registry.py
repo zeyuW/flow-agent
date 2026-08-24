@@ -100,6 +100,33 @@ class ToolRegistry:
                 )
         return tool.run(tool_input)
 
+    async def execute_async(
+        self, tool_name: str, tool_input: dict[str, Any]
+    ) -> ToolResult:
+        """异步执行支持 async runner 的工具。"""
+
+        with self._lock:
+            tool = self._tools.get(tool_name)
+        if tool is None:
+            return ToolResult(ok=False, content=f"Unknown tool: {tool_name}")
+        if self._guard is not None:
+            decision = self._guard.check_tool(tool_name)
+            if not decision.allowed:
+                return ToolResult(
+                    ok=False,
+                    content=f"Guard blocked tool: {decision.reason}",
+                )
+            decision = self._guard.check_tool_input(tool_name, tool_input)
+            if not decision.allowed:
+                return ToolResult(
+                    ok=False,
+                    content=f"Guard blocked input: {decision.reason}",
+                )
+        runner = getattr(tool, "run_async", None)
+        if callable(runner):
+            return await runner(tool_input)
+        return tool.run(tool_input)
+
     def execute_with_policy(
         self, tool_name: str, tool_input: dict[str, Any]
     ) -> tuple[ToolResult, dict[str, Any]]:

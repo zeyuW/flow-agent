@@ -1,3 +1,5 @@
+import asyncio
+
 from application.delegation.app.manager import SubagentManager
 from application.delegation.app.models import SubagentResult
 from application.delegation.infra.store import JsonlTaskStore
@@ -55,3 +57,31 @@ def test_manager_persists_task_lifecycle(tmp_path):
         if row.get("type") == "spawn_trace"
     ]
     assert phases == ["started", "completed"]
+
+
+def test_manager_async_tasks_share_worker_loop_without_blocking(tmp_path):
+    manager = SubagentManager(task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"))
+
+    class Executor:
+        async def execute(self, **kwargs):
+            await asyncio.sleep(0.05)
+            return SubagentResult(
+                task_id=kwargs["task_id"],
+                status="completed",
+                summary=kwargs["description"],
+            )
+
+    manager._executor = Executor()
+
+    async def scenario():
+        return await asyncio.gather(
+            manager.run_task_async(task_id="task-a", description="A", run_id="run"),
+            manager.run_task_async(task_id="task-b", description="B", run_id="run"),
+        )
+
+    try:
+        results = asyncio.run(scenario())
+    finally:
+        manager.shutdown()
+
+    assert [result.summary for result in results] == ["A", "B"]

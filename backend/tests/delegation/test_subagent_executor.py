@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from application.delegation.app.executor import SubagentExecutor
+from application.delegation.app.executor import SubagentExecutor, _build_prompt
 
 
 class FakeAgent:
@@ -107,3 +107,10 @@ def test_executor_converts_timeout_to_timed_out_result():
 
     assert result.status == "timed_out"
     assert result.error == "subagent_timeout"
+
+
+def test_executor_prompt_tells_research_agent_to_finish_within_scope():
+    prompt = _build_prompt("总结 passive", "只读取代表性文件")
+
+    assert "优先读取代表性文件" in prompt
+    assert "完成后立即总结" in prompt

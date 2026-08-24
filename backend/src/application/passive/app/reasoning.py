@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -120,13 +121,24 @@ class PassiveReasoner:
                 )
                 return flow
             current_messages.append(self._assistant_message(result))
-            for tool_call in result.tool_calls:
-                tool_message = self._execute_tool(
-                    tool_call,
-                    flow,
-                    step,
-                    async_mode=True,
+            if all(tool_call.name == "task" for tool_call in result.tool_calls):
+                tool_messages = await asyncio.gather(
+                    *[
+                        self._execute_tool_async(tool_call, flow, step)
+                        for tool_call in result.tool_calls
+                    ]
                 )
+            else:
+                tool_messages = [
+                    self._execute_tool(
+                        tool_call,
+                        flow,
+                        step,
+                        async_mode=True,
+                    )
+                    for tool_call in result.tool_calls
+                ]
+            for tool_call, tool_message in zip(result.tool_calls, tool_messages):
                 current_messages.append(
                     {
                         "role": "tool",
@@ -135,6 +147,48 @@ class PassiveReasoner:
                     }
                 )
         return await self._finish_after_tool_limit_async(flow, current_messages)
+
+    async def _execute_tool_async(
+        self,
+        tool_call: LLMToolCall,
+        flow: TurnFlow,
+        step: int,
+    ) -> str:
+        """异步执行 task 工具，允许多个子代理并行运行。"""
+
+        tool_input = self._tool_input_for_flow(tool_call, flow)
+        if self.tool_hook_executor is not None:
+            outcome = self.tool_hook_executor.execute_sync(
+                tool_call.name,
+                tool_input,
+                flow.session_id,
+            )
+            if outcome.decision == "deny":
+                flow.tool_trace.append(
+                    {
+                        "step": str(step + 1),
+                        "tool": tool_call.name,
+                        "status": "blocked",
+                        "arguments": tool_call.arguments_json,
+                    }
+                )
+                return f"Tool {tool_call.name} ok=False: 插件钩子阻止执行: {outcome.reason}"
+            if outcome.modified_args is not None:
+                tool_input = dict(outcome.modified_args)
+
+        tool_result = await self.tool_registry.execute_async(
+            tool_name=tool_call.name,
+            tool_input=tool_input,
+        )
+        flow.tool_trace.append(
+            {
+                "step": str(step + 1),
+                "tool": tool_call.name,
+                "status": "ok" if tool_result.ok else "failed",
+                "arguments": tool_call.arguments_json,
+            }
+        )
+        return f"Tool {tool_call.name} ok={tool_result.ok}: {tool_result.content}"
 
     def _run_tool_loop(self, flow: TurnFlow, initial_result=None) -> TurnFlow:
         current_messages = list(flow.messages)

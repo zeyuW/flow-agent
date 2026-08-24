@@ -273,6 +273,63 @@ class SubagentManager:
             release_once()
             raise
 
+    async def run_task_async(
+        self,
+        *,
+        task_id: str,
+        description: str,
+        profile: str = PROFILE_RESEARCH,
+        context: str = "",
+        max_turns: int | None = None,
+        timeout: float | None = None,
+        run_id: str = "default",
+    ) -> Any:
+        """异步等待一次 task，不阻塞主 Agent 事件循环。"""
+
+        decision = self._reserve_task(run_id)
+        if not decision.allowed:
+            return SubagentResult(
+                task_id=task_id,
+                status="failed",
+                error=decision.reason,
+            )
+
+        effective_turns = max_turns or self.default_max_turns
+        effective_timeout = timeout or self.default_timeout_seconds
+        self._trace(task_id, "started", {"run_id": run_id, "profile": profile})
+        released = False
+
+        def release_once() -> None:
+            nonlocal released
+            if not released:
+                released = True
+                self._release_task(run_id)
+
+        async def execute() -> Any:
+            try:
+                result = await self._executor.execute(
+                    task_id=task_id,
+                    description=description,
+                    profile=profile,
+                    context=context,
+                    max_turns=effective_turns,
+                    timeout=effective_timeout,
+                )
+                self._trace(task_id, result.status, result.to_dict())
+                return result
+            finally:
+                release_once()
+
+        loop = self._ensure_worker_loop()
+        future = asyncio.run_coroutine_threadsafe(execute(), loop)
+        try:
+            while not future.done():
+                await asyncio.sleep(0.01)
+            return future.result()
+        except Exception:
+            release_once()
+            raise
+
     def _reserve_task(self, run_id: str) -> GuardDecision:
         with self._task_limit_lock:
             if self._active_task_count >= self.max_concurrency:

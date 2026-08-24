@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from application.delegation.app.models import SubagentResult
@@ -63,6 +64,22 @@ def test_task_tool_returns_failed_result_without_raising():
     assert json.loads(result.content)["error"] == "模型不可用"
 
 
+def test_task_tool_async_uses_async_manager_runner():
+    class AsyncManager(FakeManager):
+        async def run_task_async(self, **kwargs):
+            self.arguments = kwargs
+            return self.result
+
+    manager = AsyncManager(
+        SubagentResult(task_id="task-async", status="completed", summary="完成")
+    )
+
+    result = asyncio.run(TaskTool(manager).run_async({"description": "执行"}))
+
+    assert result.ok is True
+    assert json.loads(result.content)["summary"] == "完成"
+
+
 def test_task_tool_exposes_structured_input_schema():
     schema = TaskTool(None).input_schema
 
@@ -76,3 +93,9 @@ def test_task_tool_exposes_structured_input_schema():
     }
     assert schema["properties"]["max_turns"]["default"] == 10
     assert schema["properties"]["timeout"]["default"] == 300
+
+
+def test_task_tool_description_requires_retrying_only_failed_tasks():
+    description = TaskTool(None).description
+
+    assert "retry only failed tasks" in description

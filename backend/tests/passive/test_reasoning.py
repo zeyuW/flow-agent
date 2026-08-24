@@ -1,3 +1,7 @@
+import asyncio
+import threading
+import time
+
 from application.capabilities.llm.client import LLMResult, LLMToolCall
 from application.capabilities.tools.base import ToolResult
 from application.capabilities.tools.registry import ToolRegistry
@@ -105,6 +109,135 @@ def test_reasoner_exposes_llm_error_without_continuing_tool_loop():
 
     assert result.final_output == "模型服务暂时不可用，请稍后重试。"
     assert result.extensions["llm_error"] == "api_400: invalid tool message"
+
+
+def test_reasoner_collects_multiple_subagent_results_for_lead_summary():
+    class TaskTool:
+        name = "task"
+        description = "执行子任务"
+        input_schema = {"type": "object"}
+
+        def run(self, tool_input):
+            return ToolResult(ok=True, content=f"子任务 {tool_input['name']} 完成")
+
+    class LeadAgent:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.messages: list[list[dict]] = []
+
+        def generate_from_messages(self, messages, *, tools=None):
+            del tools
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return LLMResult(
+                    content="",
+                    tool_calls=[
+                        LLMToolCall(
+                            id="task-a",
+                            name="task",
+                            arguments_json='{"name":"A"}',
+                            arguments={"name": "A"},
+                        ),
+                        LLMToolCall(
+                            id="task-b",
+                            name="task",
+                            arguments_json='{"name":"B"}',
+                            arguments={"name": "B"},
+                        ),
+                    ],
+                )
+            assert "子任务 A 完成" in messages[-2]["content"]
+            assert "子任务 B 完成" in messages[-1]["content"]
+            return LLMResult(content="已汇总 A、B 两个子任务")
+
+    lead = LeadAgent()
+    reasoner = PassiveReasoner(agent=lead, tool_registry=ToolRegistry())
+    reasoner.tool_registry.register(TaskTool())
+    flow = TurnFlow(
+        user_input="分别完成 A 和 B",
+        session_id="telegram:1",
+        channel="telegram",
+        trace_id="trace-multi-task",
+        messages=[{"role": "user", "content": "分别完成 A 和 B"}],
+    )
+
+    result = reasoner.run_sync(flow)
+
+    assert result.final_output == "已汇总 A、B 两个子任务"
+    assert lead.calls == 2
+
+
+def test_reasoner_runs_multiple_task_tools_in_parallel():
+    class ParallelTaskTool:
+        name = "task"
+        description = "执行子任务"
+        input_schema = {"type": "object"}
+
+        def __init__(self) -> None:
+            self.active = 0
+            self.max_active = 0
+            self.lock = threading.Lock()
+
+        async def run_async(self, tool_input):
+            with self.lock:
+                self.active += 1
+                self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.05)
+            with self.lock:
+                self.active -= 1
+            return ToolResult(ok=True, content=f"完成: {tool_input['name']}")
+
+        def run(self, tool_input):
+            raise AssertionError("parallel task must use async execution")
+
+    class LeadAgent:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.messages = []
+
+        async def generate_from_messages_async(self, messages, *, tools=None):
+            del tools
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return LLMResult(
+                    content="",
+                    tool_calls=[
+                        LLMToolCall(
+                            id="task-a",
+                            name="task",
+                            arguments_json='{"name":"A"}',
+                            arguments={"name": "A"},
+                        ),
+                        LLMToolCall(
+                            id="task-b",
+                            name="task",
+                            arguments_json='{"name":"B"}',
+                            arguments={"name": "B"},
+                        ),
+                    ],
+                )
+            return LLMResult(content="A、B 的结果已汇总")
+
+    task_tool = ParallelTaskTool()
+    lead = LeadAgent()
+    reasoner = PassiveReasoner(agent=lead, tool_registry=ToolRegistry())
+    reasoner.tool_registry.register(task_tool)
+    flow = TurnFlow(
+        user_input="分别完成 A 和 B",
+        session_id="telegram:1",
+        channel="telegram",
+        trace_id="trace-parallel",
+        messages=[{"role": "user", "content": "分别完成 A 和 B"}],
+    )
+
+    result = asyncio.run(reasoner.run_async(flow))
+
+    assert result.final_output == "A、B 的结果已汇总"
+    assert task_tool.max_active == 2
+
+
 
 
 def test_reasoner_requests_a_final_answer_when_tool_limit_is_reached():
