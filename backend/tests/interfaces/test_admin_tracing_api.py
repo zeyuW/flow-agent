@@ -169,6 +169,7 @@ class _McpRegistry:
         self.saved: dict[str, object] = {}
         self.removed = ""
         self.enabled: tuple[str, bool] | None = None
+        self.enable_error: Exception | None = None
 
     def list_configured_servers(self):
         return [{"name": "weather", "enabled": True, "connected": True, "tools": ["forecast"]}]
@@ -181,6 +182,8 @@ class _McpRegistry:
         return name == "weather"
 
     def set_server_enabled(self, name: str, enabled: bool) -> bool:
+        if self.enable_error is not None:
+            raise self.enable_error
         self.enabled = (name, enabled)
         return name == "weather"
 
@@ -294,6 +297,30 @@ def test_mcp_management_routes_save_toggle_and_remove_server():
     assert toggled == {"enabled": False}
     assert registry.enabled == ("weather", False)
     assert removed == {"removed": True}
+
+
+def test_mcp_enable_route_returns_explicit_reload_error():
+    registry = _McpRegistry()
+    registry.enable_error = RuntimeError("MCP 服务启动失败: weather")
+    app = create_admin_app(
+        TraceTimeline(),
+        _SessionQuery(),
+        _Scheduler(),
+        mcp_registry=registry,
+    )
+    routes = {
+        (route.path, next(iter(route.methods), "")): route.endpoint
+        for route in app.routes
+        if hasattr(route, "methods")
+    }
+
+    with pytest.raises(HTTPException) as exc_info:
+        routes[("/api/mcp/servers/{name}/enabled", "POST")](
+            "weather", McpServerEnabled(enabled=True)
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "MCP 服务启动失败: weather"
 
 
 def test_traces_filters_and_excludes_sensitive_data():

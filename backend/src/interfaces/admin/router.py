@@ -83,8 +83,13 @@ def create_admin_app(
     def set_mcp_enabled(name: str, payload: McpServerEnabled) -> dict[str, bool]:
         if mcp_registry is None:
             raise HTTPException(503, detail="MCP 管理服务未初始化")
-        if not mcp_registry.set_server_enabled(name, payload.enabled):
-            raise HTTPException(404, detail=f"未找到 MCP 服务: {name}")
+        try:
+            if not mcp_registry.set_server_enabled(name, payload.enabled):
+                raise HTTPException(404, detail=f"未找到 MCP 服务: {name}")
+        except HTTPException:
+            raise
+        except (OSError, ValueError, RuntimeError) as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
         return {"enabled": payload.enabled}
 
     @router.post("/skills/scan", response_model=SkillListResponse)

@@ -20,6 +20,8 @@ def test_workspace_init_and_detect(tmp_path: Path):
     assert layout.memory_journal_dir.is_dir()
     assert layout.drift_skills_dir.is_dir()
     assert layout.plugin_data_dir.is_dir()
+    assert layout.mcp_dir == runtime_dir / "mcp"
+    assert layout.mcp_dir.is_dir()
     assert not (runtime_dir / "sources").exists()
     assert layout.inbound_attachments_dir.is_dir()
     assert layout.outbound_attachments_dir.is_dir()

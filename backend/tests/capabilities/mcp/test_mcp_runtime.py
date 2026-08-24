@@ -267,6 +267,31 @@ def test_http_mcp_client_falls_back_to_legacy_streamable_http(monkeypatch):
     client.stop()
 
 
+def test_http_mcp_client_resets_connection_after_socket_hang_up(monkeypatch):
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        def post(self, url, json, **kwargs):
+            raise httpx.RemoteProtocolError(
+                "socket hang up", request=httpx.Request("POST", url)
+            )
+
+        def close(self):
+            return None
+
+    monkeypatch.setattr("application.capabilities.mcp.http_client.httpx.Client", Client)
+    client = McpHttpClient("remote", "https://example.com/mcp")
+    client._client = Client()
+    client._connected = True
+    client._modern = True
+
+    with pytest.raises(RuntimeError, match="连接已断开"):
+        client.call_sync("echo", {})
+
+    assert client.is_connected is False
+
+
 def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):
     config = _write_external_config(tmp_path)
     tools = ToolRegistry()
@@ -276,6 +301,27 @@ def test_registry_discovers_and_calls_external_json_server(tmp_path: Path):
         result = tools.execute("mcp__demo__echo", {"text": "hello"})
         assert result.ok is True
         assert result.content == "external:hello"
+    finally:
+        registry.stop_all()
+
+
+def test_registry_keeps_healthy_servers_when_another_server_fails(tmp_path: Path):
+    config = _write_external_config(tmp_path)
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    raw["mcpServers"]["broken"] = {
+        "enabled": True,
+        "command": "/path/that/does/not/exist",
+    }
+    config.write_text(json.dumps(raw), encoding="utf-8")
+    tools = ToolRegistry()
+    registry = McpServerRegistry(config, tools, startup_timeout=5, call_timeout=5)
+
+    try:
+        registry.start()
+
+        result = tools.execute("mcp__demo__echo", {"text": "healthy"})
+        assert result.ok is True
+        assert registry.list_configured_servers()[1]["error"]
     finally:
         registry.stop_all()
 
@@ -295,6 +341,22 @@ def test_registry_stop_all_terminates_external_server_process(tmp_path: Path):
 
     assert process.poll() is not None
     assert client.is_connected is False
+
+
+def test_registry_enable_failure_restores_previous_config(tmp_path: Path, monkeypatch):
+    config = _write_external_config(tmp_path)
+    registry = McpServerRegistry(config, ToolRegistry())
+    monkeypatch.setattr(
+        McpServerRegistry,
+        "reload",
+        lambda self: (_ for _ in ()).throw(RuntimeError("启动失败")),
+    )
+
+    with pytest.raises(RuntimeError, match="启动失败"):
+        registry.set_server_enabled("demo", False)
+
+    raw = json.loads(config.read_text(encoding="utf-8"))
+    assert raw["mcpServers"]["demo"]["enabled"] is True
 
 
 def test_failed_json_reload_keeps_previous_generation(tmp_path: Path):

@@ -63,9 +63,8 @@ class McpServerRegistry:
                 self._additional_specs,
             )
             revision = _specs_revision(specs)
-            if (
-                revision == self._revision
-                and all(client.is_connected for client in self._clients.values())
+            if revision == self._revision and self._clients and all(
+                client.is_connected for client in self._clients.values()
             ):
                 return
             self._replace_generation(specs)
@@ -134,11 +133,12 @@ class McpServerRegistry:
         self._watch_thread.start()
 
     def _replace_generation(self, specs: list[McpServerSpec]) -> None:
-        """先预热全部候选服务，成功后再替换旧代。"""
+        """逐个预热服务，单个失败时保留其他健康服务。"""
         candidates: dict[str, McpClient] = {}
         candidate_tools: dict[str, list[Any]] = {}
-        try:
-            for spec in specs:
+        errors: dict[str, str] = {}
+        for spec in specs:
+            try:
                 if spec.url:
                     client = McpHttpClient(
                         name=spec.name,
@@ -154,22 +154,34 @@ class McpServerRegistry:
                         cwd=spec.cwd,
                         call_timeout=self.call_timeout,
                     )
+                tools = client.start(self.startup_timeout)
                 candidates[spec.name] = client
-                candidate_tools[spec.name] = client.start(self.startup_timeout)
-        except Exception as exc:
-            if spec.name:
-                self._server_errors[spec.name] = str(exc)
-            for client in candidates.values():
-                client.stop()
-            raise
-
-        self._server_errors.clear()
-        self._server_descriptions = {
-            spec.name: spec.description for spec in specs
-        }
+                candidate_tools[spec.name] = tools
+            except Exception as exc:
+                errors[spec.name] = str(exc)
+                logger.exception("MCP 服务启动失败: %s", spec.name)
 
         old_clients = self._clients
         old_tools = self._server_tools
+        clients: dict[str, Any] = {}
+        tools_by_server: dict[str, list[Any]] = {}
+        for spec in specs:
+            if spec.name in candidates:
+                clients[spec.name] = candidates[spec.name]
+                tools_by_server[spec.name] = candidate_tools[spec.name]
+            elif (
+                (old_client := old_clients.get(spec.name)) is not None
+                and old_client.is_connected
+            ):
+                clients[spec.name] = old_client
+                tools_by_server[spec.name] = list(
+                    getattr(old_client, "_discovered_tools", [])
+                )
+
+        self._server_errors = errors
+        self._server_descriptions = {
+            spec.name: spec.description for spec in specs
+        }
         old_tool_names = {
             tool_name
             for names in old_tools.values()
@@ -177,10 +189,10 @@ class McpServerRegistry:
         }
         new_server_tools: dict[str, list[str]] = {}
         additions: list[tuple[McpToolWrapper, str]] = []
-        for name, client in candidates.items():
+        for name, client in clients.items():
             wrappers = [
                 McpToolWrapper(client=client, info=info, server_name=name)
-                for info in candidate_tools[name]
+                for info in tools_by_server[name]
             ]
             new_server_tools[name] = [wrapper.name for wrapper in wrappers]
             additions.extend(
@@ -263,9 +275,18 @@ class McpServerRegistry:
         return removed
 
     def set_server_enabled(self, name: str, enabled: bool) -> bool:
+        raw = load_mcp_config(self.config_path)
+        server = raw["mcpServers"].get(name)
+        previous = (
+            bool(server.get("enabled", True)) if isinstance(server, dict) else None
+        )
         updated = set_mcp_server_enabled(self.config_path, name, enabled)
         if updated:
-            self.reload()
+            try:
+                self.reload()
+            except Exception:
+                set_mcp_server_enabled(self.config_path, name, previous is True)
+                raise
         return updated
 
     @property

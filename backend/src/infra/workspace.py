@@ -47,6 +47,7 @@ class WorkspaceLayout:
     trace_file: Path
     proactive_trace_file: Path
     app_log_file: Path
+    mcp_dir: Path
     mcp_config_file: Path
     subagent_tasks_file: Path
     drift_history_file: Path
@@ -93,6 +94,7 @@ def build_layout(root: Path, *, runtime_dir: Path | None = None) -> WorkspaceLay
         trace_file=logs / "trace.jsonl",
         proactive_trace_file=logs / "proactive.jsonl",
         app_log_file=logs / "app.log",
+        mcp_dir=flow / "mcp",
         mcp_config_file=flow / "mcp.json",
         subagent_tasks_file=sessions / "subagent_tasks.jsonl",
         drift_history_file=drift / "drift.json",
@@ -129,6 +131,7 @@ def _workspace_directories(layout: WorkspaceLayout) -> tuple[Path, ...]:
         layout.plugin_data_dir,
         layout.sessions_dir,
         layout.logs_dir,
+        layout.mcp_dir,
         layout.inbound_attachments_dir,
         layout.outbound_attachments_dir,
     )

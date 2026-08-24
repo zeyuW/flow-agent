@@ -87,16 +87,20 @@ class McpHttpClient:
         if not self.is_connected:
             raise RuntimeError(f"MCP server {self.name!r} not connected")
         timeout = timeout or self.call_timeout
-        if self._modern:
-            response = self._send_modern(
-                "tools/call", {"name": tool_name, "arguments": arguments}, timeout
-            )
-            response.raise_for_status()
-            data = _parse_http_response(response)
-        else:
-            data = self._request_legacy(
-                "tools/call", {"name": tool_name, "arguments": arguments}, timeout
-            )
+        try:
+            if self._modern:
+                response = self._send_modern(
+                    "tools/call", {"name": tool_name, "arguments": arguments}, timeout
+                )
+                response.raise_for_status()
+                data = _parse_http_response(response)
+            else:
+                data = self._request_legacy(
+                    "tools/call", {"name": tool_name, "arguments": arguments}, timeout
+                )
+        except (httpx.TransportError, ConnectionError) as exc:
+            self.stop()
+            raise RuntimeError(f"MCP server {self.name!r} 连接已断开") from exc
         return _render_result(data.get("result", {}))
 
     def stop(self, timeout: float = 10.0) -> None:
