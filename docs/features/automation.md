@@ -121,6 +121,22 @@ AutomationRegistry
 
 委托结果可以通知目标会话，但通知本身仍需使用统一出站地址。子 Agent 不直接抢占父会话的历史，也不允许因为执行较慢而改变用户即时回合的顺序。
 
+当一个用户请求可以拆成多个相互独立的子任务时，Lead Agent 可以在同一轮通过
+`task` 工具并行委派多个 Subagent，再等待结构化结果并汇总。并行只发生在独立的
+子任务之间；每个子 Agent 仍有自己的会话上下文、工具集合、回合上限和超时，不会
+共享父 Agent 的未提交历史，也不能递归调用 `task`。
+
+```text
+Lead Agent
+    |
+    +--> task(A) --\
+    +--> task(B) ----> SubagentManager 并发配额 ---> 结果汇总
+    +--> task(C) --/
+```
+
+运行时会同时限制并发数、单次主回合的总委派数、单个子任务最大回合数和超时。达到
+并发上限的任务必须返回受控失败或等待结果，不能无限制创建后台线程。
+
 ## 队列、并发和单写者
 
 后台系统允许多个生产者，但把执行和状态写入分开：
@@ -209,10 +225,13 @@ timeout_seconds = 30.0
 
 [subagent]
 max_concurrency = 2
+max_total_per_run = 6
+max_turns = 10
+timeout_seconds = 300.0
 tasks_file = ".flow/sessions/subagent_tasks.jsonl"
 ```
 
-这些参数是资源边界，不改变三类后台执行的业务语义。提高 worker 数量也不会让同一用户会话并行执行多个回合。
+这些参数是资源边界，不改变三类后台执行的业务语义。提高 worker 数量也不会让同一用户会话并行执行多个回合；`tasks_file` 的默认相对路径在本机解析到 `~/.flow/sessions/`。
 
 ## 与其他能力的关系
 

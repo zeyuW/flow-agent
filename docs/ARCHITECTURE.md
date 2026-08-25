@@ -155,9 +155,29 @@ Lead Agent → task 工具 → SubagentExecutor → SubagentResult → Lead Agen
 
 插件可以提供阶段模块、工具钩子、事件订阅者、后台作业、主动源和 MCP 声明；Skill 提供可复用的方法、知识和资源。MCP 注册表负责合并内置、项目配置和插件来源的服务定义，并拒绝重名服务。连接外部 MCP 失败应保持基础服务可启动，但失败服务不应暴露为可调用工具。三条扩展路径的接入契约见[扩展 API](api.md)。
 
+### 8.1 管理面与运行观测
+
+`ServiceApp` 可以在本机启动独立的 AdminServer。它通过查询服务读取会话、调度、
+能力和追踪状态，通过 `TraceTimeline` 订阅 `EventBus` 形成运行诊断视图；Web
+控制台只通过 Next.js 服务端代理访问 `/api`，不直接读取数据库或日志文件。
+
+```text
+EventBus ---> TraceTimeline ---> GET /api/traces, /api/events
+SessionStore ---> SessionQueryService ---> GET /api/sessions
+SchedulerService ---------------------> /api/schedules
+SkillInstaller / McpServerRegistry ---> /api/skills, /api/mcp
+                                             |
+                                      本机 Web 控制台
+```
+
+管理面不是新的业务消息总线，也不拥有 Agent 回合。它可以执行定时任务、Skill 和
+MCP 的受控管理操作，但这些操作仍通过各自的应用服务完成；管理 API 只允许绑定
+`127.0.0.1` 或 `localhost`，不能作为公网控制平面使用。完整路由见[管理控制台与
+本机 API](features/control-plane.md)。
+
 ## 9. 状态、恢复与运行安全
 
-运行时状态包括会话、记忆向量、定时任务、后台作业、主动策略与 outbox。它们以不同目的持久化，不能把任何单个数据库当作完整的事务边界。尤其是外部渠道调用可能在本地超时后实际成功，因此 outbox 采用对“未知结果不重放”的保守语义。
+运行时状态包括会话、记忆向量、定时任务、后台作业、主动策略、追踪与 outbox。它们以不同目的持久化，不能把任何单个数据库当作完整的事务边界。默认相对 `.flow/` 路径在本机解析到用户目录 `~/.flow/`；项目共享 Skill 仍位于仓库根目录 `skills/`。尤其是外部渠道调用可能在本地超时后实际成功，因此 outbox 采用对“未知结果不重放”的保守语义。
 
 工作区进程锁用于防止同一工作区被多个服务实例同时运行。配置、认证、权限和工具守卫共同形成安全边界；其中任何一项缺失都不应由模型提示词“补救”。日志、追踪和运行单元快照提供诊断依据，`session_id` 与 `trace_id` 是关联跨组件行为的主要键。
 

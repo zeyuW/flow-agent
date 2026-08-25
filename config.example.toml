@@ -22,7 +22,7 @@ model = "text-embedding-v3"
 api_key = ""
 base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-# 本机只读管理 API，供独立前端查询追踪状态。
+# 本机管理 API，供独立前端查询状态并执行受控的本地管理操作。
 [admin_api]
 enabled = true
 host = "127.0.0.1"

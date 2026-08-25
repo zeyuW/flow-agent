@@ -10,7 +10,7 @@ backend/
 ├── uv.lock              # 依赖锁定文件
 ├── src/
 │   ├── application/     # 业务模块、应用用例和通用 Agent 能力
-│   ├── interfaces/      # HTTP、Telegram、QQ、CLI 等外部适配器
+│   ├── interfaces/      # 管理 API、HTTP、Telegram、QQ、CLI 等外部适配器
 │   ├── infra/           # 配置、消息总线、持久化、worker 和运行保障
 │   └── bootstrap/       # 配置加载、依赖装配和 ServiceApp 生命周期
 └── tests/               # 单元、集成和架构边界测试
@@ -46,6 +46,8 @@ application/<feature>/
 ### `interfaces/`
 
 接口层负责协议转换和渠道生命周期。`interfaces/channels/` 提供统一渠道契约、注册服务以及 CLI、HTTP、Telegram、QQ 适配器。渠道把外部输入转换为统一应用消息，也把统一出站消息转换为平台调用；业务代码不直接创建平台客户端。
+
+`interfaces/admin/` 提供绑定到本机的管理 API。它为 Web 控制台提供会话、追踪、事件、定时任务和能力查询，也提供 MCP 服务、Skill 和定时任务的受控管理操作；它不是公网业务 API。
 
 ### `infra/`
 
@@ -105,7 +107,15 @@ cp config.example.toml config.toml
 ./scripts/start.sh
 ```
 
-渠道、主动线路、后台任务和委托策略都由 `config.toml` 控制；不要把 `config.toml`、密钥或 `.flow/` 运行数据提交到 Git。
+`config.toml` 是仓库根目录的唯一 TOML 配置源。相对路径中的 `.flow/` 会解析到用户运行目录 `~/.flow/`；这里保存会话、记忆、日志、追踪、插件、用户 Skill、MCP 配置和子 Agent 任务记录。项目共享 Skill 放在仓库根目录 `skills/`。不要把 `config.toml`、密钥或 `~/.flow/` 运行数据提交到 Git。
+
+后端默认启动本机管理 API：
+
+```text
+127.0.0.1:8790/api
+```
+
+管理 API 的查询和变更入口见[管理控制台与本机 API](../docs/features/control-plane.md)。前端开发可执行 `./scripts/dev.sh`，只启动后端则使用 `./scripts/start.sh`。
 
 ## 验证命令
 
@@ -124,6 +134,7 @@ cd backend && uv run pyright
 - [文档总索引](../docs/README.md)
 - [系统架构](../docs/ARCHITECTURE.md)
 - [扩展 API：Plugin、MCP 和 Skill 二次开发](../docs/api.md)
+- [管理控制台与本机 API](../docs/features/control-plane.md)
 - [Agent Loop](../docs/features/agent-loop.md)
 - [被动回复](../docs/features/passive.md)
 - [主动回复](../docs/features/proactive.md)
@@ -132,3 +143,4 @@ cd backend && uv run pyright
 - [渠道](../docs/features/channels.md)
 - [文档维护规则](../docs/knowledge.md)
 - [根目录快速开始](../README.md)
+- [前端控制台开发说明](../frontend/README.md)
