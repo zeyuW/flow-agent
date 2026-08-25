@@ -3,6 +3,7 @@
 Flow Agent 是一个可扩展的多渠道智能体服务，提供对话、工具调用、长期记忆、后台任务和主动消息能力，并支持通过 MCP、插件和技能扩展运行时能力。
 
 ## 效果演示
+
 ### 客户端
   <table>
     <tr>
@@ -31,6 +32,7 @@ Flow Agent 是一个可扩展的多渠道智能体服务，提供对话、工具
     </tr>
   </table>
 
+
 ### 控制台
   <table>
     <tr>
@@ -58,8 +60,7 @@ Flow Agent 是一个可扩展的多渠道智能体服务，提供对话、工具
       </td>
     </tr>
   </table>
-
-## 快速开始
+## 快速开始（Linux）
 
 ### 1. 拉取仓库
 
@@ -70,64 +71,59 @@ git clone https://github.com/zeyuW/flow-agent.git
 cd flow-agent
 ```
 
-### 2. 安装 uv
-
-项目需要 Python 3.11 或更高版本。未安装 uv 时可执行：
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+安装uv ，已安装可以忽略
 ```
-
-确认安装成功：
-
-```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv --version
 ```
 
-### 3. 创建配置
+项目需要 Python 3.11+ 和 uv。
 
-在仓库根目录执行：
+### 2. 配置模型
+
+至少填写以下配置
 
 ```bash
 cp config.example.toml config.toml
 ```
 
-编辑 `config.toml`，至少填写主模型配置：
-
 ```toml
 [llm.main]
 model = "deepseek-v4-flash"
-api_key = ""
+api_key = "你的 DeepSeek API Key"
 base_url = "https://api.deepseek.com/v1"
+
+[embedding]
+provider = "qwen"
+model = "text-embedding-v3"
+api_key = "你的 DashScope API Key"
+base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 ```
 
-配置文件位于仓库根目录。运行时数据与代码分离：本机启动默认使用用户目录
-`~/.flow/` 保存会话数据库、记忆、日志、追踪、插件、用户 Skill 和 MCP 配置；
-项目共享 Skill 仍位于仓库的 `skills/` 目录。不要把 `~/.flow/`、`config.toml`
-或任何密钥提交到 Git。
+推荐 Telegram 
+在 `@BotFather` 创建 Bot，并将 Bot Token 和自己的数字用户 ID 写入：
 
-### 4. 管理控制台（可选）
+```toml
+[channels.telegram]
+enabled = true
+bot_token = "你的 Telegram Bot Token"
+allowed_users = [123456789]
+allowed_groups = []
+```
 
-后端默认在本机 `127.0.0.1:8790` 启动管理 API，前端控制台位于 `frontend/`。
-推荐同时启动后端和前端：
+不使用 Telegram 时保持 `enabled = false`。不要提交 API Key、Bot Token 或 `config.toml`。
+
+### 3. 启动
+
+终端执行：
 
 ```bash
 ./scripts/dev.sh
 ```
 
-然后打开 <http://localhost:3000>（实际根据端口占用会变化）。控制台可以查看会话、追踪事件和运行日志，
-管理定时任务、MCP 服务和用户 Skill；管理 API 只绑定本机地址，不应直接暴露到
-公网。若只需要运行 Agent，不需要启动前端，直接执行下一节的 `start.sh` 即可。
+然后打开 [http://localhost:3000](http://localhost:3000)。运行数据默认保存在 `~/.flow/`。
 
-### 5. 启动和停止
-
-从仓库根目录执行：
-
-```bash
-./scripts/start.sh
-```
-
-### 6. Docker（可选）
+### 4. Docker（可选、暂不推荐）
 
 Docker 同样读取仓库根目录的 `config.toml`，先完成配置并启用需要的渠道：
 
@@ -167,6 +163,8 @@ export no_proxy=localhost,127.0.0.1,host.docker.internal
 docker compose down
 ```
 
+
+
 ## 继续阅读
 
 - [文档总索引：按阅读目的选择入口](docs/README.md)
@@ -183,3 +181,4 @@ docker compose down
 - [渠道：统一适配器、消息规范化和投递](docs/features/channels.md)
 - [文档维护规则](docs/knowledge.md)
 - [配置示例](config.example.toml)
+
