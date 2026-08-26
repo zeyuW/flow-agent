@@ -32,6 +32,34 @@ export const traceDetailSchema = traceSummarySchema.extend({
 });
 export type TraceDetail = z.infer<typeof traceDetailSchema>;
 
+export const logEventSchema = z.object({
+  type: z.string(),
+  at: z.string(),
+  level: z.enum(["INFO", "WARN", "ERROR"]),
+  title: z.string(),
+  detail: z.string(),
+  error: z.string().nullable()
+});
+export const logItemSchema = z.object({
+  trace_id: z.string(),
+  stage: z.string(),
+  level: z.enum(["INFO", "WARN", "ERROR"]),
+  status: z.string(),
+  started_at: z.string().nullable(),
+  finished_at: z.string().nullable(),
+  duration_ms: z.number().int().nonnegative(),
+  session_id: z.string().nullable(),
+  event_count: z.number().int().nonnegative(),
+  events: z.array(logEventSchema)
+});
+export const logPageSchema = z.object({
+  items: z.array(logItemSchema),
+  total: z.number().int().nonnegative(),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative()
+});
+export type LogPage = z.infer<typeof logPageSchema>;
+
 export const sessionSummarySchema = z.object({
   id: z.string(),
   channel: z.string(),

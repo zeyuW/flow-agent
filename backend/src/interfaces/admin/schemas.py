@@ -36,6 +36,35 @@ class EventSummary(TraceEvent):
     trace_id: str
 
 
+class LogEvent(BaseModel):
+    type: str
+    at: str
+    level: Literal["INFO", "WARN", "ERROR"]
+    title: str
+    detail: str
+    error: str | None = None
+
+
+class LogItem(BaseModel):
+    trace_id: str
+    stage: str
+    level: Literal["INFO", "WARN", "ERROR"]
+    status: str
+    started_at: str | None
+    finished_at: str | None
+    duration_ms: int
+    session_id: str | None = None
+    event_count: int
+    events: list[LogEvent]
+
+
+class LogPage(BaseModel):
+    items: list[LogItem]
+    total: int
+    limit: int
+    offset: int
+
+
 class SessionSummary(BaseModel):
     id: str
     channel: str

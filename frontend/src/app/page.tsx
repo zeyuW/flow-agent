@@ -58,6 +58,15 @@ function formatDateTime(timestamp: string) {
   }).format(date);
 }
 
+function formatTarget(channel: string, sessionId: string) {
+  const prefix = `${channel}:`;
+  return sessionId.startsWith(prefix) ? sessionId.slice(prefix.length) : sessionId;
+}
+
+function targetKey(channel: string, sessionId: string) {
+  return `${channel}:${formatTarget(channel, sessionId)}`;
+}
+
 function SessionsPage() {
   const [selectedDate, setSelectedDate] = useState(() => formatDate(new Date()));
   const [selectedId, setSelectedId] = useState<string>();
@@ -202,8 +211,8 @@ function SchedulesPage() {
     (task, index) =>
       schedules.findIndex(
         (candidate) =>
-          candidate.channel === task.channel &&
-          candidate.session_id === task.session_id
+          targetKey(candidate.channel, candidate.session_id) ===
+          targetKey(task.channel, task.session_id)
       ) === index
   );
   const activeTargetTaskId = targetTaskId || targets[0]?.id || "";
@@ -260,17 +269,13 @@ function SchedulesPage() {
           <article className="feature-card" key={task.id}>
             <div>
               <p className="eyebrow">
-                {task.enabled ? "已启用" : "已停止"} · {task.channel}
+                {task.enabled ? "已启用" : "已停止"}
               </p>
               <h2>{task.name}</h2>
             </div>
             <p>{task.message}</p>
             <footer>
-              <span>
-                {task.enabled
-                  ? `下次执行：${formatDateTime(task.next_run_at)}`
-                  : "任务已停止"}
-              </span>
+              <span>下次执行：{formatDateTime(task.next_run_at)}</span>
               {task.enabled ? (
                 <button
                   disabled={cancelMutation.isPending}
@@ -279,15 +284,15 @@ function SchedulesPage() {
                 >
                   停止任务
                 </button>
-              ) : task.trigger === "daily" || task.trigger === "every" ? (
+              ) : (
                 <button
                   disabled={resumeMutation.isPending}
                   onClick={() => resumeMutation.mutate(task.id)}
                   type="button"
                 >
-                  重新启用
+                  启动任务
                 </button>
-              ) : null}
+              )}
             </footer>
           </article>
         ))
@@ -311,17 +316,24 @@ function SchedulesPage() {
             ) : (
               <>
                 <label>
-                  <span>发送到</span>
-                  <select
-                    onChange={(event) => setTargetTaskId(event.target.value)}
-                    value={activeTargetTaskId}
-                  >
-                    {targets.map((task) => (
-                      <option key={task.id} value={task.id}>
-                        {task.channel} · {task.session_id}
-                      </option>
-                    ))}
-                  </select>
+                  <span>投递目标</span>
+                  {targets.length === 1 ? (
+                    <p className="schedule-target-value">
+                      {targets[0].channel} · {formatTarget(targets[0].channel, targets[0].session_id)}
+                    </p>
+                  ) : (
+                    <select
+                      aria-label="投递目标"
+                      onChange={(event) => setTargetTaskId(event.target.value)}
+                      value={activeTargetTaskId}
+                    >
+                      {targets.map((task) => (
+                        <option key={task.id} value={task.id}>
+                          {task.channel} · {formatTarget(task.channel, task.session_id)}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </label>
                 <label>
                   <span>任务名称</span>

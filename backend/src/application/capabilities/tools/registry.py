@@ -245,6 +245,21 @@ def _tokenize(text: str) -> set[str]:
 def _tool_is_explicitly_requested(tool_name: str, normalized_input: str) -> bool:
     """用户点名 MCP 服务时，将该服务的工具视为显式候选。"""
     tool_name = tool_name.lower()
+    if tool_name == "schedule_task":
+        return any(
+            keyword in normalized_input
+            for keyword in ("提醒", "定时", "闹钟", "睡前", "到点", "每隔")
+        )
+    if tool_name == "list_scheduled_tasks":
+        return any(
+            keyword in normalized_input
+            for keyword in ("定时任务", "提醒任务", "有哪些提醒", "查看提醒")
+        )
+    if tool_name == "cancel_scheduled_task":
+        return any(
+            keyword in normalized_input
+            for keyword in ("取消提醒", "取消定时", "删除提醒")
+        )
     if tool_name in normalized_input:
         return True
     parts = tool_name.split("__")

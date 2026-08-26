@@ -68,6 +68,10 @@ def test_registry_always_selects_explicitly_named_tool():
         def name(self) -> str:
             return self._tool_name
 
+        @property
+        def description(self) -> str:
+            return "睡前安排相关工具"
+
     registry = ToolRegistry()
     for index in range(12):
         registry.register(NamedTool(f"generic_{index}"))
@@ -103,6 +107,34 @@ def test_registry_selects_core_tools_for_chinese_intents():
 
     names = {item["function"]["name"] for item in selected}
     assert {"write", "edit", "bash"} == names
+
+
+def test_registry_keeps_schedule_tool_for_reminder_intent():
+    class GenericTool(EchoTool):
+        def __init__(self, tool_name: str) -> None:
+            self._tool_name = tool_name
+
+        @property
+        def name(self) -> str:
+            return self._tool_name
+
+    class ScheduleTool(EchoTool):
+        @property
+        def name(self) -> str:
+            return "schedule_task"
+
+        @property
+        def description(self) -> str:
+            return "创建提醒或定时执行任务"
+
+    registry = ToolRegistry()
+    for index in range(12):
+        registry.register(GenericTool(f"generic_{index}"))
+    registry.register(ScheduleTool())
+
+    selected = registry.select_openai_tools("睡前安排一下", max_tools=3)
+
+    assert "schedule_task" in {item["function"]["name"] for item in selected}
 
 
 def test_registry_selects_skill_installer_for_chinese_install_request():

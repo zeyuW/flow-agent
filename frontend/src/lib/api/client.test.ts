@@ -270,6 +270,7 @@ describe("管理 API 客户端", () => {
       "createSchedule",
       "getCapabilities",
       "getEvents",
+      "getLogs",
       "getMcpServers",
       "getSchedules",
       "getSession",

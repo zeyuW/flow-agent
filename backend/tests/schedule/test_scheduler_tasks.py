@@ -185,6 +185,50 @@ def test_admin_can_resume_a_recurring_task(tmp_path):
     assert resumed.next_run_at > clock.value
 
 
+def test_admin_can_resume_an_unexpired_one_time_task(tmp_path):
+    clock = MutableClock(datetime(2026, 7, 19, 8, 0, tzinfo=timezone.utc))
+    service = SchedulerService(store_path=tmp_path / "scheduled.db", now_fn=clock)
+    task = service.create_task(
+        trigger="after",
+        when="10m",
+        task_type="reminder",
+        message="喝水提醒",
+        channel="telegram",
+        session_id="telegram:1",
+        chat_id="1",
+    )
+
+    assert service.cancel_task_by_id(task.id) is True
+    assert service.resume_task_by_id(task.id) is True
+    resumed = service.get_task_by_id(task.id)
+    assert resumed is not None
+    assert resumed.enabled is True
+    assert resumed.next_run_at == task.next_run_at
+
+
+def test_admin_can_restart_an_expired_one_time_task_now(tmp_path):
+    clock = MutableClock(datetime(2026, 7, 19, 8, 0, tzinfo=timezone.utc))
+    service = SchedulerService(store_path=tmp_path / "scheduled.db", now_fn=clock)
+    task = service.create_task(
+        trigger="after",
+        when="10m",
+        task_type="reminder",
+        message="喝水提醒",
+        channel="telegram",
+        session_id="telegram:1",
+        chat_id="1",
+    )
+
+    assert service.cancel_task_by_id(task.id) is True
+    clock.value = datetime(2026, 7, 19, 9, 0, tzinfo=timezone.utc)
+
+    assert service.resume_task_by_id(task.id) is True
+    resumed = service.get_task_by_id(task.id)
+    assert resumed is not None
+    assert resumed.enabled is True
+    assert resumed.next_run_at == clock.value
+
+
 def test_schedule_tool_is_selected_for_chinese_reminder_request(tmp_path):
     service = SchedulerService(store_path=tmp_path / "scheduled.db")
     registry = ToolRegistry()

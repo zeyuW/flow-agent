@@ -9,6 +9,7 @@ import {
   traceDetailSchema,
   traceEventSchema,
   traceSummarySchema,
+  logPageSchema,
   type SessionDetail,
   type SessionSummary,
   type ScheduleSummary,
@@ -16,6 +17,7 @@ import {
   type TraceEvent,
   type TraceSummary
 } from "./schemas";
+import type { LogPage } from "./schemas";
 
 export class AdminApiError extends Error {
   constructor(message: string, public readonly status?: number) {
@@ -77,6 +79,25 @@ export function getTraces(): Promise<TraceSummary[]> {
 
 export function getTrace(traceId: string): Promise<TraceDetail> {
   return getJson(`/api/traces/${encodeURIComponent(traceId)}`, traceDetailSchema);
+}
+
+export type LogFilters = {
+  limit?: number;
+  offset?: number;
+  level?: string;
+  stage?: string;
+  q?: string;
+  start_at?: string;
+  end_at?: string;
+};
+
+export function getLogs(filters: LogFilters = {}): Promise<LogPage> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  return getJson(`/api/logs${suffix}`, logPageSchema);
 }
 
 export function getSessions(

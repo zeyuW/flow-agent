@@ -139,12 +139,16 @@ class SchedulerService:
         return cancelled
 
     def resume_task_by_id(self, task_id: str) -> bool:
-        """恢复每天或固定间隔的任务，并重新计算下一次执行时间。"""
+        """恢复一次性任务或周期任务。"""
 
         task = self.store.get_by_id(task_id)
-        if task is None or task.enabled or task.trigger not in {"daily", "every"}:
+        if task is None or task.enabled:
             return False
-        next_run = self._next_run(task, self._aware_now(), failed=False)
+        now = self._aware_now()
+        if task.trigger in {"daily", "every"}:
+            next_run = self._next_run(task, now, failed=False)
+        else:
+            next_run = max(task.next_run_at, now)
         if next_run is None:
             return False
         resumed = self.store.resume(task_id, next_run)

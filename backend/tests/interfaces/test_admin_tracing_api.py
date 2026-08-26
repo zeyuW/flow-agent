@@ -38,6 +38,70 @@ def _routes():
     return {route.path: route.endpoint for route in app.routes}
 
 
+def test_logs_endpoint_returns_paginated_safe_events():
+    app = _app_with_trace_events()
+    client = TestClient(app)
+
+    response = client.get("/api/logs", params={"stage": "passive", "limit": 1})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [
+            {
+                "trace_id": "trace-1",
+                "stage": "passive",
+                "level": "INFO",
+                "status": "completed",
+                "started_at": "2026-08-10T10:00:00Z",
+                "finished_at": "2026-08-10T10:00:04.210000Z",
+                "duration_ms": 4210,
+                "session_id": "telegram:1",
+                "event_count": 2,
+                "events": [
+                    {
+                        "type": "turn_started",
+                        "at": "2026-08-10T10:00:00Z",
+                        "level": "INFO",
+                        "title": "收到渠道消息",
+                        "detail": "收到渠道消息",
+                        "error": None,
+                    },
+                    {
+                        "type": "turn_committed",
+                        "at": "2026-08-10T10:00:04.210000Z",
+                        "level": "INFO",
+                        "title": "回合已提交",
+                        "detail": "回合已提交",
+                        "error": None,
+                    },
+                ],
+            }
+        ],
+        "total": 1,
+        "limit": 1,
+        "offset": 0,
+    }
+
+
+def _app_with_trace_events():
+    timeline = TraceTimeline()
+    started = datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc)
+    for event_type, trace_id, seconds, payload in [
+        ("turn_started", "trace-1", 0, {"channel": "telegram"}),
+        ("turn_committed", "trace-1", 4.21, {"channel": "telegram"}),
+        ("tool_call_started", "trace-2", 5, {"channel": "http"}),
+    ]:
+        event = Event(
+            event_type,
+            trace_id=trace_id,
+            session_id="telegram:1",
+            timestamp=started + timedelta(seconds=seconds),
+            payload=payload,
+        )
+        timeline.record(event)
+    return create_admin_app(timeline, _SessionQuery(), _Scheduler())
+
+
 class _SessionQuery:
     def list_sessions(
         self, start_date: date, end_date: date, limit: int

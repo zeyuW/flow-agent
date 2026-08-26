@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, FastAPI, HTTPException, Query
@@ -28,6 +28,7 @@ from interfaces.admin.schemas import (
     TraceDetail,
     TraceStatus,
     TraceSummary,
+    LogPage,
 )
 
 
@@ -157,6 +158,36 @@ def create_admin_app(
             for event in timeline.list_events(limit, trace_id, type)
         ]
 
+    @router.get("/logs", response_model=LogPage)
+    def list_logs(
+        limit: Annotated[int, Query(ge=1, le=100)] = 20,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        level: str | None = None,
+        stage: str | None = None,
+        q: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> dict[str, object]:
+        if level is not None and level not in {"INFO", "WARN", "ERROR"}:
+            raise HTTPException(422, detail="日志级别不支持")
+        if start_at is not None and end_at is not None and start_at > end_at:
+            raise HTTPException(422, detail="开始时间不能晚于结束时间")
+        records, total = timeline.list_log_traces(
+            limit=limit,
+            offset=offset,
+            level=level,
+            stage=stage,
+            query=q,
+            start_at=start_at,
+            end_at=end_at,
+        )
+        return {
+            "items": [_log_item(record) for record in records],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
     @router.get("/sessions", response_model=list[SessionSummary])
     def list_sessions(
         start_date: date,
@@ -215,8 +246,35 @@ def create_admin_app(
     @router.post("/schedules/{task_id}/resume")
     def resume_schedule(task_id: str) -> dict[str, bool]:
         if not scheduler.resume_task_by_id(task_id):
-            raise HTTPException(404, detail=f"未找到可恢复的周期任务: {task_id}")
+            raise HTTPException(404, detail=f"未找到可恢复的定时任务: {task_id}")
         return {"resumed": True}
 
     app.include_router(router)
     return app
+
+
+def _log_item(record) -> dict[str, object]:
+    stages = {event.stage for event in record.events}
+    stage = next((candidate for candidate in ("subagent", "proactive", "memory", "tool", "passive") if candidate in stages), "passive")
+    return {
+        "trace_id": record.id,
+        "stage": stage,
+        "level": record.level,
+        "status": record.status,
+        "started_at": record.started_at.isoformat().replace("+00:00", "Z") if record.started_at else None,
+        "finished_at": record.finished_at.isoformat().replace("+00:00", "Z") if record.finished_at else None,
+        "duration_ms": record.duration_ms,
+        "session_id": next((event.session_id for event in record.events if event.session_id), None),
+        "event_count": len(record.events),
+        "events": [
+            {
+                "type": event.type,
+                "at": event.at,
+                "level": event.level,
+                "title": event.summary,
+                "detail": event.error or event.summary,
+                "error": event.error,
+            }
+            for event in sorted(record.events, key=lambda item: item.at)
+        ],
+    }

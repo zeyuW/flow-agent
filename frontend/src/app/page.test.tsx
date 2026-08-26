@@ -6,6 +6,7 @@ import {
   createSchedule,
   getCapabilities,
   getMcpServers,
+  getLogs,
   getSchedules,
   getSession,
   getSessions,
@@ -19,12 +20,14 @@ import {
 } from "@/lib/api/client";
 
 import OverviewPage from "./page";
+import type { LogPage } from "@/lib/api/schemas";
 
 vi.mock("@/lib/api/client", () => ({
   cancelSchedule: vi.fn(),
   createSchedule: vi.fn(),
   getCapabilities: vi.fn(),
   getMcpServers: vi.fn(),
+  getLogs: vi.fn(),
   getSchedules: vi.fn(),
   getSession: vi.fn(),
   getSessions: vi.fn(),
@@ -53,6 +56,45 @@ describe("OverviewPage", () => {
     vi.clearAllMocks();
     vi.mocked(getCapabilities).mockResolvedValue({ skills: [], connectors: [] });
     vi.mocked(getMcpServers).mockResolvedValue([]);
+    vi.mocked(getLogs).mockImplementation(async (filters = {}) => {
+      const items: LogPage["items"] = [
+        {
+          id: "proactive-1",
+          at: "2026-08-25T03:28:08.579Z",
+          level: "INFO" as const,
+          stage: "proactive",
+          title: "主动消息去重命中",
+          detail: "候选消息已存在",
+          trace_id: "trace-proactive",
+          session_id: "telegram:1",
+          error: null,
+          status: "completed",
+          started_at: "2026-08-25T03:28:08.000Z",
+          finished_at: "2026-08-25T03:28:08.579Z",
+          duration_ms: 579,
+          event_count: 1,
+          events: [{ type: "turn_committed", at: "2026-08-25T03:28:08.579Z", level: "INFO" as const, title: "主动消息去重命中", detail: "候选消息已存在", error: null }]
+        },
+        {
+          id: "memory-1",
+          at: "2026-08-25T03:27:33.619Z",
+          level: "INFO" as const,
+          stage: "memory",
+          title: "画像归档模型调用完成",
+          detail: "处理待归档事实",
+          trace_id: "trace-memory",
+          session_id: "memory:background",
+          error: null,
+          status: "completed",
+          started_at: "2026-08-25T03:27:33.000Z",
+          finished_at: "2026-08-25T03:27:33.619Z",
+          duration_ms: 619,
+          event_count: 1,
+          events: [{ type: "turn_committed", at: "2026-08-25T03:27:33.619Z", level: "INFO" as const, title: "画像归档模型调用完成", detail: "处理待归档事实", error: null }]
+        }
+      ].filter((item) => !filters.stage || item.stage === filters.stage);
+      return { items, total: items.length, limit: 5, offset: 0 };
+    });
     vi.mocked(getSchedules).mockResolvedValue([]);
     vi.mocked(cancelSchedule).mockResolvedValue(undefined);
     vi.mocked(createSchedule).mockResolvedValue({
@@ -110,12 +152,12 @@ describe("OverviewPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "日志" }));
 
     expect(await screen.findByLabelText("运行记录筛选")).toBeInTheDocument();
-    expect(screen.getAllByText("主动消息去重命中").length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("主动消息去重命中")).length).toBeGreaterThan(0);
 
     fireEvent.change(screen.getByLabelText("业务阶段"), { target: { value: "memory" } });
 
-    expect(screen.getAllByText("画像归档模型调用完成").length).toBeGreaterThan(0);
-    expect(screen.queryByText("主动消息去重命中")).not.toBeInTheDocument();
+    expect((await screen.findAllByText("画像归档模型调用完成")).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.queryByText("主动消息去重命中")).not.toBeInTheDocument());
   });
 
   it("展示连接器协议版本和连接失败原因", async () => {
@@ -314,6 +356,59 @@ describe("OverviewPage", () => {
     );
   });
 
+  it("只有一个投递目标时不显示重复的目标下拉框", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "daily-news",
+        name: "每日新闻",
+        trigger: "daily",
+        task_type: "agent",
+        message: "推送新闻",
+        channel: "telegram",
+        session_id: "telegram:1",
+        timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z",
+        interval_seconds: null,
+        daily_time: "08:00",
+        enabled: true,
+        run_count: 0,
+        created_at: "2026-08-21T00:00:00Z",
+        last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建任务" }));
+
+    expect(screen.getByText("telegram · 1")).toBeInTheDocument();
+    expect(screen.getAllByRole("combobox")).toHaveLength(2);
+  });
+
+  it("不同内部会话键格式不能产生重复投递目标", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "task-1", name: "提醒一", trigger: "daily", task_type: "reminder", message: "一",
+        channel: "telegram", session_id: "telegram:1", timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z", interval_seconds: null, daily_time: "08:00",
+        enabled: true, run_count: 0, created_at: "2026-08-21T00:00:00Z", last_error: null
+      },
+      {
+        id: "task-2", name: "提醒二", trigger: "daily", task_type: "reminder", message: "二",
+        channel: "telegram", session_id: "1", timezone: "Asia/Shanghai",
+        next_run_at: "2026-08-22T00:00:00Z", interval_seconds: null, daily_time: "09:00",
+        enabled: true, run_count: 0, created_at: "2026-08-21T00:00:00Z", last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "新建任务" }));
+
+    expect(screen.getByText("telegram · 1")).toBeInTheDocument();
+    expect(screen.getAllByText("telegram · 1")).toHaveLength(1);
+  });
+
   it("每天任务使用合法的时间选择器", async () => {
     vi.mocked(getSchedules).mockResolvedValueOnce([
       {
@@ -368,9 +463,29 @@ describe("OverviewPage", () => {
 
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
-    fireEvent.click(await screen.findByRole("button", { name: "重新启用" }));
+    expect(await screen.findByText("每日新闻")).toBeInTheDocument();
+    expect(screen.queryByText("任务已停止")).not.toBeInTheDocument();
+    expect(screen.getByText(/下次执行：08\/22 08:00/)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "启动任务" }));
 
     await waitFor(() => expect(resumeSchedule).toHaveBeenCalledWith("daily-news"));
+  });
+
+  it("可重新启用尚未到期的一次性任务", async () => {
+    vi.mocked(getSchedules).mockResolvedValueOnce([
+      {
+        id: "water-reminder", name: "喝水提醒", trigger: "after", task_type: "reminder",
+        message: "喝水", channel: "telegram", session_id: "telegram:1", timezone: "Asia/Shanghai",
+        next_run_at: new Date(Date.now() + 60_000).toISOString(), interval_seconds: null,
+        daily_time: null, enabled: false, run_count: 0, created_at: "2026-08-21T00:00:00Z", last_error: null
+      }
+    ]);
+
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
+    fireEvent.click(await screen.findByRole("button", { name: "启动任务" }));
+
+    await waitFor(() => expect(resumeSchedule).toHaveBeenCalledWith("water-reminder"));
   });
 
   it("展示项目和已安装 Skill 及连接器状态", async () => {

@@ -25,6 +25,12 @@ class TimelineEvent:
     status: str
     summary: str
     error: str | None = None
+    stage: str = "passive"
+    session_id: str | None = None
+
+    @property
+    def level(self) -> str:
+        return "ERROR" if self.status == "failed" else "INFO"
 
 
 @dataclass(slots=True)
@@ -46,6 +52,10 @@ class TraceRecord:
         return max(
             0, round((self.finished_at - self.started_at).total_seconds() * 1000)
         )
+
+    @property
+    def level(self) -> str:
+        return "ERROR" if self.status == "failed" else "INFO"
 
     def as_summary(self) -> dict[str, object]:
         return {
@@ -86,6 +96,18 @@ class TraceTimeline:
         "turn_phase_error": ("turn_failed", "回合处理失败", "failed"),
         "turn_error": ("turn_failed", "回合处理失败", "failed"),
     }
+
+    @staticmethod
+    def _stage(event_type: str) -> str:
+        if event_type.startswith("tool_"):
+            return "tool"
+        if event_type.startswith("proactive_"):
+            return "proactive"
+        if event_type.startswith("subagent_"):
+            return "subagent"
+        if event_type.startswith("memory_"):
+            return "memory"
+        return "passive"
 
     def __init__(self, capacity: int = 300) -> None:
         self._capacity = max(20, capacity)
@@ -133,6 +155,8 @@ class TraceTimeline:
                     status=event_status,
                     summary=summary,
                     error="回合处理失败" if event_status == "failed" else None,
+                    stage=self._stage(event.event_type),
+                    session_id=event.session_id or None,
                 )
             )
 
@@ -173,3 +197,94 @@ class TraceTimeline:
         if event_type is not None:
             events = [event for event in events if event.type == event_type]
         return sorted(events, key=lambda event: event.at, reverse=True)[:limit]
+
+    def list_log_events(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        level: str | None = None,
+        stage: str | None = None,
+        query: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> tuple[list[TimelineEvent], int]:
+        """返回管理端日志列表；只使用已脱敏的事件摘要。"""
+
+        with self._lock:
+            events = [
+                event for record in self._records.values() for event in record.events
+            ]
+        normalized_query = (query or "").strip().lower()
+        if level is not None:
+            events = [event for event in events if event.level == level]
+        if stage is not None:
+            events = [event for event in events if event.stage == stage]
+        if start_at is not None or end_at is not None:
+            events = [
+                event
+                for event in events
+                if _in_time_range(event.at, start_at, end_at)
+            ]
+        if normalized_query:
+            events = [
+                event
+                for event in events
+                if normalized_query in " ".join(
+                    filter(None, [
+                        event.type,
+                        event.summary,
+                        event.error,
+                        event.trace_id,
+                        event.session_id,
+                    ])
+                ).lower()
+            ]
+        events.sort(key=lambda event: event.at, reverse=True)
+        total = len(events)
+        return events[offset : offset + limit], total
+
+    def list_log_traces(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        level: str | None = None,
+        stage: str | None = None,
+        query: str | None = None,
+        start_at: datetime | None = None,
+        end_at: datetime | None = None,
+    ) -> tuple[list[TraceRecord], int]:
+        """按 Trace 聚合返回管理端日志列表。"""
+
+        with self._lock:
+            records = list(self._records.values())
+        normalized_query = (query or "").strip().lower()
+        filtered: list[TraceRecord] = []
+        for record in records:
+            if level is not None and record.level != level:
+                continue
+            if stage is not None and not any(event.stage == stage for event in record.events):
+                continue
+            if start_at is not None and record.finished_at is not None and record.finished_at < start_at:
+                continue
+            if end_at is not None and record.started_at is not None and record.started_at > end_at:
+                continue
+            if normalized_query and normalized_query not in " ".join(
+                filter(None, [record.id, record.channel, record.error, *(event.summary for event in record.events)])
+            ).lower():
+                continue
+            filtered.append(record)
+        filtered.sort(key=lambda record: record.started_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return filtered[offset : offset + limit], len(filtered)
+
+
+def _in_time_range(
+    value: str, start_at: datetime | None, end_at: datetime | None
+) -> bool:
+    current = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if start_at is not None and current < start_at:
+        return False
+    if end_at is not None and current > end_at:
+        return False
+    return True
