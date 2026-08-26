@@ -564,6 +564,7 @@ def create_app_runtime(config: AppConfig):
         timeout_seconds=cfg.subagent.timeout_seconds,
         message_bus=message_bus,
         llm_client=llm_client,
+        event_bus=event_bus,
     )
 
     if spawn_tool is not None:

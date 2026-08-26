@@ -109,3 +109,41 @@ def test_timeline_ignores_events_without_trace_id():
     timeline.record(Event("before_turn", payload={"channel": "telegram"}))
 
     assert timeline.list_traces(limit=20, status=None, channel=None) == []
+
+
+def test_timeline_groups_subagent_lifecycle_into_parent_trace():
+    from application.agent.app.tracing import TraceTimeline
+
+    timeline = TraceTimeline()
+    timeline.record(Event("turn_started", trace_id="trace-parent"))
+    timeline.record(
+        Event(
+            "subagent_started",
+            trace_id="trace-parent",
+            payload={"job_id": "task-a"},
+        )
+    )
+    timeline.record(
+        Event(
+            "subagent_completed",
+            trace_id="trace-parent",
+            payload={"job_id": "task-a"},
+        )
+    )
+    timeline.record(Event("turn_committed", trace_id="trace-parent"))
+
+    record = timeline.get_trace("trace-parent")
+
+    assert record is not None
+    assert [event.type for event in record.events] == [
+        "turn_started",
+        "subagent_started",
+        "subagent_completed",
+        "turn_committed",
+    ]
+    assert [event.stage for event in record.events] == [
+        "passive",
+        "subagent",
+        "subagent",
+        "passive",
+    ]

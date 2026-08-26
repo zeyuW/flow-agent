@@ -6,6 +6,7 @@ from application.delegation.app.task_tool import TaskTool
 from application.delegation.infra.store import JsonlTaskStore
 from application.passive.app.phase import TurnFlow
 from application.passive.app.reasoning import PassiveReasoner
+from infra.bus.event import EventBus
 
 
 class _LeadAgent:
@@ -40,6 +41,14 @@ class _Executor:
         )
 
 
+class _EventSpy:
+    def __init__(self) -> None:
+        self.events = []
+
+    def on_event(self, event) -> None:
+        self.events.append(event)
+
+
 def test_lead_agent_task_subagent_result_and_final_summary(tmp_path):
     manager = SubagentManager(task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"))
     manager._executor = _Executor()
@@ -66,3 +75,31 @@ def test_lead_agent_task_subagent_result_and_final_summary(tmp_path):
 
     assert result.final_output == "项目结构检查完成，主 Agent 已汇总结果。"
     assert lead.calls == 2
+
+
+def test_task_subagent_publishes_lifecycle_events_under_parent_trace(tmp_path):
+    event_bus = EventBus()
+    spy = _EventSpy()
+    event_bus.subscribe(spy)
+    manager = SubagentManager(
+        task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"),
+        event_bus=event_bus,
+    )
+    manager._executor = _Executor()
+
+    try:
+        result = manager.run_task_threadsafe(
+            task_id="task-1",
+            description="检查项目结构",
+            run_id="trace-parent",
+        )
+    finally:
+        manager.shutdown()
+
+    assert result.status == "completed"
+    assert [event.event_type for event in spy.events] == [
+        "subagent_started",
+        "subagent_completed",
+    ]
+    assert {event.trace_id for event in spy.events} == {"trace-parent"}
+    assert all(event.payload["job_id"] == "task-1" for event in spy.events)

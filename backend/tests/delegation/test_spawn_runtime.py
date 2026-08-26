@@ -6,6 +6,7 @@ import threading
 import time
 
 from infra.bus.message import MessageBus
+from infra.bus.event import EventBus
 from application.delegation.app.manager import SubagentManager
 from application.delegation.app.spawn import SpawnTool
 from application.delegation.infra.store import JsonlTaskStore
@@ -36,6 +37,14 @@ class ImmediateLLM:
     def generate(self, messages, tools=None):
         del messages, tools
         return type("Response", (), {"content": "调研完成", "tool_calls": []})()
+
+
+class EventSpy:
+    def __init__(self) -> None:
+        self.events = []
+
+    def on_event(self, event) -> None:
+        self.events.append(event)
 
 
 def test_spawn_tool_passes_telegram_context_inside_running_loop():
@@ -123,6 +132,42 @@ def test_background_spawn_notifies_original_telegram_chat(tmp_path):
         assert payload["type"] == "spawn_completion"
         assert payload["status"] == "completed"
         assert payload["result"] == "调研完成"
+    finally:
+        manager.shutdown()
+
+
+def test_background_spawn_publishes_lifecycle_under_parent_trace(tmp_path):
+    bus = MessageBus()
+    event_bus = EventBus()
+    spy = EventSpy()
+    event_bus.subscribe(spy)
+    manager = SubagentManager(
+        task_store=JsonlTaskStore(tmp_path / "tasks.jsonl"),
+        message_bus=bus,
+        event_bus=event_bus,
+        llm_client=ImmediateLLM(),
+    )
+    try:
+        manager.run_spawn_threadsafe(
+            run_in_background=True,
+            task="完成调研",
+            label="调研任务",
+            profile="research",
+            origin_channel="telegram",
+            origin_chat_id="8706327858",
+            origin_session_id="8706327858",
+            parent_trace_id="trace-parent",
+        )
+
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline and len(spy.events) < 2:
+            time.sleep(0.01)
+
+        assert [event.event_type for event in spy.events] == [
+            "subagent_started",
+            "subagent_completed",
+        ]
+        assert {event.trace_id for event in spy.events} == {"trace-parent"}
     finally:
         manager.shutdown()
 

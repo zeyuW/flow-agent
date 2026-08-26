@@ -238,6 +238,72 @@ def test_reasoner_runs_multiple_task_tools_in_parallel():
     assert task_tool.max_active == 2
 
 
+def test_reasoner_keeps_other_parallel_task_when_one_task_raises():
+    class PartialTaskTool:
+        name = "task"
+        description = "执行子任务"
+        input_schema = {"type": "object"}
+
+        async def run_async(self, tool_input):
+            if tool_input["name"] == "A":
+                raise RuntimeError("A failed")
+            await asyncio.sleep(0.01)
+            return ToolResult(ok=True, content="完成: B")
+
+        def run(self, tool_input):
+            raise AssertionError("parallel task must use async execution")
+
+    class LeadAgent:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.messages = []
+
+        async def generate_from_messages_async(self, messages, *, tools=None):
+            del tools
+            self.calls += 1
+            self.messages.append(messages)
+            if self.calls == 1:
+                return LLMResult(
+                    content="",
+                    tool_calls=[
+                        LLMToolCall(
+                            id="task-a",
+                            name="task",
+                            arguments_json='{"name":"A"}',
+                            arguments={"name": "A"},
+                        ),
+                        LLMToolCall(
+                            id="task-b",
+                            name="task",
+                            arguments_json='{"name":"B"}',
+                            arguments={"name": "B"},
+                        ),
+                    ],
+                )
+            assert "A failed" in messages[-2]["content"]
+            assert "完成: B" in messages[-1]["content"]
+            return LLMResult(content="已汇总可用结果")
+
+    registry = ToolRegistry()
+    registry.register(PartialTaskTool())
+    flow = TurnFlow(
+        user_input="分别完成 A 和 B",
+        session_id="telegram:1",
+        channel="telegram",
+        trace_id="trace-partial",
+        messages=[{"role": "user", "content": "分别完成 A 和 B"}],
+    )
+
+    result = asyncio.run(
+        PassiveReasoner(
+            agent=LeadAgent(),
+            tool_registry=registry,
+        ).run_async(flow)
+    )
+
+    assert result.final_output == "已汇总可用结果"
+
+
 
 
 def test_reasoner_requests_a_final_answer_when_tool_limit_is_reached():

@@ -23,12 +23,14 @@ def create_subagent_runtime(
     timeout_seconds: float = 300.0,
     message_bus=None,
     llm_client=None,
+    event_bus=None,
 ) -> SubagentRuntime:
     task_path = Path(tasks_file) if tasks_file else (data_dir / "subagent_tasks.jsonl")
     manager = SubagentManager(
         task_store=JsonlTaskStore(task_path),
         message_bus=message_bus,
         llm_client=llm_client,
+        event_bus=event_bus,
     )
     manager.max_concurrency = max_concurrency
     manager.max_total_subagents = max_total_per_run

@@ -101,6 +101,7 @@ class SpawnTool:
             origin_channel = tool_input.get("__channel", "cli")
             origin_chat_id = tool_input.get("__chat_id", "default")
             origin_session_id = tool_input.get("__session_id", origin_chat_id)
+            parent_trace_id = tool_input.get("__trace_id", "")
 
             # 委派策略仍在工具边界执行，避免无意义地创建子代理。
             decision = self._policy.decide(
@@ -125,6 +126,7 @@ class SpawnTool:
                     origin_channel=origin_channel,
                     origin_chat_id=origin_chat_id,
                     origin_session_id=origin_session_id,
+                    parent_trace_id=parent_trace_id,
                     decision=spawn_decision,
                 )
             elif run_in_background:
@@ -136,6 +138,7 @@ class SpawnTool:
                         origin_channel=origin_channel,
                         origin_chat_id=origin_chat_id,
                         origin_session_id=origin_session_id,
+                        parent_trace_id=parent_trace_id,
                         decision=spawn_decision,
                     )
                 )

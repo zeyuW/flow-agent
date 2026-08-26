@@ -26,6 +26,7 @@ from application.delegation.domain.models import (
 )
 from application.delegation.infra.store import JsonlTaskStore
 from application.capabilities.tools.guard import GuardDecision
+from infra.bus.event import Event
 
 logger = logging.getLogger(__name__)
 _SPAWN_MAX_ITERATIONS = 10
@@ -41,10 +42,12 @@ class SubagentManager:
         task_store: JsonlTaskStore,
         message_bus: Any = None,
         llm_client: Any = None,
+        event_bus: Any = None,
     ) -> None:
         self._task_store = task_store
         self._bus = message_bus
         self._llm = llm_client
+        self._event_bus = event_bus
         self._executor = SubagentExecutor(runtime=self)
         self._persist_lock = threading.Lock()
         self._running_tasks: dict[str, asyncio.Task] = {}
@@ -131,6 +134,32 @@ class SubagentManager:
         except Exception:
             logger.exception("记录子代理状态失败: job_id=%s phase=%s", job_id, phase)
 
+    def _publish_lifecycle(
+        self,
+        *,
+        job_id: str,
+        trace_id: str,
+        phase: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """把子代理生命周期接入主 Agent 的 Trace。"""
+
+        if self._event_bus is None or not trace_id:
+            return
+        event_type = {
+            "started": "subagent_started",
+            "completed": "subagent_completed",
+            "failed": "subagent_failed",
+            "timed_out": "subagent_timed_out",
+        }.get(phase, "subagent_failed")
+        self._event_bus.publish(
+            Event(
+                event_type,
+                trace_id=trace_id,
+                payload={"job_id": job_id, **(payload or {})},
+            )
+        )
+
     def _ensure_worker_loop(self) -> asyncio.AbstractEventLoop:
         """按需启动持久事件循环，防止后台任务随临时循环一起被取消。"""
 
@@ -188,6 +217,7 @@ class SubagentManager:
         origin_channel: str,
         origin_chat_id: str,
         origin_session_id: str,
+        parent_trace_id: str = "",
         decision: SpawnDecision | None = None,
     ) -> str:
         """从同步工具线程安全地提交子代理任务。"""
@@ -201,6 +231,7 @@ class SubagentManager:
                 origin_channel=origin_channel,
                 origin_chat_id=origin_chat_id,
                 origin_session_id=origin_session_id,
+                parent_trace_id=parent_trace_id,
                 decision=decision,
             )
         else:
@@ -242,6 +273,12 @@ class SubagentManager:
         effective_turns = max_turns or self.default_max_turns
         effective_timeout = timeout or self.default_timeout_seconds
         self._trace(task_id, "started", {"run_id": run_id, "profile": profile})
+        self._publish_lifecycle(
+            job_id=task_id,
+            trace_id=run_id,
+            phase="started",
+            payload={"profile": profile},
+        )
         released = False
 
         def release_once() -> None:
@@ -261,6 +298,12 @@ class SubagentManager:
                     timeout=effective_timeout,
                 )
                 self._trace(task_id, result.status, result.to_dict())
+                self._publish_lifecycle(
+                    job_id=task_id,
+                    trace_id=run_id,
+                    phase=result.status,
+                    payload=result.to_dict(),
+                )
                 return result
             finally:
                 release_once()
@@ -356,6 +399,7 @@ class SubagentManager:
         origin_chat_id: str = "default",
         origin_session_id: str = "",
         profile: str = PROFILE_RESEARCH,
+        parent_trace_id: str = "",
         retry_count: int = 0,
         decision: SpawnDecision | None = None,
     ) -> str:
@@ -373,6 +417,12 @@ class SubagentManager:
             "origin_chat_id": origin_chat_id,
             "profile": profile,
         })
+        self._publish_lifecycle(
+            job_id=job_id,
+            trace_id=parent_trace_id,
+            phase="started",
+            payload={"profile": profile, "label": display_label},
+        )
 
         # 后台任务必须绑定到管理器的持久事件循环。
         bg_task = asyncio.create_task(
@@ -384,6 +434,7 @@ class SubagentManager:
                 origin_chat_id=origin_chat_id,
                 origin_session_id=origin_session_id or origin_chat_id,
                 profile=profile,
+                parent_trace_id=parent_trace_id,
                 retry_count=retry_count,
             ),
             name=f"spawn:{job_id}",
@@ -435,6 +486,7 @@ class SubagentManager:
         origin_chat_id: str,
         origin_session_id: str,
         profile: str,
+        parent_trace_id: str = "",
         retry_count: int = 0,
     ) -> None:
         """构建并运行子代理，然后向原会话发布完成通知。"""
@@ -460,6 +512,16 @@ class SubagentManager:
                 "exit_reason": result.exit_reason,
                 "result": result.result_summary[:1000],
             })
+            self._publish_lifecycle(
+                job_id=job_id,
+                trace_id=parent_trace_id,
+                phase="completed" if result.status == "completed" else "failed",
+                payload={
+                    "profile": profile,
+                    "status": result.status,
+                    "error": result.error,
+                },
+            )
 
             await self._announce_result(
                 job_id=job_id,
@@ -480,6 +542,12 @@ class SubagentManager:
                 "label": label,
                 "error": str(exc),
             })
+            self._publish_lifecycle(
+                job_id=job_id,
+                trace_id=parent_trace_id,
+                phase="failed",
+                payload={"profile": profile, "error": str(exc)},
+            )
             await self._announce_result(
                 job_id=job_id, label=label, task=task,
                 origin_channel=origin_channel, origin_chat_id=origin_chat_id,

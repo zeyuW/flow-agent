@@ -124,7 +124,7 @@ class PassiveReasoner:
             if all(tool_call.name == "task" for tool_call in result.tool_calls):
                 tool_messages = await asyncio.gather(
                     *[
-                        self._execute_tool_async(tool_call, flow, step)
+                        self._execute_tool_async_safe(tool_call, flow, step)
                         for tool_call in result.tool_calls
                     ]
                 )
@@ -189,6 +189,28 @@ class PassiveReasoner:
             }
         )
         return f"Tool {tool_call.name} ok={tool_result.ok}: {tool_result.content}"
+
+    async def _execute_tool_async_safe(
+        self,
+        tool_call: LLMToolCall,
+        flow: TurnFlow,
+        step: int,
+    ) -> str:
+        """隔离单个并行任务异常，确保其他任务仍能完成。"""
+
+        try:
+            return await self._execute_tool_async(tool_call, flow, step)
+        except Exception as exc:
+            flow.tool_trace.append(
+                {
+                    "step": str(step + 1),
+                    "tool": tool_call.name,
+                    "status": "failed",
+                    "arguments": tool_call.arguments_json,
+                }
+            )
+            logger.exception("异步工具调用失败: tool=%s", tool_call.name)
+            return f"Tool {tool_call.name} ok=False: {exc}"
 
     def _run_tool_loop(self, flow: TurnFlow, initial_result=None) -> TurnFlow:
         current_messages = list(flow.messages)
